@@ -1,0 +1,90 @@
+# ── Segredos locais ────────────────────────────────────────────────────────────
+.env
+*.env
+!.env.example
+
+# ── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Jupyter Notebooks ──────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ── LaTeX ──────────────────────────────────────────────────────────────────────
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.lof
+*.lot
+*.idx
+*.ilg
+*.ind
+*.acn
+*.acr
+*.alg
+*.glg
+*.glo
+*.gls
+*.ist
+*.run.xml
+*.bcf
+_minted*/
+*.nav
+*.snm
+*.vrb
+
+# ── VS Code ────────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+# Mas mantemos .vscode/extensions.json recomendadas se existirem
+!.vscode/extensions.json.example
+
+# ── Outputs gerados ───────────────────────────────────────────────────────────
+outputs/
+*.pdf
+# Exceto o PDF final do artigo publicado
+!article/final/*.pdf
+
+# ── Sistema operacional ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Dados grandes ─────────────────────────────────────────────────────────────
+# Datasets grandes ficam fora do git
+data/raw/
+data/processed/
+*.csv
+*.parquet
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+# Exceto arquivos de exemplo pequenos
+!data/examples/

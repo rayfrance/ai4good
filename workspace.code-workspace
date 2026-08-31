@@ -1,0 +1,16 @@
+{
+  "folders": [
+    {
+      "name": "AI4Good",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "files.encoding": "utf8",
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/.venv": true,
+      "outputs": true
+    }
+  }
+}

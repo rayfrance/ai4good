@@ -3,7 +3,7 @@
 from .graph import MLPGraph, Neuron, Connection, Layer
 from .activations import relu, relu_prime, sigmoid, sigmoid_prime
 from .losses import binary_cross_entropy, binary_cross_entropy_prime
-from .data import load_heart, split_stratified, standardize
+from .data import load_heart, split_stratified, standardize, deduplicate
 
 __all__ = [
     "MLPGraph",

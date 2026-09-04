@@ -29,7 +29,7 @@ _ROOT = Path(__file__).resolve().parents[2]  # raiz do repositório
 sys.path.insert(0, str(_ROOT / "code" / "src"))
 
 from mlp.graph import MLPGraph
-from mlp.data import load_heart, split_stratified, standardize
+from mlp.data import load_heart, split_stratified, standardize, deduplicate
 
 # ---------------------------------------------------------------------------
 # Constantes
@@ -122,11 +122,13 @@ def _accuracy(mlp: MLPGraph, X: np.ndarray, y: np.ndarray, threshold: float = 0.
 
 @st.cache_data
 def load_and_split(seed: int):
-    """Carrega heart.csv, divide e padroniza. Resultado cacheado."""
+    """Carrega heart.csv, remove duplicatas, divide e padroniza. Resultado cacheado."""
     X, y = load_heart(DATA_PATH)
+    X, y = deduplicate(X, y)      # remove 723 duplicatas → ~302 amostras únicas
     X_train, X_test, y_train, y_test = split_stratified(X, y, test_size=0.2, seed=seed)
     X_train_s, X_test_s, mean, std = standardize(X_train, X_test)
-    return X_train_s, X_test_s, y_train, y_test, mean, std
+    return X_train_s, X_test_s, y_train, y_test, mean, std, len(X)
+
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +194,7 @@ def main():
 
     # Carrega dados
     try:
-        X_train, X_test, y_train, y_test, mean, std = load_and_split(int(seed))
+        X_train, X_test, y_train, y_test, mean, std, n_unique = load_and_split(int(seed))
     except Exception as e:
         st.error(f"Erro ao carregar dados: {e}")
         st.stop()
@@ -202,15 +204,16 @@ def main():
     # ------------------------------------------------------------------
     with st.expander("📊 Dados do dataset", expanded=False):
         col_a, col_b, col_c, col_d = st.columns(4)
-        col_a.metric("Total de amostras", 1025)
+        col_a.metric("Amostras únicas", n_unique, help="1025 registros originais; 723 duplicatas removidas")
         col_b.metric("Features", 13)
         col_c.metric("Treino (80%)", len(X_train))
         col_d.metric("Teste (20%)", len(X_test))
 
         st.caption(
-            "Padronização Z-score calculada exclusivamente no treino. "
-            "Mesmos µ e σ aplicados ao teste e às inferências."
+            "⚠️ Dataset Kaggle contém 723 duplicatas — removidas antes do split para evitar "
+            "acurácia inflada. Padronização Z-score calculada exclusivamente no treino."
         )
+
 
     # ------------------------------------------------------------------
     # Treinamento

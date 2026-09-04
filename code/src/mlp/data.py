@@ -27,6 +27,26 @@ def load_heart(path: str | Path) -> Tuple[np.ndarray, np.ndarray]:
     return X, y
 
 
+def deduplicate(X: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Remove linhas duplicadas de X (mantém a primeira ocorrência).
+
+    O dataset Kaggle johnsmith88/heart-disease-dataset possui 723 duplicatas
+    em 1025 registros. Sem deduplicação, amostras idênticas caem em treino
+    e teste, inflando artificialmente a acurácia para 100%.
+
+    Args:
+        X: features, shape (n, d)
+        y: rótulos, shape (n,)
+
+    Returns:
+        X_unique, y_unique sem linhas repetidas
+    """
+    _, idx = np.unique(X, axis=0, return_index=True)
+    idx_sorted = np.sort(idx)  # mantém ordem original
+    return X[idx_sorted], y[idx_sorted]
+
+
 def split_stratified(
     X: np.ndarray,
     y: np.ndarray,

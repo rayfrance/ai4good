@@ -1,4 +1,6 @@
 numpy>=2.0
 streamlit>=1.40
 graphviz>=0.20
+matplotlib>=3.8
+pandas>=2.0
 pytest>=8.0

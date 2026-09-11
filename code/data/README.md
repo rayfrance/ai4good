@@ -25,8 +25,11 @@
 
 ## Divisão usada no experimento
 
-- **Treino:** 820 registros (80%), estratificado por `target`, semente 42
-- **Teste:** 205 registros (20%), sem sobreposição com treino
+O dataset original contém 1.025 linhas, mas apenas **302 são únicas** (723 duplicatas).
+A deduplicação é aplicada antes do split para evitar vazamento de dados.
+
+- **Treino:** ~243 registros (80%), estratificado por `target`, semente 42
+- **Teste:** ~59 registros (20%), sem sobreposição com treino
 - **Padronização:** µ e σ calculados exclusivamente no treino; aplicados em treino, teste e inferências
 
 ## Como baixar

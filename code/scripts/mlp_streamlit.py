@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+import io
+import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 
@@ -42,8 +44,64 @@ FEATURE_NAMES = [
 ]
 
 # ---------------------------------------------------------------------------
-# Helpers de visualização DOT
+# Helpers de visualização: Matplotlib e DOT
 # ---------------------------------------------------------------------------
+
+def _draw_mlp_matplotlib(mlp: MLPGraph, figsize=(7.5, 5.5)):
+    """
+    Desenha o grafo da MLP em camadas perfeitamente alinhadas (estilo limpo).
+    - Exibe todos os neurônios de cada camada (13 | 8 | 5 | 1).
+    - Arestas azuis (peso positivo) e vermelhas (peso negativo).
+    - Espessura proporcional ao módulo do peso.
+    - Círculos uniformes sem rótulos soltos ou números flutuantes.
+    """
+    fig, ax = plt.subplots(figsize=figsize, dpi=200)
+    ax.axis('off')
+
+    layer_sizes = mlp.layer_sizes
+    max_nodes = max(layer_sizes)
+    positions = {}
+
+    for li, size in enumerate(layer_sizes):
+        y_coords = np.linspace(max_nodes - 1, 0, size) if size > 1 else [(max_nodes - 1) / 2.0]
+        for ni, y_pos in enumerate(y_coords):
+            nid = f'L{li}N{ni}'
+            positions[nid] = (li * 2.6, y_pos)
+
+    state = mlp.graph_state()
+    weights = [abs(c['weight']) for c in state['connections']]
+    max_w = max(weights) if weights else 1.0
+
+    # Arestas
+    for conn in state['connections']:
+        if conn['from_id'] in positions and conn['to_id'] in positions:
+            x1, y1 = positions[conn['from_id']]
+            x2, y2 = positions[conn['to_id']]
+            w = conn['weight']
+            color = '#1f77b4' if w >= 0 else '#d62728'
+            norm_w = abs(w) / max_w
+            lw = 0.4 + 2.6 * norm_w
+            alpha = min(0.9, 0.2 + 0.7 * norm_w)
+            ax.plot([x1, x2], [y1, y2], color=color, linewidth=lw, alpha=alpha, zorder=1)
+
+    # Neurônios (círculos limpos)
+    for nid, (x, y_pos) in positions.items():
+        circle = plt.Circle((x, y_pos), 0.22, facecolor='#f8f9fa', edgecolor='#2c3e50', linewidth=1.3, zorder=2)
+        ax.add_patch(circle)
+
+    # Rótulos no topo das camadas
+    layer_names = [f'Entrada ({layer_sizes[0]})'] + [
+        f'Oculta {i} ({s})' for i, s in enumerate(layer_sizes[1:-1], 1)
+    ] + [f'Saída ({layer_sizes[-1]})']
+
+    for li, name in enumerate(layer_names):
+        ax.text(li * 2.6, max_nodes + 0.3, name, ha='center', va='bottom', fontsize=9, fontweight='bold', color='#2c3e50')
+
+    ax.set_xlim(-0.7, (len(layer_sizes) - 1) * 2.6 + 0.7)
+    ax.set_ylim(-0.7, max_nodes + 0.9)
+    plt.tight_layout()
+    return fig
+
 
 def _build_dot(state: dict, max_nodes_shown: int = 5) -> str:
     """
@@ -166,9 +224,6 @@ def main():
         seed = st.number_input("Semente", min_value=0, max_value=9999, value=42)
         threshold = st.slider("Limiar de decisão", 0.0, 1.0, 0.5, 0.01)
 
-        st.subheader("Visualização")
-        max_nodes = st.slider("Nós visíveis por camada", 2, 13, 5)
-
         btn_train = st.button("🚀 Treinar", type="primary", use_container_width=True)
         btn_reset = st.button("🔄 Resetar", use_container_width=True)
 
@@ -214,7 +269,6 @@ def main():
             "acurácia inflada. Padronização Z-score calculada exclusivamente no treino."
         )
 
-
     # ------------------------------------------------------------------
     # Treinamento
     # ------------------------------------------------------------------
@@ -225,7 +279,6 @@ def main():
         acc_hist: list[float] = []
 
         progress_bar = st.progress(0, text="Iniciando treinamento…")
-        epoch_text = st.empty()
         col_graph, col_curves = st.columns([1.2, 1])
 
         graph_placeholder = col_graph.empty()
@@ -238,11 +291,11 @@ def main():
             pct = epoch / epochs
             progress_bar.progress(pct, text=f"Época {epoch}/{epochs} — loss: {loss:.4f} — acc treino: {acc:.2%}")
 
-            # Atualiza grafo a cada 5 épocas ou na última
-            if epoch % 5 == 0 or epoch == epochs:
-                state = mlp.graph_state()
-                dot = _build_dot(state, max_nodes_shown=max_nodes)
-                graph_placeholder.graphviz_chart(dot, use_container_width=True)
+            # Atualiza grafo a cada 10 épocas ou na última
+            if epoch % 10 == 0 or epoch == epochs:
+                fig = _draw_mlp_matplotlib(mlp)
+                graph_placeholder.pyplot(fig)
+                plt.close(fig)
 
             # Atualiza curvas
             chart_data = {
@@ -299,11 +352,22 @@ def main():
         col_g, col_c = st.columns([1.2, 1])
 
         with col_g:
-            st.subheader("🕸️ Grafo da MLP")
+            st.subheader("🕸️ Grafo da MLP (Pesos Finais)")
             st.caption("🔵 Peso positivo · 🔴 Peso negativo · Espessura ∝ |peso|")
-            state = mlp.graph_state()
-            dot = _build_dot(state, max_nodes_shown=max_nodes)
-            st.graphviz_chart(dot, use_container_width=True)
+            fig = _draw_mlp_matplotlib(mlp)
+            st.pyplot(fig)
+
+            # Botão de download da imagem limpa para colocar no slide
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", bbox_inches="tight", dpi=300)
+            st.download_button(
+                label="📥 Baixar imagem do Grafo para o Slide",
+                data=buf.getvalue(),
+                file_name="mlp_grafo_pesos.png",
+                mime="image/png",
+                use_container_width=True
+            )
+            plt.close(fig)
 
         with col_c:
             st.subheader("📈 Curvas de Treinamento")
@@ -354,6 +418,7 @@ def main():
         # ------------------------------------------------------------------
         with st.expander("🔢 Pesos das conexões (primeiras 30)", expanded=False):
             import pandas as pd
+            state = mlp.graph_state()
             conns = state["connections"][:30]
             df_w = pd.DataFrame([
                 {"De": c["from_id"], "Para": c["to_id"], "Peso": round(c["weight"], 6)}

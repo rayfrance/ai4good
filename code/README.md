@@ -80,10 +80,14 @@ python tools/workspace_check.py
 
 ## 📊 Divisão dos dados
 
+O dataset Kaggle `johnsmith88/heart-disease-dataset` contém 1.025 registros,
+porém apenas **302 são únicos** (723 duplicatas com labels consistentes).
+A deduplicação é aplicada **antes** do split para evitar acurácia inflada.
+
 | Conjunto | Registros | Proporção | Método |
 |---|---|---|---|
-| Treino | 820 | 80% | Estratificado por `target`, semente 42 |
-| Teste | 205 | 20% | Estratificado por `target`, semente 42 |
+| Treino | ~243 | 80% | Estratificado por `target`, semente 42 |
+| Teste | ~59 | 20% | Estratificado por `target`, semente 42 |
 
 - **Padronização:** µ e σ calculados exclusivamente no treino. O teste nunca influencia a normalização.
 - **Embaralhamento:** apenas o conjunto de treino é reembaralhado a cada época.

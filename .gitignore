@@ -88,3 +88,12 @@ data/processed/
 *.pickle
 # Exceto arquivos de exemplo pequenos
 !data/examples/
+# Garante que READMEs dentro de data/ sejam versionados
+!code/data/README.md
+
+# ── Streamlit ─────────────────────────────────────────────────────────────────
+.streamlit/
+
+# ── Modelos e checkpoints salvos ──────────────────────────────────────────────
+*.npz
+*.npy

@@ -80,12 +80,15 @@ desktop.ini
 # Datasets grandes ficam fora do git
 data/raw/
 data/processed/
+code/data/cifar10/
+code/data/fashion_mnist/
 *.csv
 *.parquet
 *.h5
 *.hdf5
 *.pkl
 *.pickle
+*.tar.gz
 # Exceto arquivos de exemplo pequenos
 !data/examples/
 # Garante que READMEs dentro de data/ sejam versionados
@@ -97,3 +100,5 @@ data/processed/
 # ── Modelos e checkpoints salvos ──────────────────────────────────────────────
 *.npz
 *.npy
+*.pt
+

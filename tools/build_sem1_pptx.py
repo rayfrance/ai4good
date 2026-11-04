@@ -140,6 +140,17 @@ def build():
         parts = [x.strip() for x in LINK_RE.sub("", s["aparece"]).split("|")]
         parts = [x.rstrip(" ·") for x in parts if x.strip(" ·")]
         headline, bullets = parts[0], parts[1:]
+        if s["title"].lower() == "capa":
+            add_text(slide, headline, Inches(0.8), Inches(2.3), Inches(11.7),
+                     Inches(1.5), 72, ACCENT, bold=True)
+            if bullets:
+                add_text(slide, bullets[0], Inches(0.8), Inches(3.9), Inches(11.7),
+                         Inches(0.8), 30, FG)
+            if len(bullets) > 1:
+                add_text(slide, " · ".join(bullets[1:]), Inches(0.8), Inches(6.4),
+                         Inches(11.7), Inches(0.5), 16, MUTED)
+            slide.notes_slide.notes_text_frame.text = s["falo"]
+            continue
         add_text(slide, s["title"].upper(), Inches(0.6), Inches(0.35),
                  Inches(12), Inches(0.5), 16, ACCENT, bold=True)
         img = next((f for k, f in IMAGES.items() if k in s["aparece"].lower()), None)

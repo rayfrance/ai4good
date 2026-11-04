@@ -28,6 +28,11 @@ abaixo. o guia exige que sejam da autora, sem tela. -->
 
 **Melhorias futuras, fora do escopo atual:** calibração automática de nível; diagnóstico das experiências a partir de LinkedIn, GitHub e currículo (fica fora do primeiro uso para não comprometer fluidez e adesão); referencial de competências como o SFIA.
 
+## slide 0 · capa · 10 s
+
+- **aparece:** Leadroid | seu líder técnico robô, do júnior ao sênior | Rayane France · AI4Good · UFRPE · 2026.2
+- **eu falo:** "boa noite, eu sou a Rayane e vou apresentar o Leadroid."
+
 ## slide 1 · a ideia · 45 s
 
 - **aparece:** o agente entrega a tarefa. quem acompanha o seu crescimento? | hoje: as tarefas saem do Claude Code, do Codex, do Cursor | falta: o líder técnico que acompanha e aponta o que praticar para evoluir | Leadroid: um líder técnico robô, ativado nos repositórios que eu escolho

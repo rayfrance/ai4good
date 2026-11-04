@@ -3,7 +3,7 @@
 > roteiro do [seminário · preliminares](https://lucassf.pages.dev/ai4good/?doc=artefatos%2F4-seminario-preliminares.md). de 4 a 6 slides, de 3 a 5
 > minutos. em cada slide: o que aparece, o que você fala, e quanto tempo leva.
 
-**link dos slides:** [sem1_preliminares.pptx no GitHub](https://github.com/rayfrance/ai4good/blob/feature/va2-sem1/outputs/sem1_preliminares.pptx), gerado por `tools/build_sem1_pptx.py` a partir deste roteiro
+**link dos slides:** [abrir a apresentação (PowerPoint online)](https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fraw.githubusercontent.com%2Frayfrance%2Fai4good%2Ffeature%2Fva2-sem1%2Foutputs%2Fsem1_preliminares.pptx) · [baixar o .pptx](https://github.com/rayfrance/ai4good/raw/feature/va2-sem1/outputs/sem1_preliminares.pptx) · gerados por `tools/build_sem1_pptx.py` a partir deste roteiro
 
 
 ## as quatro frases, sem IA

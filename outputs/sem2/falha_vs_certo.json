@@ -1,0 +1,108 @@
+{
+  "falha": {
+    "onde_esta": "Atua como Desenvolvedora .NET em plataforma hospitalar corporativa, lidando com integrações legadas, ASP.NET MVC/Razor e rotinas críticas.",
+    "lacuna_principal": "Consolidar autonomia sobre decisões arquiteturais complexas (DDD) e manter rigor rigoroso com testes ao delegar implementação pesada para agentes de IA.",
+    "diagnostico_fontes": {
+      "conflito_curriculo_vs_realidade": "Nenhum conflito relevante; o currículo alinha-se com a atuação diária em .NET e legados hospitalares.",
+      "padrao_uso_ia_observado": "Uso ativo de agentes de IA para gerar código em blocos grandes, o que exige maior vigilância para garantir propriedade intelectual e robustez dos testes."
+    },
+    "skills": [
+      {
+        "nome": "Domain-Driven Design (DDD)",
+        "atual": 2,
+        "alvo": 4,
+        "evidencia": "Mencionada no currículo e em repositório de estudo (medi-flow), mas ainda em fase inicial de aplicação prática rigorosa no legado hospitalar.",
+        "fonte": "curriculo"
+      },
+      {
+        "nome": "Programação Agêntica e Fluxo com IA",
+        "atual": 3,
+        "alvo": 4,
+        "evidencia": "Uso constante de Claude Code, Codex e Gemini para acelerar entregas e evoluções de funcionalidades.",
+        "fonte": "triagem"
+      },
+      {
+        "nome": "Arquitetura .NET / Clean Architecture",
+        "atual": 3,
+        "alvo": 4,
+        "evidencia": "Aplicação de Clean Code e SOLID em refatorações no sistema hospitalar e projetos em .NET.",
+        "fonte": "commits"
+      },
+      {
+        "nome": "Back-end C# / .NET e Integrações",
+        "atual": 4,
+        "alvo": 5,
+        "evidencia": "Implementação consistente de integrações, rotinas de e-mail, filtros alfanuméricos e consumo de dados em C#/.NET.",
+        "fonte": "commits"
+      },
+      {
+        "nome": "Front-end (JS / Razor / React)",
+        "atual": 3,
+        "alvo": 4,
+        "evidencia": "Ajustes de layout em ASP.NET MVC/Razor, JavaScript e correções visuais em modais e tabelas.",
+        "fonte": "commits"
+      },
+      {
+        "nome": "Testes e Qualidade / SQL",
+        "atual": 3,
+        "alvo": 4,
+        "evidencia": "Histórico com XUnit e otimização de consultas SQL e tratamento de dados hospitalares.",
+        "fonte": "curriculo"
+      }
+    ],
+    "proximo_passo": "Na próxima tarefa de integração ou refatoração com agente, explique em detalhes o desenho de domínio e os casos de teste antes de commitar."
+  },
+  "certo": {
+    "onde_esta": "Desenvolvedora Fullstack Júnior nível 3 atuando em .NET, ASP.NET MVC, JavaScript, SQL e integrações hospitalares (Tasy/MV/Jev), utilizando ativamente ferramentas de IA como Claude Code e Codex.",
+    "lacuna_principal": "Transição do conhecimento teórica inicial de DDD para a modelagem prática em sistemas legados corporativos com forte uso de agentes de IA mantendo a propriedade intelectual.",
+    "diagnostico_fontes": {
+      "conflito_curriculo_vs_realidade": "O currículo menciona Clean Architecture e DDD como já aplicados com proficiência para fins de processos seletivos, mas a triagem real e as notas de estudo apontam que a desenvolvedora está no início do estudo formal de DDD (Capítulo 1) e atua cotidianamente em legados .NET MVC/Razor.",
+      "padrao_uso_ia_observado": "Uso intenso de Claude Code e Codex com múltiplos plugins, estruturando planos de escrita e gestão de repositório, exigindo atenção para garantir que a lógica de domínio não seja totalmente delegada sem compreensão crítica."
+    },
+    "skills": [
+      {
+        "nome": "Domain-Driven Design (DDD)",
+        "atual": 1,
+        "alvo": 4,
+        "evidencia": "Início do estudo formal pelo livro de Vlad Khononov (Capítulo 1) com notas no vault sobre subdomínios.",
+        "fonte": "historico_ia"
+      },
+      {
+        "nome": "Programação Agêntica e Fluxo com IA",
+        "atual": 3,
+        "alvo": 4,
+        "evidencia": "Uso frequente de Claude Code, Codex, plugins oficiais e automação de planos no terminal.",
+        "fonte": "historico_ia"
+      },
+      {
+        "nome": "Arquitetura .NET / Clean Architecture",
+        "atual": 2,
+        "alvo": 4,
+        "evidencia": "Projetos de estudo em C# (ex.: medi-flow) e refatorações no trabalho com ASP.NET MVC.",
+        "fonte": "github"
+      },
+      {
+        "nome": "Back-end C# / .NET e Integrações",
+        "atual": 3,
+        "alvo": 4,
+        "evidencia": "Commits frequentes implementando e-mails, filtros e integrações com ERPs hospitalares (Jev/Tasy/MV).",
+        "fonte": "commits"
+      },
+      {
+        "nome": "Front-end (JS / Razor / React)",
+        "atual": 3,
+        "alvo": 4,
+        "evidencia": "Correções e melhorias em JavaScript, modais Razor e visual de componentes no ASP.NET MVC.",
+        "fonte": "commits"
+      },
+      {
+        "nome": "Testes e Qualidade / SQL",
+        "atual": 2,
+        "alvo": 4,
+        "evidencia": "Experiência prévia com XUnit em estágio e consultas SQL em ambientes corporativos de saúde.",
+        "fonte": "curriculo"
+      }
+    ],
+    "proximo_passo": "Abra sua nota do Capítulo 1 de DDD no Obsidian, responda às suas próprias dúvidas sobre subdomínios de suporte vs. genéricos com base no seu projeto atual na empresa, e use o Claude Code para revisar sua explicação técnica."
+  }
+}

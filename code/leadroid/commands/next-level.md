@@ -1,13 +1,13 @@
 ---
-description: Mostra a lacuna para o próximo nível de carreira (Jr 3 -> Pleno) e o plano de 30/90/180 dias
-allowed-tools: Bash(python:*), Read
+description: Luzia · rota para o próximo nível (90 dias, 6 meses, 12 meses)
+allowed-tools: Bash(cd:*), Bash(python:*)
 ---
 
-Execute o comando `@next-level` do plugin **Leadroid**:
+Rode a Luzia (plugin de carreira) e mostre a saída **exatamente como veio**, sem resumir nem reescrever:
 
 ```bash
-python -m leadroid.cli next-level
+cd /c/Repositorio/ai4good-sem2/code && python -m leadroid.cli next-level
 ```
-(Diretório de trabalho: `C:\Repositorio\ai4good-sem2\code`)
 
-Mostre a lacuna principal rumo a Pleno, as ações de 30/90/180 dias com uso educado da IA e o próximo passo prático.
+
+Não leia, abra nem mostre arquivos ou código do repositório atual: a Luzia já entrega tudo mascarado (LGPD).

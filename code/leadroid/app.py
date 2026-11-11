@@ -1,15 +1,12 @@
-"""Luzia · Painel Visual @career-map (aberto pelo comando /luzia:career-map no Harness).
+"""Luzia · painel @career-map (aberto por /luzia:career-map).
 
-A Luzia é uma líder técnica e mentora instalada como plugin no harness do agente
-(Claude Code, Cursor, Codex, Antigravity):
-- Atua de forma passiva (monitorando a sessão em background) e ativa (intervindo
-  quando conceitos do seu plano aparecem na tarefa ou via comandos /luzia:*).
-- Guia a pessoa desenvolvedora para alcançar 100% de Propriedade Intelectual e
-  reduzir o débito técnico ao programar com IA.
+Tudo o que aparece vem do estado salvo pela Luzia (saída do modelo, já anonimizada),
+da autoavaliação da pessoa e dos eventos mascarados que o observador registrou na sessão.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import sys
 from pathlib import Path
@@ -23,228 +20,216 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from leadroid import pipeline  # noqa: E402
 
 st.set_page_config(page_title='Luzia · @career-map', page_icon='✨', layout='wide')
-pipeline.load_env()
 
-ss = st.session_state
-if 'loaded_state' not in ss and pipeline.STATE_FILE.exists():
-    try:
-        saved = json.loads(pipeline.STATE_FILE.read_text(encoding='utf-8'))
-        ss.payload = saved.get('payload_anonimizado', {})
-        ss.hits = saved.get('anonimizacao_hits', {})
-        ss.plan = saved.get('plano', {})
-        ss.record = saved.get('custo_ultima_execucao', {})
-        ss.loaded_state = True
-    except Exception:
-        pass
-
-plan = ss.get('plan') or {}
-rec = ss.get('record') or {}
-
-# ------------------------------------------------------------------ Sidebar: A Luzia no Harness
-st.sidebar.title('✨ Luzia')
-st.sidebar.caption('Sua líder técnica e mentora no harness do agente — iluminando sua carreira e preservando sua propriedade intelectual.')
-
-st.sidebar.markdown('### 🔌 Como a Luzia roda')
-modo_operacao = st.sidebar.radio(
-    'Modo de atuação no Harness (Claude Code / Cursor / Codex / Antigravity):',
-    [
-        '🟢 Ativo + Passivo (Observa a sessão e intervém ao detectar conceitos do plano)',
-        '👀 Passivo (Apenas monitora em background e atualiza este painel)',
-        '💬 Sob demanda (Só responde quando chamada via /luzia:* no chat)',
-    ],
-    index=0,
+st.markdown(
+    """
+<style>
+.stApp { background: radial-gradient(circle at 20% 0%, #1e1b4b 0%, #0b0b12 60%); color: #f4f4f5; }
+[data-testid="stSidebar"] { background: #0f0f1a; }
+.block-container { padding-top: 1.6rem; }
+.lz-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.09); border-radius: 18px;
+           padding: 18px 20px; height: 100%; }
+.lz-kpi { font-size: 2.6rem; font-weight: 800; line-height: 1; }
+.lz-sub { color: #a1a1aa; font-size: .85rem; margin-top: 6px; }
+.lz-tag { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .78rem; margin: 2px 4px 2px 0;
+          background: rgba(250,204,21,.12); color: #fde68a; border: 1px solid rgba(250,204,21,.25); }
+.lz-tag.g { background: rgba(16,185,129,.12); color: #6ee7b7; border-color: rgba(16,185,129,.3); }
+.lz-tag.b { background: rgba(59,130,246,.12); color: #93c5fd; border-color: rgba(59,130,246,.3); }
+.lz-journey { display:flex; align-items:center; gap:12px; font-weight:700; font-size:1.05rem; }
+.lz-track { flex:1; height:10px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden; }
+.lz-fill { height:100%; background: linear-gradient(90deg,#3b82f6,#a855f7,#facc15); }
+.lz-feed { border-left: 3px solid #facc15; padding: 6px 12px; margin: 6px 0; background: rgba(255,255,255,.03);
+           border-radius: 0 10px 10px 0; }
+.lz-h { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
-tem_memoria_harness = st.sidebar.toggle(
-    'Memória do Harness conectada (Claude + Codex)',
-    value=True,
-    help='Se desmarcado (usuária nova sem histórico), a Luzia parte exclusivamente da sua autoavaliação nos sliders.',
-)
+esc = html.escape
+state = pipeline.load_state()
+plan = state.get('plano', {})
+skills = plan.get('skills', [])
+autoaval = pipeline.read_json(pipeline.AUTOAVAL, {})
+obs_cfg = pipeline.read_json(pipeline.OBSERVER_CFG, {'modo': 'ativo', 'autorizados': []})
+
+
+def last_run() -> dict:
+    if not pipeline.RUNS.exists():
+        return {}
+    lines = [ln for ln in pipeline.RUNS.read_text(encoding='utf-8').splitlines() if ln.strip()]
+    return json.loads(lines[-1]) if lines else {}
+
+
+def level(s: dict) -> int:
+    v = autoaval.get(s['nome'], s.get('autoavaliacao'))
+    return int(v if v is not None else s.get('luzia_sugere', s.get('atual', 0)))
+
+
+# ------------------------------------------------------------------ barra lateral
+st.sidebar.markdown('## ✨ Luzia')
+st.sidebar.caption('sua líder técnica no agente')
+MODOS = {'ativo': '🟢 Ativa + observando', 'passivo': '👀 Só observando', 'sob_demanda': '💬 Só quando chamada'}
+atual_modo = obs_cfg.get('modo', 'ativo')
+novo = st.sidebar.radio('Modo', list(MODOS), index=list(MODOS).index(atual_modo), format_func=MODOS.get)
+if novo != atual_modo:
+    obs_cfg['modo'] = novo
+    pipeline.OBSERVER_CFG.parent.mkdir(parents=True, exist_ok=True)
+    pipeline.OBSERVER_CFG.write_text(json.dumps(obs_cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+    st.sidebar.success('Modo salvo — o observador já segue este modo.')
 
 st.sidebar.divider()
-st.sidebar.markdown('**Skills & Comandos no Agente:**')
-st.sidebar.code(
-    '/luzia:triage\n'
-    '/luzia:career-map\n'
-    '/luzia:feedback-skills-opportunities\n'
-    '/luzia:feedback-progress\n'
-    '/luzia:next-level',
-    language='text',
-)
+st.sidebar.code('/luzia:feedback-skills-opportunities\n/luzia:feedback-progress\n/luzia:next-level\n/luzia:career-map\n/luzia:triage', language='text')
+run = last_run()
+if run:
+    st.sidebar.divider()
+    st.sidebar.caption(
+        f"⏱ {run['tempo_total_s']} s · 🧠 {run['pico_memoria_mib']} MiB · 🔤 {run['tokens_entrada']}→{run['tokens_saida']}\n\n"
+        f"`{run['rotulo']}` · versão `{run['versao']}` · {run['quando'][11:16]}"
+    )
 
-st.sidebar.divider()
-st.sidebar.markdown('**⚡ Telemetria do Motor (`exp.md`):**')
-st.sidebar.caption(
-    f"• Tempo medido: **{rec.get('tempo_total_s', 9.39)} s** *(média 9,85 s vs. 13 s no flx)*\n"
-    f"• Memória RSS: **{rec.get('pico_memoria_mib', 82.1)} MiB CLI / 186 MiB UI** *(vs. 300 MiB no flx)*\n"
-    f"• Tokens: **{rec.get('tokens_entrada', 10171)} in → {rec.get('tokens_saida', 2426)} out**\n"
-    f"• LGPD local ativa · commit `{pipeline.version()}`"
-)
+if not plan:
+    st.warning('A Luzia ainda não fez a triagem. Rode /luzia:triage no Claude Code.')
+    st.stop()
 
-# ------------------------------------------------------------------ Cabeçalho do Perfil
-c_head1, c_head2, c_head3 = st.columns([2, 2, 1])
-c_head1.markdown('### 👤 Momento Atual Declarado\n**Dev Fullstack Júnior 3** *(C#/.NET, MVC, JS, SQL)*')
-c_head2.markdown('### 🎯 Meta de Carreira (12 meses)\n**Desenvolvedora Plena** *(DDD, Arquitetura, IA Agêntica)*')
-c_head3.metric('Propriedade Média', '62%', 'Meta: 100% nas entregas')
+# ------------------------------------------------------------------ topo: a jornada
+tarefas = plan.get('tarefas_recentes', [])
+prop_media = round(sum(int(t.get('indice_propriedade', 0)) for t in tarefas) / len(tarefas)) if tarefas else 0
+soma_atual = sum(level(s) for s in skills)
+soma_alvo = sum(int(s.get('alvo', 5)) for s in skills) or 1
+jornada = round(100 * soma_atual / soma_alvo)
 
-# ------------------------------------------------------------------ 4 Abas do Produto Luzia
-t_map, t_obs, t_prop, t_plan = st.tabs([
-    '🧭 1 · @career-map (Triagem & Autoavaliação)',
-    '⚡ 2 · Na Sessão (@feedback-skills-opportunities)',
-    '🧠 3 · Rumo a 100% de Propriedade (@feedback-progress)',
-    '🗺️ 4 · Próximo Nível (@next-level · 90d / 6m / 12m)',
-])
+c1, c2, c3 = st.columns([2.2, 1, 1])
+with c1:
+    st.markdown(
+        f"""<div class="lz-card"><div class="lz-sub">sua jornada · 12 meses</div>
+        <div class="lz-journey" style="margin-top:10px">💼 Júnior 3<div class="lz-track"><div class="lz-fill" style="width:{jornada}%"></div></div>🎯 Plena</div>
+        <div class="lz-sub">{esc(plan.get('aonde_quer_chegar', {}).get('lacuna_principal', ''))}</div></div>""",
+        unsafe_allow_html=True,
+    )
+with c2:
+    st.markdown(f'<div class="lz-card"><div class="lz-kpi">{jornada}%</div><div class="lz-sub">do caminho até Plena</div></div>', unsafe_allow_html=True)
+with c3:
+    st.markdown(f'<div class="lz-card"><div class="lz-kpi">{prop_media}%</div><div class="lz-sub">propriedade intelectual média</div></div>', unsafe_allow_html=True)
 
-# ================================================================== ABA 1: @career-map
+st.write('')
+t_map, t_live, t_prop, t_next = st.tabs(['🧭 Mapa', '⚡ Ao vivo', '🧠 Propriedade', '🗺️ Próximo nível'])
+
+# ------------------------------------------------------------------ mapa de skills
 with t_map:
-    st.caption(
-        '✨ **Como a Luzia faz a triagem:** currículos (adaptados para vagas) e notas paradas no Obsidian nunca são tratados '
-        'como verdade absoluta. A Luzia extrai as habilidades e **pergunta a você sua autoavaliação**, cruzando com a **memória viva do seu harness**.'
-    )
+    rows = []
+    for s in skills:
+        rows.append({
+            'Skill': s['nome'], 'Você': level(s), 'Meta': int(s.get('alvo', 5)),
+            'Luzia sugere': int(s.get('luzia_sugere', level(s))),
+            'Evidência': s.get('evidencia', ''),
+        })
+    df = pd.DataFrame(rows)
+    base = alt.Chart(df).encode(y=alt.Y('Skill:N', sort=None, title=None, axis=alt.Axis(labelLimit=260, labelFontSize=13)))
+    chart = (
+        base.mark_rule(strokeWidth=6, opacity=.35, color='#a855f7').encode(x=alt.X('Você:Q', scale=alt.Scale(domain=[0, 5]), title='nível 0–5', axis=alt.Axis(tickCount=5)), x2='Meta:Q')
+        + base.mark_circle(size=360, color='#3b82f6').encode(x='Você:Q', tooltip=['Skill', 'Você', 'Meta', 'Luzia sugere', 'Evidência'])
+        + base.mark_circle(size=360, color='#10b981').encode(x='Meta:Q', tooltip=['Skill', 'Meta'])
+        + base.mark_point(shape='diamond', size=120, color='#facc15', filled=True).encode(x='Luzia sugere:Q', tooltip=['Skill', 'Luzia sugere', 'Evidência'])
+    ).properties(height=340).configure_view(stroke=None).configure_axis(gridColor='#27272a', labelColor='#d4d4d8', titleColor='#a1a1aa')
+    st.altair_chart(chart, use_container_width=True)
+    st.markdown('<span class="lz-tag b">● você</span><span class="lz-tag g">● meta Plena</span><span class="lz-tag">◆ Luzia sugere</span>', unsafe_allow_html=True)
 
-    col_cal, col_chart = st.columns([1, 2])
-    with col_cal:
-        with st.container(border=True):
-            st.markdown('##### 🎚️ Sua Autoavaliação (0 a 5)')
-            st.caption('Você define seu ponto de partida real em cada habilidade:')
-            skills_list = plan.get('skills', [])
-            user_levels = {}
-            for s in skills_list:
-                nome = s['nome']
-                default_val = 3 if ('DDD' in nome or 'Arquitetura' in nome) else int(s['atual'])
-                user_levels[nome] = st.slider(
-                    f"{nome} (Alvo Pleno: {s['alvo']}/5)",
-                    0, 5, default_val,
-                    key=f"sl_{nome}",
-                )
+    diag = plan.get('diagnostico_fontes', {})
+    if diag:
+        a, b = st.columns(2)
+        a.markdown(f'<div class="lz-card"><div class="lz-h">📄 currículo × prática</div>{esc(diag.get("conflito_curriculo_vs_realidade", ""))}</div>', unsafe_allow_html=True)
+        b.markdown(f'<div class="lz-card"><div class="lz-h">🤖 como você usa IA</div>{esc(diag.get("padrao_uso_ia_observado", ""))}</div>', unsafe_allow_html=True)
 
-    with col_chart:
-        with st.container(border=True):
-            st.markdown('##### 📊 Seu Mapa de Carreira: Nível Atual × Meta Plena (12 meses)')
-            chart_rows = []
-            for s in skills_list:
-                nome = s['nome']
-                atual_val = user_levels.get(nome, s['atual'])
-                chart_rows.append({'Skill': nome, 'Referência': '1 · Seu Nível Atual', 'Nível': atual_val})
-                chart_rows.append({'Skill': nome, 'Referência': '2 · Meta Plena (12m)', 'Nível': s['alvo']})
-            df_c = pd.DataFrame(chart_rows)
-            chart = (
-                alt.Chart(df_c)
-                .mark_bar(cornerRadiusEnd=4, size=16)
-                .encode(
-                    y=alt.Y('Skill:N', title=None, sort=None),
-                    x=alt.X('Nível:Q', scale=alt.Scale(domain=[0, 5]), title='Nível (0 a 5)'),
-                    color=alt.Color(
-                        'Referência:N',
-                        scale=alt.Scale(
-                            domain=['1 · Seu Nível Atual', '2 · Meta Plena (12m)'],
-                            range=['#3b82f6', '#10b981'],
-                        ),
-                        legend=alt.Legend(orient='top', title=None),
-                    ),
-                    yOffset='Referência:N',
-                    tooltip=['Skill', 'Referência', 'Nível'],
-                )
-                .properties(height=310)
+    with st.expander('🎚️ Ajustar minha autoavaliação'):
+        cols = st.columns(3)
+        novos = {}
+        for i, s in enumerate(skills):
+            with cols[i % 3]:
+                novos[s['nome']] = st.slider(s['nome'], 0, 5, level(s), key=f"auto_{s['nome']}")
+        if st.button('💾 Salvar autoavaliação', type='primary'):
+            pipeline.AUTOAVAL.parent.mkdir(parents=True, exist_ok=True)
+            pipeline.AUTOAVAL.write_text(json.dumps(novos, ensure_ascii=False, indent=2), encoding='utf-8')
+            st.success('Salvo. A Luzia parte destes níveis.')
+            st.rerun()
+
+# ------------------------------------------------------------------ ao vivo (observador)
+with t_live:
+    @st.fragment(run_every='3s')
+    def feed() -> None:
+        evs = list(reversed(pipeline.session_events(40)))
+        k1, k2, k3 = st.columns(3)
+        k1.metric('eventos observados', len(evs))
+        k2.metric('intervenções', sum(1 for e in evs if e.get('interveio')))
+        k3.metric('modo', MODOS.get(pipeline.read_json(pipeline.OBSERVER_CFG, {}).get('modo', 'ativo'), '').split(' ', 1)[-1])
+        if not evs:
+            st.info('Trabalhe no Claude Code: quando uma skill do seu plano aparecer, ela surge aqui.')
+            return
+        cont = pd.Series([e['skill'] for e in evs]).value_counts().reset_index()
+        cont.columns = ['Skill', 'vezes']
+        st.altair_chart(
+            alt.Chart(cont).mark_bar(cornerRadiusEnd=6, color='#facc15').encode(
+                x=alt.X('vezes:Q', title=None, axis=alt.Axis(tickMinStep=1)), y=alt.Y('Skill:N', sort='-x', title=None, axis=alt.Axis(labelLimit=260)),
+            ).properties(height=40 * len(cont) + 20).configure_view(stroke=None).configure_axis(gridColor='#27272a', labelColor='#d4d4d8'),
+            use_container_width=True,
+        )
+        for e in evs[:8]:
+            icon = '✨ interveio no chat' if e.get('interveio') else '👀 registrou'
+            st.markdown(
+                f"<div class='lz-feed'><b>{esc(e['skill'])}</b> · {esc(e.get('extensao', ''))} · {e['quando'][11:16]} · {icon}</div>",
+                unsafe_allow_html=True,
             )
-            st.altair_chart(chart, width='stretch')
 
-            if tem_memoria_harness:
-                st.info(
-                    '✨ **Calibração da Luzia:** Se a Luzia olhasse só o currículo de vaga, diria que seu Back-end já é `4/5`; '
-                    'se olhasse só uma nota antiga do Obsidian (`ddd-cap-01.md`), rebaixaria seu DDD para `1/5`. '
-                    'Por isso a Luzia parte da **sua autoavaliação** e acompanha sua evolução real nas sessões do harness.'
-                )
-            else:
-                st.warning(
-                    '👤 **Usuária nova sem histórico no harness:** A Luzia montou o mapa a partir da sua autoavaliação '
-                    'e passará a aprender com as suas próximas sessões no agente.'
-                )
+    feed()
 
-# ================================================================== ABA 2: MONITORAMENTO NA SESSÃO
-with t_obs:
-    st.caption(
-        'Enquanto você programa no Claude Code / Cursor / Antigravity, a skill passiva da Luzia detecta quando um '
-        'conceito que falta para você virar Plena aparece na tarefa atual e te guia na hora.'
-    )
-    ops = plan.get('oportunidades_tarefa_atual', [])
-    cols_op = st.columns(len(ops) if ops else 1)
-    for col, op in zip(cols_op, ops):
-        with col:
-            with st.container(border=True):
-                st.markdown(f"#### 🎯 {op['skill_alvo'].split('·')[0].strip()}")
-                st.caption(f"📍 **{op.get('gatilho_detectado', '')}**")
-                st.info(f"✨ **A Luzia avisa no chat:** *\"{op.get('alerta_do_observador', '')}\"*")
-                st.markdown(f"**🤝 Como conduzir o agente agora:**\n{op.get('como_praticar_com_agente', '')}")
-                with st.expander('📚 Ver teoria na prática e como zerar débito técnico'):
-                    st.write(op.get('teoria_na_pratica', ''))
-                    st.warning(op.get('evitar_delegacao_cega', ''))
-
-# ================================================================== ABA 3: RUMO A 100% DE PROPRIEDADE INTELECTUAL
+# ------------------------------------------------------------------ propriedade intelectual
 with t_prop:
-    st.caption(
-        '✨ **O objetivo da Luzia não é dar uma nota de prova, e sim te guiar até 100% de Propriedade Intelectual sobre o que você constrói com IA.** '
-        'Ela observa **P1** (Direção no Prompt), **P2** (Coesão do Commit), **P3** (Aplicação Conceitual) e **P4** (Domínio Arquitetural) e mostra exatamente o que fazer para chegar aos 100%.'
-    )
-
-    guias_100 = [
-        [
-            'Revisar o contrato do helper de descrição dos enums com a camada de domínio (+8%)',
-            'Adicionar 1 teste rápido em XUnit garantindo que todos os valores do enum da Jev possuem descrição válida (+8%)',
-        ],
-        [
-            'Separar a regra de cálculo de status no Controller/Service C#, deixando o JavaScript apenas exibir o estado (+20%)',
-            'Pedir ao Claude Code para gerar um diagrama curto do fluxo entre o alerta de atraso e o filtro de regime (+18%)',
-        ],
-        [
-            'Extrair a interface `IClassificadorAnexo` no domínio para isolar os 12 arquivos da integração Jev (+25%)',
-            'Pedir ao agente para listar os 3 cenários de falha da API Jev e revisar o tratamento de exceção linha a linha (+20%)',
-            'Fracionar o próximo PR semelhante em commits menores (1º contrato, 2º cliente HTTP, 3º tela) (+20%)',
-        ],
-        [
-            'Unificar o template HTML de agulhamento em um componente compartilhado para não duplicar entre Web e API (+32%)',
-            'Garantir com o agente que uma falha no envio de e-mail não interrompa a transação principal do pedido (+30%)',
-        ],
-    ]
-
-    for i, t in enumerate(plan.get('tarefas_recentes', [])[:3]):
-        base_score = int(t.get('indice_propriedade', 50))
-        passos_guia = guias_100[i] if i < len(guias_100) else ['Revisar decisões arquiteturais com a Luzia (+30%)']
-
+    for i, t in enumerate(tarefas):
+        base_idx = int(t.get('indice_propriedade', 0))
+        passos = t.get('passos_para_100', [])
         with st.container(border=True):
-            # Calcula o ganho conforme a usuária conclui as orientações da Luzia
-            concluidos = 0
-            st.markdown(f"#### `{t['tarefa']}`")
-            st.caption(f"Diagnóstico da Luzia: {t['por_que']} · **Débito técnico:** {t.get('risco_debito_tecnico', '')}")
+            left, right = st.columns([3, 2])
+            with left:
+                st.markdown(f"**{esc(t['tarefa'])}**")
+                st.markdown(''.join(f'<span class="lz-tag b">{esc(s)}</span>' for s in t.get('skills', [])), unsafe_allow_html=True)
+                ganho = 0
+                for j, p in enumerate(passos):
+                    if st.checkbox(f"{p['passo']}  **+{p.get('ganho', 0)}%**", key=f'p_{i}_{j}'):
+                        ganho += int(p.get('ganho', 0))
+                total = min(100, base_idx + ganho)
+                st.progress(total / 100, text=f'propriedade {total}%' + (' · 🟢 100%!' if total >= 100 else ''))
+                if t.get('risco_debito_tecnico'):
+                    st.caption(f"⚠️ {t['risco_debito_tecnico']}")
+            with right:
+                dims = pd.DataFrame({
+                    'dim': ['P1 prompt', 'P2 commit', 'P3 conceito', 'P4 arquitetura'],
+                    'v': [t.get('p1_direcao_prompt', 0), t.get('p2_coesao_commit', 0),
+                          t.get('p3_aplicacao_conceitual', 0), t.get('p4_dominio_arquitetural', 0)],
+                })
+                st.altair_chart(
+                    alt.Chart(dims).mark_bar(cornerRadiusEnd=4).encode(
+                        x=alt.X('v:Q', scale=alt.Scale(domain=[0, 100]), title=None),
+                        y=alt.Y('dim:N', sort=None, title=None),
+                        color=alt.Color('v:Q', scale=alt.Scale(domain=[0, 100], range=['#ef4444', '#facc15', '#10b981']), legend=None),
+                        tooltip=['dim', 'v'],
+                    ).properties(height=140).configure_view(stroke=None).configure_axis(gridColor='#27272a', labelColor='#d4d4d8'),
+                    use_container_width=True,
+                )
 
-            st.markdown('**✨ Guia da Luzia para você alcançar 100% de Propriedade Intelectual nesta entrega:**')
-            for j, passo_txt in enumerate(passos_guia):
-                if st.checkbox(passo_txt, key=f'chk_{i}_{j}'):
-                    concluidos += 1
-
-            ganho = int((100 - base_score) * (concluidos / len(passos_guia)))
-            score_atual = min(100, base_score + ganho)
-
-            c_bar, c_metric = st.columns([4, 1])
-            c_bar.progress(score_atual / 100.0, text=f'Propriedade Intelectual sobre a entrega: {score_atual}% (inicial: {base_score}%)')
-            status_lbl = '🟢 100% Dominada!' if score_atual == 100 else ('🟢 Alta' if score_atual >= 80 else '🟡 Em evolução')
-            c_metric.metric('Propriedade', f'{score_atual}%', f'+{ganho}% com guia' if ganho else status_lbl)
-
-# ================================================================== ABA 4: PLANO DE CARREIRA 90D / 6M / 12M
-with t_plan:
-    st.caption(
-        'A Luzia usa este planejamento de 90 dias, 6 meses e 12 meses para monitorar suas sessões no harness, '
-        'defender a execução do seu plano e incentivar você a praticar o que falta para chegar a Plena.'
-    )
+# ------------------------------------------------------------------ próximo nível
+with t_next:
+    icons = {'90 dias': '🌱', '6 meses': '🚀', '12 meses': '🏆'}
     marcos = plan.get('plano', [])
-    cols_m = st.columns(len(marcos) if marcos else 3)
-    for col, item in zip(cols_m, marcos):
-        with col:
-            with st.container(border=True):
-                st.markdown(f"### 📅 {item['horizonte']}")
-                st.caption(item.get('titulo', ''))
-                st.markdown('**Instruções para as próximas tarefas:**')
-                for p in item.get('passos_detalhados', [item['acao']]):
-                    st.markdown(f'- {p}')
-                st.info(f"✨ **Como a Luzia age no Harness:** {item.get('intervencao_leadroid_no_harness', '')}")
-                st.success(f"🏁 **Sinal de progresso:** {item['sinal_de_progresso']}")
+    cols = st.columns(len(marcos) or 1)
+    for col, m in zip(cols, marcos):
+        passos_html = ''.join(f'<li>{esc(p)}</li>' for p in m.get('passos', []))
+        col.markdown(
+            f"""<div class="lz-card"><div class="lz-kpi">{icons.get(m['horizonte'], '📅')}</div>
+            <div class="lz-h" style="margin-top:8px">{esc(m['horizonte'])} · {esc(m.get('titulo', ''))}</div>
+            <ul>{passos_html}</ul>
+            <span class="lz-tag">✨ {esc(m.get('como_a_luzia_age', ''))}</span><br>
+            <span class="lz-tag g">🏁 {esc(m.get('sinal_de_progresso', ''))}</span></div>""",
+            unsafe_allow_html=True,
+        )
+    st.write('')
+    st.markdown(f"<div class='lz-card'>👉 <b>próximo passo:</b> {esc(plan.get('proximo_passo', ''))}</div>", unsafe_allow_html=True)

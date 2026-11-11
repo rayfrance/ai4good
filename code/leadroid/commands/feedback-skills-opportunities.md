@@ -1,13 +1,13 @@
 ---
-description: Mostra as oportunidades de prática de skills na tarefa atual com uso educado da IA
-allowed-tools: Bash(python:*), Read
+description: Luzia · oportunidades de prática nesta sessão, a partir do que a Luzia observou
+allowed-tools: Bash(cd:*), Bash(python:*)
 ---
 
-Execute o comando `@feedback-skills-opportunities` do plugin **Leadroid**:
+Rode a Luzia (plugin de carreira) e mostre a saída **exatamente como veio**, sem resumir nem reescrever:
 
 ```bash
-python -m leadroid.cli feedback-skills-opportunities
+cd /c/Repositorio/ai4good-sem2/code && python -m leadroid.cli feedback-skills-opportunities --rotulo feedback-skills-opportunities
 ```
-(Diretório de trabalho: `C:\Repositorio\ai4good-sem2\code`)
 
-Mostre quais skills do plano rumo a Pleno (como DDD, arquitetura .NET e programação agêntica) a tarefa atual permite praticar junto com o agente sem cair em delegação cega, mantendo os dados de custo medido no rodapé.
+Depois, em uma linha, pergunte qual oportunidade a pessoa quer praticar agora com você.
+Não leia, abra nem mostre arquivos ou código do repositório atual: a Luzia já entrega tudo mascarado (LGPD).

@@ -1,13 +1,13 @@
 ---
-description: Atualiza e exibe o painel visual @career-map (Streamlit) com skills, propriedade e custo medido
-allowed-tools: Bash(python:*), Bash(streamlit:*), Read
+description: Luzia · abre o painel visual @career-map
+allowed-tools: Bash(cd:*), Bash(python:*)
 ---
 
-Execute o comando `@career-map` do plugin **Leadroid**:
+Rode a Luzia (plugin de carreira) e mostre a saída **exatamente como veio**, sem resumir nem reescrever:
 
 ```bash
-python -m leadroid.cli career-map
+cd /c/Repositorio/ai4good-sem2/code && python -m leadroid.cli career-map
 ```
-(Diretório de trabalho: `C:\Repositorio\ai4good-sem2\code`)
 
-Informe o estado salvo em `outputs/sem2/career_state.json` e o painel visual em `streamlit run code/leadroid/app.py`.
+
+Não leia, abra nem mostre arquivos ou código do repositório atual: a Luzia já entrega tudo mascarado (LGPD).

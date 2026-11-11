@@ -1,19 +1,21 @@
 ---
 name: leadroid-session-observer
-description: Observador ativo de sessão do Leadroid no harness do agente (Claude Code, Cursor, Codex, Antigravity). Monitora a tarefa em andamento, reconhece quando conceitos do plano de carreira (DDD, Clean Architecture, testes, redução de débito técnico) aparecem na atividade e intervém de forma configurável para preservar a propriedade intelectual.
+description: Observador passivo da Luzia no Claude Code. Um hook PostToolUse (code/leadroid/observer.py, registrado em ~/.claude/settings.json) roda a cada edição de arquivo ou git commit, compara a atividade com as lacunas do plano de carreira e intervém em uma linha ou só registra, conforme o modo.
 ---
 
-# Leadroid · Observador de Sessão e Intervenção no Fluxo
+# Luzia · observador de sessão
 
-Esta skill atua continuamente enquanto a pessoa desenvolve no repositório com o agente, respeitando a configuração de intervenção em `outputs/sem2/career_state.json` (`preferencias_intervencao`).
+**Como funciona (real, no Claude Code):**
+- O hook `PostToolUse` (matcher `Edit|Write|MultiEdit|Bash`) roda `code/leadroid/observer.py` localmente, sem chamar o modelo.
+- Ele só age nos repositórios listados em `code/leadroid/private/observer.json` (`autorizados`).
+- Compara o nome do arquivo e o trecho editado com as `palavras_chave` das skills que ainda têm lacuna (autoavaliação < alvo) no plano salvo.
+- Grava em `private/sessao.jsonl` só o evento mascarado (horário, skill, extensão, ferramenta). Nunca grava caminho nem código.
 
-## Como o Observador atua durante uma tarefa
+**Modos** (`python -m leadroid.cli modo <modo>` ou o seletor do painel):
+- `ativo`: na 1ª vez que uma skill aparece na sessão, a Luzia avisa em uma linha no chat (`systemMessage` + `additionalContext`).
+- `passivo`: só registra; os eventos aparecem no feed "Ao vivo" do painel.
+- `sob_demanda`: não observa; a Luzia só responde aos comandos `/luzia:*`.
 
-1. **Detecção de oportunidade conceitual no código em construção:**
-   - Ao ler ou editar arquivos na tarefa atual, cruza o contexto do código com as **lacunas ativas do plano de carreira** (`@next-level`: 90 dias, 6 meses, 12 meses).
-   - Quando identifica um conceito que a pessoa precisa praticar (ex.: fronteira entre subdomínio principal, de suporte e genérico em DDD; desacoplamento de serviço externo; prevenção de débito técnico em legado), emite um aviso curto no fluxo:
-     > *"🧭 **Leadroid · Oportunidade na Sessão:** Esta atividade toca diretamente em `[conceito/skill do seu plano]`. Antes de delegar a implementação completa, veja como a teoria se aplica aqui: `[conexão rápida com o código atual]`."*
-2. **Defesa do plano de carreira e redução de débito técnico:**
-   - Lembra a pessoa dos compromissos do marco atual (90 dias / 6 meses / 12 meses) quando percebe uma entrega que pode gerar débito técnico ou delegação cega.
-3. **Respeito à preferência da pessoa usuária:**
-   - Se `intervencao_ativa = false` ou se o modo silencioso estiver ativado para a sessão, registra a oportunidade apenas no painel `@career-map` sem interromper o chat.
+**Quando você (Claude) receber o contexto `[Luzia · observador]`:** termine a resposta com uma única linha começando com "✨ Luzia:", ligando o conceito à mudança atual, e ofereça `/luzia:feedback-skills-opportunities`. Não interrompa a tarefa nem mostre código da empresa.
+
+**Limite:** isto vale para o Claude Code. Codex, Cursor e Antigravity ainda não têm o observador.

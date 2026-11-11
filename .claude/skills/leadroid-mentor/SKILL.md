@@ -5,14 +5,14 @@ description: Plugin de liderança técnica para quem desenvolve com IA (Claude C
 
 # Leadroid · Mentor de Carreira no Fluxo do Agente
 
-Use esta skill ou os comandos `/leadroid:triage`, `/leadroid:feedback-skills-opportunities`, `/leadroid:feedback-progress`, `/leadroid:next-level` e `/leadroid:career-map` para acompanhar o desenvolvimento profissional da pessoa desenvolvedora enquanto ela trabalha com o agente.
+Use esta skill ou os comandos `/luzia:triage`, `/luzia:feedback-skills-opportunities`, `/luzia:feedback-progress`, `/luzia:next-level` e `/luzia:career-map` para acompanhar o desenvolvimento profissional da pessoa desenvolvedora enquanto ela trabalha com o agente.
 
 ## Premissa Central
-A pessoa desenvolvedora **sempre utiliza IA** para construir software. O papel do Leadroid é garantir o **uso educado da IA**: propriedade intelectual sobre o que foi entregue (saber explicar, justificar escolhas arquiteturais e modelar o domínio) e evolução deliberada rumo ao próximo nível de carreira.
+A pessoa desenvolvedora **sempre utiliza IA** para construir software. O papel da Luzia é garantir o **uso educado da IA**: propriedade intelectual sobre o que foi entregue (saber explicar, justificar escolhas arquiteturais e modelar o domínio) e evolução deliberada rumo ao próximo nível de carreira.
 
 ## Comandos do Plugin
-- `/leadroid:triage` (`python -m leadroid.cli triage --forcar`): executa a triagem inicial cruzando declaração, currículo, GitHub (`rayfrance`), histórico compartilhado entre IAs (`Cerebro_Rayane`, `~/.claude`, `~/.codex`) e metadados de commits do repositório de trabalho autorizado (caminho em `code/leadroid/private/entrada.json`), com anonimização local LGPD.
-- `/leadroid:feedback-skills-opportunities` (`python -m leadroid.cli feedback-skills-opportunities`): aponta quais skills do plano praticar na tarefa atual sem cair em delegação cega.
-- `/leadroid:feedback-progress` (`python -m leadroid.cli feedback-progress`): audita a propriedade intelectual das entregas recentes e formula a pergunta do líder técnico.
-- `/leadroid:next-level` (`python -m leadroid.cli next-level`): mostra a lacuna atual (ex.: Jr 3 → Pleno) e o plano de 30/90/180 dias.
-- `/leadroid:career-map` (`streamlit run code/leadroid/app.py`): abre o painel visual do mapa de carreira e telemetria de custo (`tempo_total_s`, `pico_memoria_mib`, `tokens`).
+- `/luzia:triage` (`python -m leadroid.cli triage`): executa a triagem inicial cruzando declaração, currículo, GitHub (`rayfrance`), histórico compartilhado entre IAs (`Cerebro_Rayane`, `~/.claude`, `~/.codex`) e metadados de commits do repositório de trabalho autorizado (caminho em `code/leadroid/private/entrada.json`), com anonimização local LGPD.
+- `/luzia:feedback-skills-opportunities` (`python -m leadroid.cli feedback-skills-opportunities`): aponta quais skills do plano praticar na tarefa atual sem cair em delegação cega.
+- `/luzia:feedback-progress` (`python -m leadroid.cli feedback-progress`): audita a propriedade intelectual das entregas recentes e formula a pergunta do líder técnico.
+- `/luzia:next-level` (`python -m leadroid.cli next-level`): mostra a lacuna atual (ex.: Jr 3 → Pleno) e o plano de 90 dias / 6 meses / 12 meses.
+- `/luzia:career-map` (`streamlit run code/leadroid/app.py`): abre o painel visual do mapa de carreira e telemetria de custo (`tempo_total_s`, `pico_memoria_mib`, `tokens`).

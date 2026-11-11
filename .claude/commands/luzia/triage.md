@@ -1,17 +1,13 @@
 ---
-description: Triagem inicial de carreira (currículo, GitHub, histórico compartilhado entre IAs e commits locais com anonimização LGPD)
-allowed-tools: Bash(python:*), Read
+description: Luzia · triagem de carreira (currículo, GitHub, histórico entre IAs e commits, com LGPD local)
+allowed-tools: Bash(cd:*), Bash(python:*)
 ---
 
-Execute a triagem inicial do **LuzIA** (`@triage`) rodando o motor do plugin no repositório:
+Rode a Luzia (plugin de carreira) e mostre a saída **exatamente como veio**, sem resumir nem reescrever:
 
 ```bash
-python -m leadroid.cli triage --forcar
+cd /c/Repositorio/ai4good-sem2/code && python -m leadroid.cli triage --rotulo triage
 ```
-(Diretório de trabalho: `C:\Repositorio\ai4good-sem2\code`)
 
-Apresente para a pessoa desenvolvedora:
-1. O resumo calibrado de **onde ela está** vs. **aonde quer chegar** (destacando como o histórico compartilhado entre Claude/Codex/Obsidian calibrou o currículo);
-2. O **mapa de skills (atual × alvo Pleno)**;
-3. O **próximo passo imediato**;
-4. Os números reais medidos na execução (**tempo total em s**, **pico de memória em MiB**, **tokens** e **itens mascarados por LGPD**).
+Depois, em uma linha, pergunte se a pessoa quer ajustar a autoavaliação no painel (/luzia:career-map).
+Não leia, abra nem mostre arquivos ou código do repositório atual: a Luzia já entrega tudo mascarado (LGPD).

@@ -22,6 +22,34 @@ ROOT = Path(__file__).resolve().parents[2]
 PRIVATE = Path(__file__).resolve().parent / 'private'
 RUNS = ROOT / 'outputs' / 'sem2' / 'runs.jsonl'
 STATE_FILE = ROOT / 'outputs' / 'sem2' / 'career_state.json'
+AUTOAVAL = PRIVATE / 'autoavaliacao.json'
+OBSERVER_CFG = PRIVATE / 'observer.json'
+SESSION_LOG = PRIVATE / 'sessao.jsonl'
+
+
+def read_json(path: Path, default):
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except Exception:
+        return default
+
+
+def load_state() -> dict:
+    return read_json(STATE_FILE, {})
+
+
+def session_events(limit: int = 30) -> list[dict]:
+    """Eventos já mascarados que o observador (hook) registrou na sessão."""
+    if not SESSION_LOG.exists():
+        return []
+    lines = SESSION_LOG.read_text(encoding='utf-8').splitlines()[-limit:]
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            continue
+    return out
 
 
 def load_env() -> None:
@@ -85,6 +113,8 @@ def build_payload(inputs: dict, redactor: Redactor) -> dict:
     ai_hist = inputs.get('ai_history') or {}
     ai_hist = json.loads(r(json.dumps(ai_hist, ensure_ascii=False))) if ai_hist else {}
 
+    autoaval = read_json(AUTOAVAL, {}) if inputs.get('usar_autoavaliacao', True) else {}
+
     return {
         'triagem': {
             'nivel_atual_declarado': r(inputs.get('nivel', '')),
@@ -93,6 +123,7 @@ def build_payload(inputs: dict, redactor: Redactor) -> dict:
             'como_usa_ia_hoje': r(inputs.get('uso_ia', '')),
             'observacao_curriculo': r(inputs.get('observacao_curriculo', '')),
         },
+        'autoavaliacao_0_a_5': autoaval or None,
         'curriculo': r(inputs.get('cv_text', ''))[:6000],
         'linkedin': r(inputs.get('linkedin_text', ''))[:6000],
         'github': gh,
@@ -126,16 +157,29 @@ def save_state(payload: dict, plan: dict, record: dict, hits: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
+def update_state(fields: dict, record: dict) -> None:
+    """Atualiza só os campos do dia a dia no estado salvo (a triagem continua valendo)."""
+    state = load_state()
+    if not state:
+        return
+    state.setdefault('plano', {}).update(fields)
+    state['atualizado_em'] = record['quando']
+    state['custo_ultima_execucao'] = record
+    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
+
+
 def run_plan(
     payload: dict,
     prep_seconds: float,
     label: str = 'demo',
     hits: dict | None = None,
     save_current_state: bool = True,
+    schema: str | None = None,
+    intro: str | None = None,
 ) -> tuple[planner.LLMResult, dict]:
-    """Chama o modelo e devolve o plano com o registro de custo (sem dados pessoais)."""
+    """Chama o modelo e devolve a resposta com o registro de custo (sem dados pessoais)."""
     t0 = time.perf_counter()
-    prompt = planner.build_prompt(payload)
+    prompt = planner.build_prompt(payload, schema or planner.TRIAGE_SCHEMA, intro)
     result = planner.call_llm(prompt)
     ai_hist = payload.get('historico_compartilhado_ia') or {}
     record = {
@@ -154,8 +198,9 @@ def run_plan(
         'commits': len(payload.get('commits_recentes', [])),
         'notas_vault': len(ai_hist.get('notas_autorais_vault', [])),
         'sessoes_ia': len(ai_hist.get('sessoes_claude_code', [])) + len(ai_hist.get('sessoes_codex', [])),
+        'eventos_sessao': len(payload.get('eventos_sessao', [])),
     }
     log_run(record)
-    if save_current_state:
+    if save_current_state and schema is None:
         save_state(payload, result.plan, record, hits or {})
     return result, record

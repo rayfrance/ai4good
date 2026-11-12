@@ -26,12 +26,15 @@ from . import arquivos, banco, trajetoria, triage
 from .privacy import Redactor
 
 SEP_REG, SEP_CAMPO = '\x1e', '\x1f'
-FORMATO = f'--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%B%x1f'
+FORMATO = '--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%B%x1f'
 RE_MERGED_PR = re.compile(r'^Merged PR (\d+):\s*(.*)', re.IGNORECASE)
 RE_GH_PR = re.compile(r'^Merge pull request #(\d+) from (\S+)', re.IGNORECASE)
-RE_TICKET = re.compile(r'(?:AB)?#(\d+)')
-RE_IDS = re.compile(r'(?:\bAB)?#\d+|\b(?:PR|Pull Request)\s*#?\d+', re.IGNORECASE)
+RE_TICKET = re.compile(r'(?<![\w#])(?:AB)?#(\d+)')
+RE_IDS = re.compile(r'(?<![\w#])(?:AB)?#\d+|\b(?:PR|Pull Request)\s*#?\d+', re.IGNORECASE)
 MAX_MENSAGEM = 300
+IGNORADOS = {'node_modules', 'vendor', '.venv', 'venv', 'dist', 'bin', 'obj', 'packages'}
+LOCKS = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'poetry.lock', 'composer.lock', 'gemfile.lock',
+         'packages.lock.json', 'cargo.lock'}
 SOBREPOSICAO = timedelta(days=2)  # a busca incremental volta um pouco: datas de autor podem ficar para trás
 
 
@@ -88,6 +91,23 @@ def _detalhar(repo: Path, regs: list[dict]) -> None:
     for i in range(0, len(hashes), 100):
         for d in _ler(repo, '--no-walk', *hashes[i:i + 100]):
             por_hash[d['hash']]['arqs'] = d['arqs']
+
+
+def _principal(repo: Path) -> str:
+    """Ramo principal: origin/HEAD, senão main/master/develop, senão HEAD. Entrega é bloco fechado (já integrado)."""
+    try:
+        ref = _git(repo, 'symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD').strip()
+        if ref:
+            return ref
+    except subprocess.CalledProcessError:
+        pass
+    for nome in ('main', 'master', 'develop'):
+        try:
+            _git(repo, 'rev-parse', '--verify', '--quiet', f'refs/heads/{nome}')
+            return f'refs/heads/{nome}'
+        except subprocess.CalledProcessError:
+            continue
+    return 'HEAD'
 
 
 def _meu(reg: dict, ids: set[str]) -> bool:
@@ -150,7 +170,7 @@ def detectar(repo: Path, identidades: list[str], desde: str) -> list[dict]:
         return []
     repo = Path(repo)
     # Sem `--since`: o git para de andar no primeiro commit velho e perde commits de data fora de ordem.
-    todos = _ler(repo, '--all', numstat=False)
+    todos = _ler(repo, _principal(repo), numstat=False)
     resultado: list[dict] = []
     em_pr: set[str] = set()
 
@@ -196,8 +216,14 @@ def termos_do_prisma(palavras: list[str], textos: list[str]) -> list[str]:
     return achadas
 
 
+def _ignorado(caminho: str) -> bool:
+    partes = caminho.replace(chr(92), '/').lower().split('/')
+    return bool(IGNORADOS & set(partes[:-1])) or partes[-1] in LOCKS or partes[-1].endswith('.lock')
+
+
 def prismas_de(entrega: dict, prismas: list[dict]) -> dict[str, list[str]]:
-    textos = [t for c in entrega['commits'] for t in (c['mensagem'], *c['caminhos'])]
+    textos = [t for c in entrega['commits']
+              for t in (c['mensagem'], *(p for p in c['caminhos'] if not _ignorado(p)))]
     achados = {p['nome']: termos_do_prisma(p['palavras'], textos) for p in prismas}
     return {nome: termos for nome, termos in achados.items() if termos}
 
@@ -241,11 +267,17 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
         desde_gravado = janela['desde']
     else:
         busca, desde_gravado = alvo, alvo.isoformat()
-    achadas = detectar(repo, minhas, busca.isoformat(timespec='seconds'))
+    try:
+        achadas = detectar(repo, minhas, busca.isoformat(timespec='seconds'))
+    except (subprocess.CalledProcessError, OSError) as erro:  # não é repositório git, ou git ausente
+        arquivos.registrar_erro('entregas.atualizar', erro)
+        return {**resultado, 'aviso': 'não consegui ler o histórico git deste repositório'}
     redator = _redator(repo, minhas)
     prismas = trajetoria.prismas(con)
 
     with banco.transacao(con):
+        tocadas: set[int] = set()
+        antigas: set[int] = set()
         for e in achadas:
             linha = con.execute('SELECT id FROM entrega WHERE chave = ?', (e['chave'],)).fetchone()
             novos = 0
@@ -259,8 +291,8 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
                 antes = con.execute('SELECT entrega_id FROM commit_ WHERE hash = ?', (c['hash'],)).fetchone()
                 if antes is None or antes['entrega_id'] != eid:
                     novos += 1
-                    if antes is not None and antes['entrega_id'] is not None:
-                        _recalcular(con, antes['entrega_id'])  # saiu de outra entrega (ex.: o PR chegou depois)
+                    if antes is not None and antes['entrega_id'] not in (None, eid):
+                        antigas.add(antes['entrega_id'])  # saiu de outra entrega (ex.: o PR chegou depois)
                 msg = redator.redact(_limpar(c['mensagem']))[:MAX_MENSAGEM]
                 con.execute(
                     'INSERT INTO commit_ (hash, entrega_id, data, mensagem, arquivos, linhas, areas_json) '
@@ -280,18 +312,22 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
             if linha is None:
                 resultado['novas'] += 1
             elif novos:
-                resultado['atualizadas'] += 1
+                tocadas.add(eid)
+        for velha in antigas:  # só depois de todos os commits terem mudado de lugar
+            if _recalcular(con, velha):
+                tocadas.add(velha)
+        resultado['atualizadas'] = len(tocadas)
         trajetoria.perfil_gravar(con, 'entregas_desde', {'desde': desde_gravado, 'ultima': agora.isoformat()})
     return resultado
 
 
-def _recalcular(con: sqlite3.Connection, eid: int) -> None:
+def _recalcular(con: sqlite3.Connection, eid: int) -> bool:
     """Totais da entrega a partir dos commits gravados; entrega sem commits some."""
     linhas = con.execute('SELECT data, arquivos, linhas, areas_json FROM commit_ WHERE entrega_id = ?', (eid,)).fetchall()
     if not linhas:
         con.execute('DELETE FROM entrega_prisma WHERE entrega_id = ?', (eid,))
         con.execute('DELETE FROM entrega WHERE id = ?', (eid,))
-        return
+        return False
     areas: Counter = Counter()
     for r in linhas:
         areas.update(json.loads(r['areas_json']))
@@ -300,3 +336,4 @@ def _recalcular(con: sqlite3.Connection, eid: int) -> None:
                 'WHERE id = ?',
                 (datas[0], datas[-1], len(linhas), sum(r['arquivos'] for r in linhas), sum(r['linhas'] for r in linhas),
                  json.dumps([a for a, _ in areas.most_common(4)], ensure_ascii=False), eid))
+    return True

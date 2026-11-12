@@ -168,3 +168,47 @@ def test_titulo_mascarado_sem_ids(con, repo, privado):
         assert '#12' not in m and 'ProdutoZeta' not in m and 'AB#' not in m and 'Fulana' not in m
     ids = [json.loads(r['ids_privados_json']) for r in con.execute('SELECT ids_privados_json FROM entrega')]
     assert any('12' in i for i in ids)
+
+
+def test_commits_soltos_depois_mergeados_nao_duplicam(con, repo, privado):
+    repo.git('checkout', '-q', '-b', 'feat')
+    repo.commit('feat: parte um', 'src/A.cs', quando=_dias(6))
+    repo.commit('feat: parte dois', 'src/B.cs', quando=_dias(5))
+    repo.git('checkout', '-q', 'main')
+    repo.git('merge', '-q', '--ff-only', 'feat')  # já na principal, ainda sem PR: viram entregas soltas
+    _entrada(privado, repo)
+    assert entregas.atualizar(con) == {'novas': 3, 'atualizadas': 0}  # 'inicio' + 2 soltas
+    repo.git('reset', '-q', '--hard', 'HEAD~2')
+    repo.git('merge', '--no-ff', '-m', 'Merged PR 7: Parte um e dois', 'feat', quando=_dias(1))
+    res = entregas.atualizar(con)
+    assert res['novas'] == 1
+    assert con.execute('SELECT COUNT(*) FROM entrega').fetchone()[0] == 2  # 'inicio' + o PR
+    assert con.execute("SELECT COUNT(*) FROM entrega WHERE fonte = 'merge-pr'").fetchone()[0] == 1
+    assert con.execute('SELECT COUNT(*) FROM entrega e WHERE NOT EXISTS '
+                       '(SELECT 1 FROM commit_ c WHERE c.entrega_id = e.id)').fetchone()[0] == 0
+    assert con.execute('SELECT commits FROM entrega WHERE fonte = ?', ('merge-pr',)).fetchone()[0] == 2
+
+
+def test_ramo_nao_integrado_nao_vira_entrega(repo):
+    repo.git('checkout', '-q', '-b', 'abandonado')
+    h = repo.commit('feat: meia obra', 'src/Meia.cs', quando=_dias(3))
+    repo.git('checkout', '-q', 'main')
+    res = entregas.detectar(repo.pasta, [EU], _desde())
+    assert h not in {c['hash'] for e in res for c in e['commits']}
+
+
+def test_repo_invalido_devolve_zeros_com_aviso(con, privado, tmp_path):
+    vazio = tmp_path / 'nao-git'
+    vazio.mkdir()
+    (privado / 'entrada.json').write_text(json.dumps({'repo': str(vazio), 'author': EU}), encoding='utf-8')
+    res = entregas.atualizar(con)
+    assert res['novas'] == 0 and res['atualizadas'] == 0 and res['aviso']
+    assert con.execute('SELECT COUNT(*) FROM entrega').fetchone()[0] == 0
+
+
+def test_ticket_nao_confunde_csharp_e_lock_nao_conta_termo(repo):
+    repo.commit('feat: usa C#5 e AB#42', 'package-lock.json', quando=_dias(2))
+    e = [x for x in entregas.detectar(repo.pasta, [EU], _desde()) if x['fonte'] == 'ticket']
+    assert len(e) == 1 and e[0]['ids_privados'] == ['42']
+    assert entregas.prismas_de({'commits': [{'mensagem': 'x', 'caminhos': ['node_modules/aggregate/a.js']}]},
+                               [{'nome': 'P', 'palavras': ['aggregate']}]) == {}

@@ -25,7 +25,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from luzia import arquivos, jogo  # noqa: E402
+from luzia import arquivos, jogo, trajetoria  # noqa: E402
 
 PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
@@ -50,7 +50,7 @@ def read_json(path: Path, default):
 
 
 def plano() -> dict:
-    return arquivos.ler_estado().get('plano', {})
+    return trajetoria.plano()
 
 
 def lacunas(plan: dict) -> dict[str, dict]:

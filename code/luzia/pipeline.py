@@ -33,12 +33,7 @@ def read_json(path: Path, default):
 
 def load_state() -> dict:
     """Estado vivo da carreira: o plano e o resto da última triagem moram no `perfil` do banco."""
-    arquivos.ler_estado()  # primeira vez: traz a foto do seminário para a pasta privada, antes de o banco migrar
-    with trajetoria.abrir() as con:
-        plano = trajetoria.perfil_ler(con, 'plano')
-        if plano is None:
-            return arquivos.ler_estado()
-        return {**(trajetoria.perfil_ler(con, 'estado_legado', {}) or {}), 'plano': plano}
+    return trajetoria.estado()
 
 
 def rotulos(state: dict) -> tuple[str, str]:
@@ -179,10 +174,8 @@ def _gravar_estado(state: dict) -> None:
         trajetoria.perfil_gravar(con, 'plano', plano)
         trajetoria.perfil_gravar(con, 'estado_legado', {k: v for k, v in state.items() if k != 'plano'})
         trajetoria.perfil_gravar(con, 'rotulos', dict(zip(('onde_esta', 'aonde_quer_chegar'), _rotulos_de(state))))
-        novos = trajetoria.sincronizar_prismas(con, plano.get('skills', []))
-    if novos:
-        with trajetoria.abrir() as con:
-            trajetoria.nova_versao(con, 'triagem', None)
+        if trajetoria.sincronizar_prismas(con, plano.get('skills', [])):
+            trajetoria.acrescentar_versao(con, 'triagem', None)
 
 
 def save_state(payload: dict, plan: dict, record: dict, hits: dict) -> None:

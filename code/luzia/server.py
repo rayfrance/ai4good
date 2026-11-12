@@ -203,14 +203,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post(self, path: str, dados: dict) -> None:
         if path == '/api/autoavaliacao':
-            try:
-                niveis = {str(k): max(0, min(5, int(v))) for k, v in dados.items()}
-            except (TypeError, ValueError):
+            if any(isinstance(v, bool) or not isinstance(v, int) for v in dados.values()):
                 return self._json({'erro': 'nível inválido'}, 400)
-            with trajetoria.abrir() as con:  # só o que mudou vira registro `declarado` no livro de níveis
-                atuais = {p['nome']: p['nivel'] for p in trajetoria.prismas(con)}
-                for nome, nivel in niveis.items():
-                    if nome in atuais and atuais[nome] != nivel:
+            niveis = {str(k): max(0, min(5, v)) for k, v in dados.items()}
+            with trajetoria.abrir() as con:
+                atuais = {p['nome']: p['nivel'] for p in trajetoria.prismas(con, incluir_arquivados=True)}
+                if any(nome not in atuais for nome in niveis):
+                    return self._json({'erro': 'prisma desconhecido'}, 400)
+                declarados = trajetoria.declarados(con)
+                for nome, nivel in niveis.items():  # confirmar um nível (mudado ou não) é declarar
+                    if atuais[nome] != nivel or nome not in declarados:
                         trajetoria.declarar_nivel(con, nome, nivel)
             return self._json({'ok': True})
         if path == '/api/modo':

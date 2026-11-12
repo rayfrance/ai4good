@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from luzia import arquivos, jogo  # noqa: E402
+from luzia import arquivos, jogo, trajetoria  # noqa: E402
 
 LARANJA, LILAS, APAGADO, FIM = '\033[38;5;208m', '\033[38;5;183m', '\033[2m', '\033[0m'
 
@@ -32,7 +32,7 @@ def linha(evento: dict) -> str:
     cwd = (evento.get('workspace') or {}).get('current_dir') or evento.get('cwd') or ''
     if not autorizado(cwd):
         return ''
-    plan = arquivos.ler_estado().get('plano', {})
+    plan = trajetoria.plano()
     if not plan:
         return f'{LARANJA}✦ Luzia{FIM} {APAGADO}rode /luzia:triage{FIM}'
     r = jogo.rota(plan)

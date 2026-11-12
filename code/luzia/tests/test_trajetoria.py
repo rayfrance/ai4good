@@ -105,3 +105,52 @@ def test_log_run_grava_chamada_modelo(privado):
     assert (r['rotulo'], r['modelo'], r['segundos'], r['tokens_in'], r['tokens_out']) == ('demo', 'm', 1.5, 10, 5)
     assert json.loads(r['registro_json'])['rotulo'] == 'demo'
     assert pipeline.RUNS.exists()
+
+
+def test_observer_e_statusline_veem_o_plano_atualizado(privado):
+    from luzia import observer, statusline
+    pipeline.update_state({'trechos': ['novo']}, {'quando': '2026-11-12T09:00:00'})
+    assert observer.plano()['trechos'] == ['novo']
+    assert statusline.trajetoria.plano()['trechos'] == ['novo']
+    assert not (privado / 'career_state.json').read_text(encoding='utf-8').count('novo')  # o arquivo já não é a fonte
+
+
+def _post(path, dados):
+    from luzia import server
+    h = server.Handler.__new__(server.Handler)
+    resp = []
+    h._json = lambda d, code=200: resp.append((code, d))
+    h._post(path, dados)
+    return resp[-1]
+
+
+def test_confirmar_nivel_sem_mudar_declara(privado):
+    with trajetoria.abrir() as con:
+        assert DDD not in trajetoria.declarados(con)
+    assert _post('/api/autoavaliacao', {DDD: 1})[0] == 200  # o nível sugerido (1), confirmado sem mudar
+    with trajetoria.abrir() as con:
+        assert trajetoria.declarados(con)[DDD] == 1
+        ult = con.execute('SELECT * FROM nivel_registro WHERE prisma = ? ORDER BY id DESC', (DDD,)).fetchone()
+        assert (ult['origem'], ult['de'], ult['para']) == ('declarado', 1, 1)
+        assert trajetoria.perfil_ler(con, 'autoavaliacao')[DDD] == 1
+        n = con.execute('SELECT COUNT(*) FROM nivel_registro').fetchone()[0]
+    _post('/api/autoavaliacao', {DDD: 1})  # confirmar de novo não acumula registros
+    with trajetoria.abrir() as con:
+        assert con.execute('SELECT COUNT(*) FROM nivel_registro').fetchone()[0] == n
+
+
+def test_autoavaliacao_rejeita_nome_e_nivel_invalidos(privado):
+    assert _post('/api/autoavaliacao', {'Inexistente': 2})[0] == 400
+    assert _post('/api/autoavaliacao', {DDD: 'dois'})[0] == 400
+    assert _post('/api/autoavaliacao', {DDD: 2, 'Inexistente': 2})[0] == 400
+    with trajetoria.abrir() as con:
+        assert {p['nome']: p['nivel'] for p in trajetoria.prismas(con)}[DDD] == 1  # nada foi gravado
+
+
+def test_triagem_nova_cria_prisma_e_versao_na_mesma_transacao(privado):
+    plan = dict(pipeline.load_state()['plano'])
+    plan['skills'] = plan['skills'] + [{'nome': 'Mensageria', 'luzia_sugere': 1, 'alvo': 3}]
+    pipeline.save_state({}, plan, {'quando': '2026-11-12T10:00:00'}, {})
+    with trajetoria.abrir() as con:
+        assert 'Mensageria' in [p['nome'] for p in trajetoria.prismas(con)]
+        assert [p['nome'] for p in trajetoria.versoes(con)[-1]['prismas']].count('Mensageria') == 1

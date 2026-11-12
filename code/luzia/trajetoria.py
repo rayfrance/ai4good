@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterator
 
-from . import banco
+from . import arquivos, banco
 
 
 def agora() -> str:
@@ -104,6 +104,23 @@ def declarar_nivel(con: sqlite3.Connection, nome: str, nivel: int) -> None:
         con.execute("INSERT INTO nivel_registro (prisma, de, para, quando, origem) VALUES (?, ?, ?, ?, 'declarado')",
                     (nome, atual['nivel'], nivel, quando))
         con.execute('UPDATE prisma SET nivel = ?, ultimo_nivel_em = ? WHERE nome = ?', (nivel, quando, nome))
+        auto = perfil_ler(con, 'autoavaliacao', {}) or {}
+        perfil_gravar(con, 'autoavaliacao', {**auto, nome: nivel})
+
+
+def estado() -> dict:
+    """Estado vivo da carreira (plano e resto da última triagem), do `perfil`; o arquivo só vale se o banco não tem plano."""
+    if not arquivos.ESTADO.exists():
+        arquivos.ler_estado()  # primeira vez: traz a foto do seminário para a pasta privada, antes de o banco migrar
+    with abrir() as con:
+        plano_db = perfil_ler(con, 'plano')
+        if plano_db is None:
+            return arquivos.ler_estado()
+        return {**(perfil_ler(con, 'estado_legado', {}) or {}), 'plano': plano_db}
+
+
+def plano() -> dict:
+    return estado().get('plano', {})
 
 
 def registrar_subida(con: sqlite3.Connection, nome: str, para: int, lm: int, luz_propria: int) -> None:
@@ -126,15 +143,19 @@ def historico_subidas(con: sqlite3.Connection) -> list[dict]:
 
 
 # ------------------------------------------------------------------ versões
+def acrescentar_versao(con: sqlite3.Connection, origem: str, pedido_id: int | None = None) -> int:
+    """Como `nova_versao`, dentro de uma transação já aberta (quem chama confirma ou desfaz)."""
+    foto = [{k: p[k] for k in ('nome', 'nivel', 'meta', 'estado', 'origem', 'palavras')} for p in prismas(con)]
+    numero = (con.execute('SELECT MAX(numero) FROM trajetoria_versao').fetchone()[0] or 0) + 1
+    con.execute('INSERT INTO trajetoria_versao (numero, criada_em, origem, pedido_id, foto_json) VALUES (?, ?, ?, ?, ?)',
+                (numero, agora(), origem, pedido_id, json.dumps({'prismas': foto}, ensure_ascii=False)))
+    return numero
+
+
 def nova_versao(con: sqlite3.Connection, origem: str, pedido_id: int | None = None) -> int:
     """Foto dos prismas ativos e metas, com o próximo número; devolve o número. Só acrescenta."""
     with banco.transacao(con):
-        foto = [{k: p[k] for k in ('nome', 'nivel', 'meta', 'estado', 'origem', 'palavras')} for p in prismas(con)]
-        numero = (con.execute('SELECT MAX(numero) FROM trajetoria_versao').fetchone()[0] or 0) + 1
-        con.execute('INSERT INTO trajetoria_versao (numero, criada_em, origem, pedido_id, foto_json) '
-                    'VALUES (?, ?, ?, ?, ?)',
-                    (numero, agora(), origem, pedido_id, json.dumps({'prismas': foto}, ensure_ascii=False)))
-    return numero
+        return acrescentar_versao(con, origem, pedido_id)
 
 
 def versoes(con: sqlite3.Connection) -> list[dict]:

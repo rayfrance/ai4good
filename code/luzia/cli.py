@@ -47,7 +47,7 @@ def recent_commits(cfg: dict, redactor: Redactor, limit: int = 15) -> list[dict]
 
 
 def skills_summary(plan: dict) -> list[dict]:
-    autoaval = pipeline.read_json(pipeline.AUTOAVAL, {})
+    autoaval = jogo.autoavaliacao()
     return [
         {'nome': s['nome'], 'nivel': autoaval.get(s['nome'], s.get('autoavaliacao') or s.get('luzia_sugere')),
          'alvo': s.get('alvo')}

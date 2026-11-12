@@ -3,8 +3,7 @@
 Regras em `docs/luzia-ux.md`. Tudo fica em `private/` (fora do git):
 - `feixes.json`: catálogo persistente de feixes, com estado e histórico;
 - `lumens.jsonl`: livro de lúmens (skill, lm, luz própria ou refletida, fonte);
-- `degraus.json`: base de níveis, data do último degrau por skill e histórico de subidas;
-- `autoavaliacao.json`: o nível atual de cada skill (declarado e confirmado pela pessoa);
+- níveis, base, data do último nível e subidas: banco (`trajetoria.py`: `prisma` e `nivel_registro`);
 - `cartoes.json`: cartões que o observador mostrou (cada um pode virar luz própria uma vez).
 """
 
@@ -15,7 +14,7 @@ import math
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import arquivos
+from . import arquivos, trajetoria
 
 PRIVATE = arquivos.PRIVATE
 FEIXES = PRIVATE / 'feixes.json'
@@ -55,21 +54,40 @@ def _assinatura(dados) -> str:
 
 # ------------------------------------------------------------------ níveis e skills
 def niveis(plan: dict) -> dict[str, dict]:
-    auto = _ler(AUTOAVAL, {})
+    """Prismas ativos da trajetória (os do plano e os incluídos por pedido), com nível e meta lidos do banco."""
+    with trajetoria.abrir() as con:
+        todos = {p['nome']: p for p in trajetoria.prismas(con, incluir_arquivados=True)}
+        declarados = trajetoria.declarados(con)
     out = {}
     for s in plan.get('skills', []):
         nome = s['nome']
-        nivel = auto.get(nome)
-        if nivel is None:
+        p = todos.get(nome)
+        if p is not None and p['estado'] == 'arquivado':
+            continue
+        if p is not None:
+            nivel, meta = p['nivel'], p['meta']
+        else:  # skill nova do plano que o banco ainda não conhece
             nivel = s.get('autoavaliacao') if s.get('autoavaliacao') is not None else s.get('luzia_sugere', 0)
-        out[nome] = {'nivel': int(nivel or 0), 'meta': int(s.get('alvo', 5)), 'sugere': s.get('luzia_sugere'),
-                     'declarado': nome in auto}
+            meta = s.get('alvo', 5)
+        out[nome] = {'nivel': int(nivel or 0), 'meta': int(meta), 'sugere': s.get('luzia_sugere'),
+                     'declarado': nome in declarados}
+    for nome, p in todos.items():
+        if nome not in out and p['estado'] == 'ativo':
+            out[nome] = {'nivel': p['nivel'], 'meta': p['meta'], 'sugere': None, 'declarado': nome in declarados}
     return out
+
+
+def autoavaliacao() -> dict[str, int]:
+    """Nível dos prismas que a pessoa declarou ou conquistou (o que antes ficava em autoavaliacao.json)."""
+    with trajetoria.abrir() as con:
+        return trajetoria.declarados(con)
 
 
 def skill_de(nome: str, plan: dict) -> str:
     """Casa o nome de skill de um feixe com a skill do plano (tolerante a variações)."""
     nomes = [s['nome'] for s in plan.get('skills', [])]
+    with trajetoria.abrir() as con:
+        nomes += [p['nome'] for p in trajetoria.prismas(con) if p['nome'] not in nomes]  # incluídos por pedido
     if nome in nomes:
         return nome
     base = (nome or '').lower()
@@ -289,20 +307,21 @@ def converter(skill: str, nota: int, ref: str = '') -> dict:
 
 # ------------------------------------------------------------------ degraus e rota
 def _degraus() -> dict:
-    return _ler(DEGRAUS, {'base': {}, 'desde': {}, 'historico': [], 'marcos_dossie': []})
+    """Base, data do último nível, subidas conquistadas e marcos do dossiê (lidos do banco, no formato antigo)."""
+    with trajetoria.abrir() as con:
+        ativos = trajetoria.prismas(con)
+        return {'base': {p['nome']: trajetoria.base_de(con, p) for p in ativos},
+                'desde': {p['nome']: trajetoria.desde(con, p['nome']) for p in ativos},
+                'historico': trajetoria.historico_subidas(con),
+                'marcos_dossie': trajetoria.perfil_ler(con, 'marcos_dossie', [])}
 
 
 def garantir_base(plan: dict) -> dict:
-    """A base da rota é o primeiro nível DECLARADO pela pessoa (nunca a sugestão da Luzia)."""
+    """A base da rota é o primeiro registro do livro de níveis; skill sem registro ainda parte do nível atual."""
     d = _degraus()
-    mudou = False
     for nome, v in niveis(plan).items():
-        if v['declarado'] and nome not in d['base']:
-            d['base'][nome] = v['nivel']
-            mudou = True
+        d['base'].setdefault(nome, v['nivel'])
         d['desde'].setdefault(nome, '')
-    if mudou or not DEGRAUS.exists():
-        _gravar(DEGRAUS, d)
     return d
 
 
@@ -341,7 +360,8 @@ def rota(plan: dict) -> dict:
     lm_total = sum(r['lm'] for r in livro())
     lm_propria = sum(r['lm'] for r in livro() if r['luz'] == 'propria')
     marcos = [math.ceil(total * k / 3) for k in (1, 2, 3)] if total else []
-    return {'degraus_total': total, 'degraus_feitos': feitos, 'marcos': marcos, 'skills': skills,
+    return {'niveis_total': total, 'niveis_feitos': feitos, 'degraus_total': total, 'degraus_feitos': feitos,
+            'marcos': marcos, 'skills': skills,
             'lm_total': lm_total, 'luz_propria': round(100 * lm_propria / lm_total) if lm_total else 0,
             'pct': round(100 * feitos / total) if total else 100}
 
@@ -357,20 +377,19 @@ def subir(skill: str, plan: dict) -> dict:
     p = progresso_skill(skill, d)
     if not p['pronto']:
         return {'erro': 'ainda não: falta ' + ', '.join(p['falta'])}
-    auto = _ler(AUTOAVAL, {})
-    d['base'].setdefault(skill, nv[skill]['nivel'])  # a base guarda o nível de antes da primeira subida
     novo = min(nv[skill]['meta'], nv[skill]['nivel'] + 1)
-    auto[skill] = novo
-    _gravar(AUTOAVAL, auto)
-    d['desde'][skill] = agora()
-    d['historico'].append({'quando': agora(), 'skill': skill, 'para': novo, 'lm': p['lm'], 'luz_propria': p['luz_propria']})
-    _gravar(DEGRAUS, d)
+    with trajetoria.abrir() as con:
+        if con.execute('SELECT 1 FROM prisma WHERE nome = ?', (skill,)).fetchone() is None:
+            return {'erro': 'skill não encontrada na sua trajetória'}
+        trajetoria.registrar_subida(con, skill, novo, p['lm'], p['luz_propria'])
     r = rota(plan)
     marco = None
+    marcos_feitos = list(d.get('marcos_dossie', []))
     for i, m in enumerate(r['marcos'], 1):
-        if r['degraus_feitos'] >= m and i not in d.get('marcos_dossie', []):
-            d.setdefault('marcos_dossie', []).append(i)
-            _gravar(DEGRAUS, d)
+        if r['niveis_feitos'] >= m and i not in marcos_feitos:
+            marcos_feitos.append(i)
+            with trajetoria.abrir() as con, trajetoria.banco.transacao(con):
+                trajetoria.perfil_gravar(con, 'marcos_dossie', marcos_feitos)
             marco = {'n': i, 'dossie': str(dossie(plan, f'marco {i} de 3'))}
     return {'skill': skill, 'para': novo, 'rota': r, 'marco': marco}
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from luzia import acoes, arquivos, jogo, modelo, pipeline, propriedade  # noqa: E402
+from luzia import acoes, arquivos, jogo, modelo, pipeline, propriedade, trajetoria  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PAINEL = HERE / 'painel'
@@ -54,7 +54,7 @@ def estado() -> dict:
     plan = state.get('plano', {})
     if not plan:
         return {'vazio': True}
-    autoaval = pipeline.read_json(pipeline.AUTOAVAL, {})
+    autoaval = jogo.autoavaliacao()
     rota_jogo = jogo.rota(plan)
     por_skill = {s['nome']: s for s in rota_jogo['skills']}
     d = jogo._degraus()
@@ -207,7 +207,11 @@ class Handler(BaseHTTPRequestHandler):
                 niveis = {str(k): max(0, min(5, int(v))) for k, v in dados.items()}
             except (TypeError, ValueError):
                 return self._json({'erro': 'nível inválido'}, 400)
-            arquivos.gravar_json(pipeline.AUTOAVAL, niveis)
+            with trajetoria.abrir() as con:  # só o que mudou vira registro `declarado` no livro de níveis
+                atuais = {p['nome']: p['nivel'] for p in trajetoria.prismas(con)}
+                for nome, nivel in niveis.items():
+                    if nome in atuais and atuais[nome] != nivel:
+                        trajetoria.declarar_nivel(con, nome, nivel)
             return self._json({'ok': True})
         if path == '/api/modo':
             modo = dados.get('modo')

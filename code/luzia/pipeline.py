@@ -15,7 +15,7 @@ try:
 except ImportError:
     psutil = None  # type: ignore[assignment]
 
-from . import arquivos, planner, triage
+from . import arquivos, banco, planner, trajetoria, triage
 from .privacy import Redactor
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,11 +32,25 @@ def read_json(path: Path, default):
 
 
 def load_state() -> dict:
-    return arquivos.ler_estado()
+    """Estado vivo da carreira: o plano e o resto da última triagem moram no `perfil` do banco."""
+    arquivos.ler_estado()  # primeira vez: traz a foto do seminário para a pasta privada, antes de o banco migrar
+    with trajetoria.abrir() as con:
+        plano = trajetoria.perfil_ler(con, 'plano')
+        if plano is None:
+            return arquivos.ler_estado()
+        return {**(trajetoria.perfil_ler(con, 'estado_legado', {}) or {}), 'plano': plano}
 
 
 def rotulos(state: dict) -> tuple[str, str]:
-    """Nomes curtos de onde a pessoa está e aonde quer chegar (ex.: 'Júnior 3' → 'Plena')."""
+    """Nomes curtos de onde a pessoa está e aonde quer chegar (ex.: 'Júnior 3' → 'Plena'), do perfil."""
+    with trajetoria.abrir() as con:
+        guardados = trajetoria.perfil_ler(con, 'rotulos')
+    if isinstance(guardados, dict) and guardados.get('onde_esta') and guardados.get('aonde_quer_chegar'):
+        return guardados['onde_esta'], guardados['aonde_quer_chegar']
+    return _rotulos_de(state)
+
+
+def _rotulos_de(state: dict) -> tuple[str, str]:
     import re
     plan = state.get('plano', {})
     tri = (state.get('payload_anonimizado') or {}).get('triagem', {})
@@ -121,7 +135,7 @@ def build_payload(inputs: dict, redactor: Redactor) -> dict:
     ai_hist = inputs.get('ai_history') or {}
     ai_hist = json.loads(r(json.dumps(ai_hist, ensure_ascii=False))) if ai_hist else {}
 
-    autoaval = read_json(AUTOAVAL, {}) if inputs.get('usar_autoavaliacao', True) else {}
+    autoaval = trajetoria_autoavaliacao() if inputs.get('usar_autoavaliacao', True) else {}
 
     return {
         'triagem': {
@@ -140,14 +154,38 @@ def build_payload(inputs: dict, redactor: Redactor) -> dict:
     }
 
 
+def trajetoria_autoavaliacao() -> dict:
+    with trajetoria.abrir() as con:
+        return trajetoria.declarados(con)
+
+
 def log_run(record: dict) -> None:
+    """Custo de uma chamada: vai para `chamada_modelo` e segue em `outputs/sem2/runs.jsonl` (sem dado pessoal)."""
     RUNS.parent.mkdir(parents=True, exist_ok=True)
     with RUNS.open('a', encoding='utf-8') as f:
         f.write(json.dumps(record, ensure_ascii=False) + '\n')
+    with trajetoria.abrir() as con, banco.transacao(con):
+        con.execute('INSERT INTO chamada_modelo (quando, rotulo, modelo, segundos, tokens_in, tokens_out, registro_json) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    (record.get('quando') or datetime.now().isoformat(timespec='seconds'), record.get('rotulo'),
+                     record.get('modelo'), record.get('tempo_modelo_s'), record.get('tokens_entrada'),
+                     record.get('tokens_saida'), json.dumps(record, ensure_ascii=False)))
+
+
+def _gravar_estado(state: dict) -> None:
+    """Plano e demais campos do estado no `perfil`, mais rótulos; skills novas viram prismas (as conhecidas ficam como estão)."""
+    plano = state.get('plano') or {}
+    with trajetoria.abrir() as con, banco.transacao(con):
+        trajetoria.perfil_gravar(con, 'plano', plano)
+        trajetoria.perfil_gravar(con, 'estado_legado', {k: v for k, v in state.items() if k != 'plano'})
+        trajetoria.perfil_gravar(con, 'rotulos', dict(zip(('onde_esta', 'aonde_quer_chegar'), _rotulos_de(state))))
+        novos = trajetoria.sincronizar_prismas(con, plano.get('skills', []))
+    if novos:
+        with trajetoria.abrir() as con:
+            trajetoria.nova_versao(con, 'triagem', None)
 
 
 def save_state(payload: dict, plan: dict, record: dict, hits: dict) -> None:
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     anterior = load_state().get('plano', {})
     for chave in ('tarefas_recentes', 'oportunidades_tarefa_atual', '_commits_dia'):
         if chave not in plan and chave in anterior:
@@ -166,7 +204,7 @@ def save_state(payload: dict, plan: dict, record: dict, hits: dict) -> None:
         'plano': plan,
         'payload_anonimizado': payload,
     }
-    arquivos.gravar_json(STATE_FILE, state)
+    _gravar_estado(state)
 
 
 def update_state(fields: dict, record: dict) -> None:
@@ -177,7 +215,9 @@ def update_state(fields: dict, record: dict) -> None:
     state.setdefault('plano', {}).update(fields)
     state['atualizado_em'] = record['quando']
     state['custo_ultima_execucao'] = record
-    arquivos.gravar_json(STATE_FILE, state)
+    with trajetoria.abrir() as con, banco.transacao(con):
+        trajetoria.perfil_gravar(con, 'plano', state['plano'])
+        trajetoria.perfil_gravar(con, 'estado_legado', {k: v for k, v in state.items() if k != 'plano'})
 
 
 def run_plan(

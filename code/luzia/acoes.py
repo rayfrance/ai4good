@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -36,9 +37,25 @@ def _lista(texto) -> list:
     return valor if isinstance(valor, list) else []
 
 
-def fila() -> list[dict]:
+def _abrir(espera_ms: int | None):
+    """Conexão normal, ou com espera curta (hook: nunca fica preso mais que o orçamento dele)."""
+    if espera_ms is None:
+        return trajetoria.abrir()
+    return _curta(espera_ms)
+
+
+@contextmanager
+def _curta(espera_ms: int):
+    con = banco.conectar(espera_ms=espera_ms)
+    try:
+        yield con
+    finally:
+        con.close()
+
+
+def fila(espera_ms: int | None = None) -> list[dict]:
     """Ações que a pessoa mandou do painel para o agente e ainda não começou."""
-    with trajetoria.abrir() as con:
+    with _abrir(espera_ms) as con:
         return [{'id': r['avanco_id'], 'titulo': r['titulo'], 'quando': r['quando'], 'oferecida_em': _lista(r['oferecida_json'])}
                 for r in con.execute('SELECT * FROM fila ORDER BY quando, rowid')]
 
@@ -55,8 +72,8 @@ def desenfileirar(acao_id: str) -> None:
         con.execute('DELETE FROM fila WHERE avanco_id = ?', (acao_id,))
 
 
-def marcar_oferecida(acao_id: str, sessao: str) -> None:
-    with trajetoria.abrir() as con, banco.transacao(con):
+def marcar_oferecida(acao_id: str, sessao: str, espera_ms: int | None = None) -> None:
+    with _abrir(espera_ms) as con, banco.transacao(con):
         r = con.execute('SELECT oferecida_json FROM fila WHERE avanco_id = ?', (acao_id,)).fetchone()
         if r is None:
             return

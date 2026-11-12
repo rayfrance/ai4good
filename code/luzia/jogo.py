@@ -239,12 +239,19 @@ def _inserir_avanco(con: sqlite3.Connection, f: dict) -> None:
          int(f.get('revisitas') or 0), 1 if f.get('revisita_aberta') else 0, f.get('criado_em') or agora()))
 
 
-def _atualizar_conteudo(con: sqlite3.Connection, f: dict) -> None:
+def _atualizar_conteudo(con: sqlite3.Connection, f: dict, antes: dict) -> None:
+    """Grava só o que o sync mudou: o conteúdo é relido dentro da transação (um `resumo` gravado agora por
+    `conquistar` não se perde) e recebe apenas as chaves que diferem do que o sync leu."""
     dur = f.get('duracao_min')
+    atual = json.loads(con.execute('SELECT conteudo_json FROM avanco WHERE id = ?', (f['id'],)).fetchone()[0] or '{}')
+    novo = _conteudo(f)
+    atual.update({k: v for k, v in novo.items() if antes.get(k, object()) != v})
+    for k in set(antes) - set(novo):
+        atual.pop(k, None)
     con.execute(
         'UPDATE avanco SET prisma = ?, tipo = ?, titulo = ?, conteudo_json = ?, duracao_min = ?, valor_lm = ?,'
         ' conta_json = ?, origem = ?, dimensao = ? WHERE id = ?',
-        (f.get('skill_plano'), f.get('tipo'), f.get('titulo'), _json(_conteudo(f)),
+        (f.get('skill_plano'), f.get('tipo'), f.get('titulo'), _json(atual),
          dur if isinstance(dur, int) and not isinstance(dur, bool) else None, f.get('valor_lm'),
          _json(f['conta']) if f.get('conta') is not None else None, _origem_coluna(f.get('origem')),
          f.get('dimensao'), f['id']))
@@ -318,7 +325,7 @@ def sincronizar(plan: dict) -> dict[str, dict]:
                 for fid in novos:
                     _inserir_avanco(con, cat[fid])
                 for fid in mudaram:
-                    _atualizar_conteudo(con, cat[fid])
+                    _atualizar_conteudo(con, cat[fid], antes[fid][3])
     return cat
 
 

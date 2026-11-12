@@ -195,3 +195,56 @@ def test_evento_anterior_ao_catalogo_vira_em_andamento(plan):
     base = acoes.derivadas(plan)[0]['id']
     acoes.registrar_evento(base, 'iniciada', skill='x')
     assert jogo.sincronizar(plan)[base]['estado'] == 'em_andamento'
+
+
+# ------------------------------------------------------------------ hook: fila no banco
+def _prompt_com_conceito(plan, privado):
+    from luzia import observer
+    cfg = json.loads((privado / 'observer.json').read_text(encoding='utf-8'))
+    _, info = next(iter(observer.lacunas(plan).items()))
+    return {'session_id': 's-fila', 'prompt': ' '.join(info['palavras'][:3]), 'cwd': cfg['autorizados'][0]}, cfg
+
+
+def test_fila_que_falha_nao_engole_a_luz_propria(plan, privado, monkeypatch, capsys):
+    from luzia import observer
+    evento, cfg = _prompt_com_conceito(plan, privado)
+
+    def quebra(*a, **k):
+        raise RuntimeError('banco travado')
+    monkeypatch.setattr(acoes, 'fila', quebra)
+    observer.ao_enviar_prompt(evento, cfg)
+    saida = json.loads(capsys.readouterr().out)['hookSpecificOutput']['additionalContext']
+    assert 'luz própria' in saida and 'Luzia · fila' not in saida
+    assert 'RuntimeError' in (privado / 'erros.log').read_text(encoding='utf-8')
+
+
+def test_trava_do_banco_nao_prende_o_hook(plan, privado, capsys):
+    import time
+    from luzia import observer
+    evento, cfg = _prompt_com_conceito(plan, privado)
+    acoes.enfileirar('ab12', 'Um feixe')
+    segurando = banco.conectar()
+    segurando.execute('BEGIN IMMEDIATE')  # outra escrita em andamento
+    try:
+        t0 = time.monotonic()
+        observer.ao_enviar_prompt(evento, cfg)
+        gasto = time.monotonic() - t0
+    finally:
+        segurando.rollback()
+        segurando.close()
+    assert gasto < 4  # a espera do hook é curta (1,5 s por escrita), não os 5 s do padrão
+    assert 'Luzia · fila' in json.loads(capsys.readouterr().out)['hookSpecificOutput']['additionalContext']
+
+
+def test_sync_nao_apaga_resumo_gravado_no_meio(plan, ids, monkeypatch):
+    f = ids[0]
+    _sql('UPDATE prisma SET meta = meta + 1 WHERE nome = ?', DDD)
+    real = jogo._atualizar_conteudo
+
+    def com_concorrente(con, feixe, antes):  # outra conexão grava o resumo entre a leitura e a escrita do sync
+        con.execute("UPDATE avanco SET conteudo_json = json_set(conteudo_json, '$.resumo', 'gravado agora') WHERE id = ?", (f,))
+        return real(con, feixe, antes)
+    monkeypatch.setattr(jogo, '_atualizar_conteudo', com_concorrente)
+    jogo.sincronizar(plan)
+    monkeypatch.undo()
+    assert jogo.sincronizar(plan)[f]['resumo'] == 'gravado agora'

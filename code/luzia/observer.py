@@ -25,7 +25,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from luzia import acoes, arquivos, jogo, trajetoria  # noqa: E402
+from luzia import acoes, arquivos, banco, jogo, trajetoria  # noqa: E402
 
 PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
@@ -118,11 +118,15 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
             if lm and modo == 'ativo':
                 partes.append(f'[Luzia · luz própria] A pessoa DIRIGIU "{skill}" neste pedido (+{lm} lm de luz própria). '
                               f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · {skill}: você dirigiu isto, +{lm} lm de luz própria."')
-    pend = [f for f in acoes.fila() if sid not in f.get('oferecida_em', [])]
+    try:  # espera curta: o hook não pode travar a sessão; sem a fila, o resto do aviso sai igual
+        pend = [f for f in acoes.fila(banco.ESPERA_CURTA_MS) if sid not in f.get('oferecida_em', [])]
+    except Exception as e:
+        arquivos.registrar_erro('observer fila', e)
+        pend = []
     if pend:
         item = pend[0]
         try:
-            acoes.marcar_oferecida(item['id'], sid)
+            acoes.marcar_oferecida(item['id'], sid, banco.ESPERA_CURTA_MS)
         except Exception as e:  # o aviso sai mesmo se o banco estiver ocupado; o erro fica registrado
             arquivos.registrar_erro('observer fila', e)
         partes.append(
@@ -191,7 +195,11 @@ def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
         return
     andamento = jogo.em_andamento()
     prontas = [s['nome'].split('(')[0].strip() for s in jogo.rota(plan)['skills'] if s['pronto'] and not s['na_meta']]
-    fila = acoes.fila()
+    try:
+        fila = acoes.fila(banco.ESPERA_CURTA_MS)
+    except Exception as e:
+        arquivos.registrar_erro('observer fila', e)
+        fila = []
     partes = []
     if prontas:
         partes.append(f"{', '.join(prontas)} pronta para subir de degrau")

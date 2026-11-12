@@ -6,6 +6,7 @@ uma única vez, e só esvazia o arquivo depois do COMMIT. Tudo roda na fixture `
 
 import json
 import multiprocessing
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -248,4 +249,56 @@ def test_dados_invalidos_levantam(privado, operacao, dados):
     banco.conectar().close()
     with pytest.raises(ValueError):
         banco.gravar_ou_pendurar(operacao, dados)
+    assert _linhas_no_disco(privado) == []
+
+
+APPENDS_POR_PROCESSO = 500
+
+
+def _pendurar_muitos(arquivo: str, quem: int, largada) -> None:
+    """Roda num processo filho (spawn): acrescenta APPENDS_POR_PROCESSO linhas no mesmo arquivo, sem pausa."""
+    largada.wait(timeout=60)
+    for i in range(APPENDS_POR_PROCESSO):
+        banco._pendurar(Path(arquivo), 'lumen', {**LUMEN, 'ref': f'{quem}-{i}'}, '2026-11-12T10:00:00')
+
+
+def test_acrescimos_simultaneos_nao_se_sobrepoem(privado):
+    """Quatro processos acrescentando no mesmo pendentes.jsonl: toda linha inteira, nenhuma some (sem depender de tempo)."""
+    arquivo = privado / banco.PENDENTES
+    ctx = multiprocessing.get_context('spawn')
+    largada = ctx.Event()
+    procs = [ctx.Process(target=_pendurar_muitos, args=(str(arquivo), quem, largada)) for quem in range(4)]
+    for p in procs:
+        p.start()
+    largada.set()
+    for p in procs:
+        p.join(timeout=120)
+    vivos = [p for p in procs if p.is_alive()]
+    for p in vivos:
+        p.terminate()
+    assert not vivos and [p.exitcode for p in procs] == [0] * len(procs)
+    linhas = [l for l in arquivo.read_text(encoding='utf-8').split('\n') if l]
+    refs = [json.loads(l)['dados']['ref'] for l in linhas]  # toda linha precisa ser JSON inteiro
+    assert sorted(refs) == sorted(f'{q}-{i}' for q in range(4) for i in range(APPENDS_POR_PROCESSO))
+
+
+def test_trava_presa_vai_para_arquivo_proprio(privado, monkeypatch):
+    """Se a trava do acréscimo não sai no prazo, o evento vai para um arquivo próprio que a absorção aplica."""
+    banco.conectar().close()
+    arquivo = privado / banco.PENDENTES
+    monkeypatch.setattr(banco, 'ESPERA_PENDURAR_S', 0.05)
+    fd = os.open(arquivo, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_BINARY', 0))
+    try:
+        assert banco._travar(fd, time.monotonic() + 1)  # outro "processo" segurando a trava
+        banco._pendurar(arquivo, 'lumen', dict(LUMEN), '2026-11-12T10:00:00')
+        banco._destravar(fd)
+    finally:
+        os.close(fd)
+    assert arquivo.read_bytes() == b''
+    proprios = list(privado.glob('pendentes-*.absorvendo'))
+    assert len(proprios) == 1 and [l['dados'] for l in _linhas_no_disco(privado)] == [LUMEN]
+    con = banco.conectar()
+    with banco.transacao(con):
+        pass
+    assert len(_lumens(con)) == 1
     assert _linhas_no_disco(privado) == []

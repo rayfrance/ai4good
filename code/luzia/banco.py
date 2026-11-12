@@ -26,12 +26,19 @@ from typing import Iterator
 
 from . import arquivos
 
+if os.name == 'nt':
+    import msvcrt
+else:
+    import fcntl
+
 ESQUEMA_VERSAO = 1
 ESPERA_MS = 5000
 ESPERA_CURTA_MS = 1500  # caminho quente do hook: abrir e gravar cabem no tempo dele
 PENDENTES = 'pendentes.jsonl'
 RESERVA = 'pendentes-{ns:020d}-{pid}.absorvendo'  # arquivo reservado por uma absorção (o nome ordena pelo tempo)
 MARCA = 'pendentes:'  # meta('pendentes:<reserva>'): aquela reserva já foi aplicada num COMMIT
+ESPERA_PENDURAR_S = 0.3  # trava do acréscimo (segurada por microssegundos); 1,5 s do banco + isto cabe em ~2 s
+_BYTE_DA_TRAVA = 1 << 40  # byte muito além do fim do arquivo: travá-lo serializa os acréscimos sem bloquear leitura
 # Ao lado do banco: a migração falhou com este código (sobrevive ao rollback; apagar o arquivo libera nova tentativa).
 MIGRACAO_FALHOU = 'migracao-falhou.json'
 
@@ -342,23 +349,95 @@ def _inserir(con: sqlite3.Connection, operacao: str, dados: dict, quando: str) -
                 [linha[c] for c in colunas])
 
 
+def _travar(fd: int, prazo: float) -> bool:
+    """Trava exclusiva de quem acrescenta em `pendentes.jsonl`, tentando até `prazo`; False se não saiu a tempo.
+
+    No Windows o modo de acréscimo do C busca o fim e depois escreve, em dois passos: dois hooks juntos acham o
+    mesmo fim e o segundo sobrescreve o primeiro (o evento some). Travar um byte muito além do fim serializa só os
+    acréscimos, sem bloquear leitura; a reserva por renomeação continua falhando enquanto o arquivo estiver aberto.
+    """
+    while True:
+        try:
+            if os.name == 'nt':
+                os.lseek(fd, _BYTE_DA_TRAVA, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            if time.monotonic() >= prazo:
+                return False
+            time.sleep(0.002)
+
+
+def _destravar(fd: int) -> None:
+    try:
+        if os.name == 'nt':
+            os.lseek(fd, _BYTE_DA_TRAVA, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass  # fechar o arquivo solta a trava de qualquer jeito
+
+
+def _acrescentar(arquivo: Path, dados: bytes, prazo: float) -> bool:
+    """Acrescenta `dados` inteiro com a trava na mão; False se a trava não saiu até `prazo` (nada foi escrito)."""
+    fd = os.open(arquivo, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, 'O_BINARY', 0), 0o600)
+    try:
+        if not _travar(fd, prazo):
+            return False
+        try:
+            resto = memoryview(dados)
+            while resto:  # com O_APPEND cada write vai para o fim atual, já protegido pela trava
+                resto = resto[os.write(fd, resto):]
+        finally:
+            _destravar(fd)
+        return True
+    finally:
+        os.close(fd)
+
+
+def _arquivo_proprio(pasta: Path, dados: bytes) -> None:
+    """Último recurso: o evento num arquivo só dele, já no formato de reserva (a próxima absorção o aplica).
+
+    Escreve num `.tmp` e renomeia, então a absorção só enxerga o arquivo completo.
+    """
+    nome = RESERVA.format(ns=time.time_ns(), pid=os.getpid())
+    tmp = pasta / (nome + '.tmp')
+    tmp.write_bytes(dados)
+    os.replace(tmp, pasta / nome)
+
+
 def _pendurar(arquivo: Path, operacao: str, dados: dict, quando: str) -> None:
-    """Acrescenta uma linha `{"operacao", "dados", "quando"}`; nunca levanta (se nem isso der, fica no erros.log)."""
-    linha = json.dumps({'operacao': operacao, 'dados': dados, 'quando': quando}, ensure_ascii=False) + '\n'
-    erro: OSError | None = None
-    for _ in range(5):
+    """Acrescenta uma linha `{"operacao", "dados", "quando"}`; nunca levanta (se nem isso der, fica no erros.log).
+
+    O acréscimo é atômico entre processos (`_travar`). Se a trava ou o arquivo não saírem em ESPERA_PENDURAR_S, o
+    evento vai para um arquivo próprio em vez de se perder.
+    """
+    texto = json.dumps({'operacao': operacao, 'dados': dados, 'quando': quando}, ensure_ascii=False) + '\n'
+    linha = texto.encode('utf-8')
+    prazo = time.monotonic() + ESPERA_PENDURAR_S
+    erro: OSError | str = 'trava_ocupada'
+    while True:
         try:
             arquivo.parent.mkdir(parents=True, exist_ok=True)
-            with arquivo.open('ab') as f:
-                f.write(linha.encode('utf-8'))
-            return
+            if _acrescentar(arquivo, linha, prazo):
+                return
+            break
         except PermissionError as e:  # Windows: uma absorção renomeando o arquivo neste instante
             erro = e
-            time.sleep(0.02)
+            if time.monotonic() >= prazo:
+                break
+            time.sleep(0.005)
         except OSError as e:
             erro = e
             break
-    arquivos.registrar_erro('banco.pendurar', erro or 'falhou')
+    arquivos.registrar_erro('banco.pendurar', erro)
+    try:
+        _arquivo_proprio(arquivo.parent, linha)
+    except OSError as e:
+        arquivos.registrar_erro('banco.pendurar', e)
 
 
 def _pasta_do_banco(con: sqlite3.Connection) -> Path | None:

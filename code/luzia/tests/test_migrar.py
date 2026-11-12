@@ -112,8 +112,9 @@ def test_rollback(antigos, monkeypatch):
         raise RuntimeError('falha simulada no meio da migração')
 
     monkeypatch.setattr(migrar, '_lampejos', quebra)  # depois de perfil, prismas, avanços, lúmens e níveis
-    with pytest.raises(RuntimeError, match='falha simulada'):
+    with pytest.raises(RuntimeError, match='migração bloqueada') as erro:
         banco.conectar()
+    assert 'falha simulada' in str(erro.value.__cause__)
     cru = sqlite3.connect(antigos / 'luzia.db')
     tabelas = {r[0] for r in cru.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     for t in set(MIGRADAS) & tabelas:
@@ -127,10 +128,129 @@ def test_rollback(antigos, monkeypatch):
     assert sorted(p.name for p in copia.iterdir()) == sorted(ARQUIVOS)  # a cópia sobrevive ao rollback
 
     monkeypatch.undo()
-    con = banco.conectar()  # a próxima abertura tenta de novo e migra tudo
+    (antigos / banco.MIGRACAO_FALHOU).unlink()  # corrigido: apagar a marca libera a nova tentativa
+    con = banco.conectar()  # tenta de novo e migra tudo
     assert migrar.totais_banco(con) == migrar.totais_json(antigos)
     con.close()
     assert sorted(p.name for p in copia.iterdir()) == sorted(ARQUIVOS)  # sem cópias repetidas na nova tentativa
+
+
+def _avisos(con) -> list[str]:
+    return json.loads(con.execute("SELECT valor FROM meta WHERE chave = 'migracao'").fetchone()[0])['avisos']
+
+
+def _reescrever(pasta: Path, nome: str, mudar) -> None:
+    dados = json.loads((pasta / nome).read_text(encoding='utf-8'))
+    (pasta / nome).write_text(json.dumps(mudar(dados) or dados, ensure_ascii=False), encoding='utf-8')
+
+
+def _acrescentar(pasta: Path, nome: str, rec: dict) -> None:
+    with (pasta / nome).open('a', encoding='utf-8') as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+
+
+def test_dados_fora_do_formato_nao_derrubam(antigos):
+    """Cada gatilho da revisão: o registro ou valor ruim é pulado/convertido com aviso e o resto migra."""
+    # nível declarado que não é número (int('dois')) e skill sem 'nome' (KeyError)
+    _reescrever(antigos, 'autoavaliacao.json', lambda a: {**a, DDD: 'dois'})
+
+    def plano(st):
+        skills = st['plano']['skills']
+        skills[2]['palavras_chave'] = 'useState'  # texto em vez de lista (str + list)
+        skills.append({'alvo': 4, 'luzia_sugere': 1})
+    _reescrever(antigos, 'career_state.json', plano)
+
+    def feixes(cat):  # lista e objeto onde a coluna espera um valor simples (ProgrammingError do sqlite)
+        cat['dbe9']['titulo'] = {'texto': 'Escrever um teste'}
+        cat['dbe9']['dimensao'] = ['p3']
+        cat['4aad']['historico'] = {'quando': '2026-11-03T08:00:00'}
+    _reescrever(antigos, 'feixes.json', feixes)
+    _reescrever(antigos, 'cartoes.json', lambda c: c.append({'skill': DDD, 'sessao': {'id': 1}, 'quando': '2026-11-09'}))
+    _reescrever(antigos, 'fila.json', lambda f: f.append({'id': {'x': 1}, 'quando': '2026-11-09'}))
+    _reescrever(antigos, 'degraus.json', lambda g: g['historico'].append({'skill': ['DDD'], 'para': 3}))
+    _acrescentar(antigos, 'lumens.jsonl', {'quando': '2026-11-09T10:00:00', 'skill': [DDD], 'lm': 5, 'luz': 'propria',
+                                           'fonte': {'tipo': 'feixe'}})
+    _acrescentar(antigos, 'sessao.jsonl', {'quando': '2026-11-09T10:00:00', 'sessao': 'sessao04', 'modo': ['ativo']})
+    _acrescentar(antigos, 'evidencias.jsonl', {'quando': '2026-11-09T10:00:00', 'id': ['3fb7'], 'evento': 'concluida'})
+
+    con = banco.conectar()  # não levanta
+    assert con.execute("SELECT valor FROM meta WHERE chave = 'migrado_em'").fetchone()
+    assert not (antigos / banco.MIGRACAO_FALHOU).exists()
+    totais = migrar.totais_banco(con)
+    assert totais == migrar.totais_json(antigos)
+    assert totais['lumens_total'] == 206 and totais['niveis'][DDD] == 1  # 'dois' ignorado: vale o do plano
+    assert {r[0] for r in con.execute('SELECT nome FROM prisma')} == {DDD, TST, FRONT}
+    palavras = json.loads(con.execute('SELECT palavras_json FROM prisma WHERE nome = ?', (FRONT,)).fetchone()[0])
+    assert palavras[0] == 'useState'
+    feixe = con.execute("SELECT titulo, dimensao, conteudo_json FROM avanco WHERE id = 'dbe9'").fetchone()
+    assert feixe['titulo'] is None and feixe['dimensao'] is None
+    assert json.loads(feixe['conteudo_json'])['_fora_do_formato'] == {'titulo': {'texto': 'Escrever um teste'},
+                                                                      'dimensao': ['p3']}
+    assert con.execute("SELECT COUNT(*) FROM avanco_evento WHERE avanco_id = '4aad'").fetchone()[0] == 0
+    assert con.execute("SELECT prisma, fonte FROM lumen WHERE lm = 5").fetchone()[:] == ('', '')
+    assert con.execute("SELECT sessao FROM lampejo WHERE quando = '2026-11-09'").fetchone()[0] is None
+    assert con.execute('SELECT COUNT(*) FROM fila').fetchone()[0] == 1
+    assert con.execute("SELECT modo FROM sessao_evento WHERE sessao = 'sessao04'").fetchone()[0] is None
+    avisos = _avisos(con)
+    for trecho in ('autoavaliacao.json', 'sem nome', 'avanco: dimensao, titulo', 'histórico',
+                   'lampejo: sessao', 'fila.json', 'subida sem skill', 'lumen: fonte, prisma', 'sessao_evento: modo',
+                   'evidencias.jsonl'):
+        assert any(trecho in a for a in avisos), (trecho, avisos)
+    assert 'dois' not in json.dumps(avisos) and 'Escrever um teste' not in json.dumps(avisos)  # só campo e tipo
+    con.close()
+
+
+def test_falha_inesperada_bloqueia_sem_repetir(antigos, monkeypatch):
+    """Erro inesperado: marca a falha, não tenta de novo a cada abertura e não multiplica o backup."""
+    chamadas = []
+
+    def quebra(*_, **__):
+        chamadas.append(1)
+        raise TypeError('erro inesperado')
+
+    monkeypatch.setattr(migrar, '_perfil', quebra)
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match=r'migração bloqueada.*erros\.log'):
+            banco.conectar()
+    assert len(chamadas) == 1  # só a primeira abertura tentou
+    marca = json.loads((antigos / banco.MIGRACAO_FALHOU).read_text(encoding='utf-8'))
+    assert marca['versao'] == migrar.versao() and marca['erro'] == 'TypeError'
+    assert marca['onde'].startswith('migrar.py:') and set(marca) == {'versao', 'quando', 'erro', 'onde'}
+    log = (antigos / 'erros.log').read_text(encoding='utf-8')
+    assert 'banco.garantir migração (migrar.py:' in log and 'erro inesperado' not in log  # tipo e lugar, sem dado
+    copia = antigos / f"migracao-{datetime.now():%Y%m%d}"
+    assert sorted(p.name for p in copia.iterdir()) == sorted(ARQUIVOS)
+
+    monkeypatch.setattr(migrar, 'versao', lambda: 'codigo-novo')  # o código da migração mudou: tenta de novo
+    with pytest.raises(RuntimeError, match='migração bloqueada'):
+        banco.conectar()
+    assert len(chamadas) == 2
+    assert json.loads((antigos / banco.MIGRACAO_FALHOU).read_text(encoding='utf-8'))['versao'] == 'codigo-novo'
+    (antigos / banco.MIGRACAO_FALHOU).unlink()  # apagar a marca também libera
+    with pytest.raises(RuntimeError, match='migração bloqueada'):
+        banco.conectar()
+    assert len(chamadas) == 3
+    assert sorted(p.name for p in copia.iterdir()) == sorted(ARQUIVOS)  # originais iguais: nenhuma cópia nova
+    assert sorted(p.name for p in antigos.glob('migracao-*') if p.is_dir()) == [copia.name]  # uma pasta por dia
+
+    monkeypatch.undo()
+    con = banco.conectar()  # a marca é de outro código: tenta, migra e apaga a marca
+    assert migrar.totais_banco(con) == migrar.totais_json(antigos)
+    assert not (antigos / banco.MIGRACAO_FALHOU).exists()
+    con.close()
+
+
+def test_trava_nao_bloqueia_a_migracao(antigos, monkeypatch):
+    """Trava ou disco (`OperationalError`) não é defeito do código: nada de marca, a próxima abertura tenta."""
+    def trava(*_, **__):
+        raise sqlite3.OperationalError('database is locked')
+
+    monkeypatch.setattr(migrar, '_perfil', trava)
+    with pytest.raises(sqlite3.OperationalError):
+        banco.conectar()
+    assert not (antigos / banco.MIGRACAO_FALHOU).exists()
+    monkeypatch.undo()
+    banco.conectar().close()
 
 
 def test_linha_cortada_no_meio_de_um_acento(antigos):

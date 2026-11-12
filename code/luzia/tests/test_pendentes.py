@@ -148,11 +148,15 @@ def test_migracao_que_falha_vai_para_pendentes(privado, monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(migrar, 'migrar', quebrar)
         assert banco.gravar_ou_pendurar('lumen', dict(LUMEN)) is False
-    assert [l['dados'] for l in _linhas_no_disco(privado)] == [LUMEN]
+    # A migração ficou bloqueada para este código: o hook continua pendurando, sem levantar.
+    assert (privado / banco.MIGRACAO_FALHOU).exists()
+    assert banco.gravar_ou_pendurar('lumen', {**LUMEN, 'ref': 'sessao-2'}) is False
+    assert [l['dados']['ref'] for l in _linhas_no_disco(privado)] == ['sessao-1', 'sessao-2']
+    (privado / banco.MIGRACAO_FALHOU).unlink()  # corrigido: apagar a marca libera a nova tentativa
     con = banco.conectar()
     with banco.transacao(con):
         pass
-    assert len(_lumens(con)) == 1
+    assert len(_lumens(con)) == 2
     assert _linhas_no_disco(privado) == []
 
 

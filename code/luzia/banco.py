@@ -18,6 +18,7 @@ import json
 import os
 import sqlite3
 import time
+import traceback
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,8 @@ ESPERA_CURTA_MS = 1500  # caminho quente do hook: abrir e gravar cabem no tempo 
 PENDENTES = 'pendentes.jsonl'
 RESERVA = 'pendentes-{ns:020d}-{pid}.absorvendo'  # arquivo reservado por uma absorção (o nome ordena pelo tempo)
 MARCA = 'pendentes:'  # meta('pendentes:<reserva>'): aquela reserva já foi aplicada num COMMIT
+# Ao lado do banco: a migração falhou com este código (sobrevive ao rollback; apagar o arquivo libera nova tentativa).
+MIGRACAO_FALHOU = 'migracao-falhou.json'
 
 # O que o hook pode gravar: tabela → colunas aceitas (só dados do evento já mascarados; nunca texto de prompt ou código).
 OPERACOES = {
@@ -512,23 +515,90 @@ def _pronto(con: sqlite3.Connection) -> bool:
     return versao == str(ESQUEMA_VERSAO) and bool(marcas.get('migrado_em'))
 
 
+def _marca_falha(con: sqlite3.Connection) -> Path | None:
+    pasta = _pasta_do_banco(con)
+    return pasta / MIGRACAO_FALHOU if pasta is not None else None
+
+
+def _bloqueio(arquivo: Path | None, versao: str) -> dict | None:
+    """A marca de falha, se ela vale para este código da migração (marca ilegível ou de outro código: não bloqueia)."""
+    if arquivo is None:
+        return None
+    try:
+        marca = json.loads(arquivo.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    return marca if isinstance(marca, dict) and marca.get('versao') == versao else None
+
+
+def _onde(erro: BaseException) -> str:
+    """Arquivo, linha e função onde a migração quebrou (nunca o dado que a quebrou)."""
+    quadros = traceback.extract_tb(erro.__traceback__)
+    if not quadros:
+        return 'desconhecido'
+    q = next((q for q in reversed(quadros) if Path(q.filename).name == 'migrar.py'), quadros[-1])
+    return f'{Path(q.filename).name}:{q.lineno} {q.name}'
+
+
+def _bloqueada(marca: dict) -> RuntimeError:
+    return RuntimeError(
+        f"migração bloqueada: a migração dos dados antigos falhou ({marca.get('erro')} em {marca.get('onde')}); "
+        f'veja private/erros.log. Ela só é tentada de novo quando o código da migração mudar ou quando '
+        f'private/{MIGRACAO_FALHOU} for apagado.')
+
+
 def garantir(con: sqlite3.Connection) -> None:
     """Cria o esquema que faltar e roda a migração dos JSON uma única vez, numa transação exclusiva.
 
     Qualquer ponto de entrada (hook, CLI, painel) pode chegar primeiro: quem pega a trava cria e migra;
     quem chega depois só confere as marcas `meta('esquema')` e `meta('migrado_em')`.
+
+    Se a migração levantar um erro inesperado, tudo é desfeito e fica uma marca `migracao-falhou.json` ao lado do
+    banco (versão do código da migração, hora, tipo do erro e onde): enquanto ela valer para o código atual, abrir o
+    banco levanta `RuntimeError('migração bloqueada: ...')` na hora, sem tentar de novo nem copiar os originais outra
+    vez (o hook segue pendurando eventos em `pendentes.jsonl`). Trava ou falha de disco (`OperationalError`) não marca:
+    a próxima abertura tenta de novo.
     """
     if _pronto(con):
         return
-    with transacao(con, 'EXCLUSIVE', absorver=False):
-        if _pronto(con):  # outro processo terminou enquanto esperávamos a trava
-            return
-        for sql in ESQUEMA:
-            con.execute(sql)
-        con.execute("INSERT INTO meta (chave, valor) VALUES ('esquema', ?) "
-                    'ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor', (str(ESQUEMA_VERSAO),))
-        if not _meta(con).get('migrado_em'):
-            from . import migrar  # import tardio: a migração usa este módulo e não pode criar ciclo
-            migrar.migrar(con)
-            con.execute("INSERT INTO meta (chave, valor) VALUES ('migrado_em', ?)",
-                        (datetime.now().isoformat(timespec='seconds'),))
+    from . import migrar  # import tardio: a migração usa este módulo e não pode criar ciclo
+    arquivo, versao = _marca_falha(con), migrar.versao()
+    marca = _bloqueio(arquivo, versao)
+    if marca is not None:
+        raise _bloqueada(marca)
+    falha: Exception | None = None
+    try:
+        with transacao(con, 'EXCLUSIVE', absorver=False):
+            if _pronto(con):  # outro processo terminou enquanto esperávamos a trava
+                return
+            for sql in ESQUEMA:
+                con.execute(sql)
+            con.execute("INSERT INTO meta (chave, valor) VALUES ('esquema', ?) "
+                        'ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor', (str(ESQUEMA_VERSAO),))
+            if not _meta(con).get('migrado_em'):
+                try:
+                    migrar.migrar(con)
+                except sqlite3.OperationalError:  # trava, disco: tenta de novo na próxima abertura
+                    raise
+                except Exception as e:
+                    falha = e
+                    raise
+                con.execute("INSERT INTO meta (chave, valor) VALUES ('migrado_em', ?)",
+                            (datetime.now().isoformat(timespec='seconds'),))
+    except Exception as e:
+        if e is not falha:
+            raise
+        marca = {'versao': versao, 'quando': datetime.now().isoformat(timespec='seconds'),
+                 'erro': type(e).__name__, 'onde': _onde(e)}
+        arquivos.registrar_erro(f"banco.garantir migração ({marca['onde']})", e)
+        if arquivo is not None:
+            try:
+                arquivos.gravar_json(arquivo, marca)
+            except OSError as erro_marca:
+                arquivos.registrar_erro('banco.garantir marca da migração', erro_marca)
+        raise _bloqueada(marca) from e
+    if arquivo is not None:
+        try:
+            arquivo.unlink(missing_ok=True)  # uma falha antiga (de outro código) não vale mais
+        except OSError:
+            pass

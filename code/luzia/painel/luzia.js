@@ -794,6 +794,19 @@ function telaAjustes() {
     <div class="opcoes">${Object.entries(MODOS).map(([k, v]) => opcao('modo', k, v, E.modo === k)).join('')}</div>`;
 }
 
+// Leituras vencidas com modelo configurado: o painel pede sozinho, em segundo plano, uma vez por carregamento
+// da página (o servidor ainda segura no máximo uma rodada a cada 10 min). A tela não espera: avisa quando terminar.
+let leiturasAutoPedidas = false;
+function leiturasAutomaticas() {
+  if (leiturasAutoPedidas || !E || !E.modelo_pronto || !(E.leituras_vencidas > 0)) return;
+  leiturasAutoPedidas = true;
+  api('/api/leituras', { auto: true }).then(async (r) => {
+    if (r.erro || !r.geradas) return;
+    toast(`${r.geradas} leitura(s) da Luzia gerada(s) com base nos fatos.`);
+    await carregar();
+  });
+}
+
 async function carregar() {
   const tela = document.querySelector('.tela.ativa')?.id || 'hoje';
   const novo = await api('/api/estado');
@@ -810,6 +823,7 @@ async function carregar() {
   }
   $('#jornada').innerHTML = '';
   render(tela);
+  leiturasAutomaticas();
 }
 
 function render(tela = document.querySelector('.tela.ativa')?.id || 'hoje') {
@@ -882,7 +896,8 @@ document.addEventListener('click', async (ev) => {
     t.disabled = true;
     toast('Gerando leituras com base nos fatos…');
     const r = await api('/api/leituras', {});
-    toast(r.erro ? `Falhou: ${r.erro}` : (r.geradas ? `${r.geradas} leitura(s) atualizada(s) com base.` : 'Leituras já estão em dia (ou sem modelo configurado).'));
+    toast(r.erro ? `Falhou: ${r.erro}` : (r.geradas ? `${r.geradas} leitura(s) atualizada(s) com base.`
+      : (E && E.modelo_pronto ? 'Nenhuma leitura gravada: já estavam em dia ou o modelo não respondeu.' : 'Leitura indisponível: configure o modelo em Ajustes.')));
     await carregar();
     return;
   }

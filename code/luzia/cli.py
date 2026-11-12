@@ -2,7 +2,7 @@
 
 O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de cada prisma (skill); os níveis formam a trajetória até a meta.
 - `hoje`, `triage`, `trajetoria` (`next-level`/`rota`), `entregas` (`feedback-progress`), `entrega <id>`,
-  `acender-entrega <id>`, `identidade`,
+  `acender-entrega <id>`, `identidade`, `leituras`,
   `feedback-skills-opportunities`
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
 - `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
@@ -351,6 +351,22 @@ def base_resumo(alvo_tipo: str | None, base: dict | None) -> str:
     return 'os fatos medidos pela Luzia'
 
 
+def bt_leituras() -> dict | None:
+    """'Gerar N leitura(s)' quando há leituras vencidas (ou faltando) e um modelo configurado."""
+    if not modelo.pronto():
+        return None
+    with trajetoria.abrir() as con:
+        n = len(leituras.vencidas(con))
+    return {'rotulo': f'Gerar {n} leitura(s)', 'descricao': 'renova as leituras vencidas numa só chamada ao modelo',
+            'rodar': 'leituras'} if n else None
+
+
+def com_leituras(bts: list[dict]) -> list[dict]:
+    """O botão de leituras entra em 2º lugar (só 3 botões aparecem): o primeiro passo continua sendo o primeiro."""
+    extra = bt_leituras()
+    return [*bts[:1], extra, *bts[1:]] if extra else bts
+
+
 def motivo_sem_leitura() -> str:
     return ('a Luzia ainda não tem base para uma leitura' if modelo.pronto()
             else 'leitura indisponível: configure o modelo (`modelo`, ou Ajustes no painel)')
@@ -470,7 +486,7 @@ def hoje(plan: dict, state: dict) -> None:
             f"Prisma {curto(s['nome'])} {s['lm']}/{s['limiar']} lm" + ('' if s['feixes'] else ' (falta 1 avanço)') for s in perto))
     else:
         print('Nenhum lúmen ainda: o primeiro avanço conquistado acende a trajetória.')
-    botoes(proximos_botoes(plan) + [BT_PAINEL], 'Por onde seguimos?')
+    botoes(com_leituras(proximos_botoes(plan) + [BT_PAINEL]), 'Por onde seguimos?')
 
 
 def _botoes_pedido(pid: int, p: dict) -> list[dict]:
@@ -625,7 +641,31 @@ def cmd_entregas(args, state: dict) -> None:
             bts.append({'rotulo': f"Ver entrega #{e['id']}", 'descricao': curto(e['titulo'], 40), 'rodar': f"entrega {e['id']}"})
     bts.append(ampliar)
     bts.append(BT_PAINEL)
-    botoes(bts, 'Qual entrega você quer inspecionar?')
+    botoes(com_leituras(bts), 'Qual entrega você quer inspecionar?')
+
+
+def cmd_leituras() -> None:
+    """Renova numa só chamada todas as leituras vencidas (ou que faltam) de prismas e entregas."""
+    with trajetoria.abrir() as con:
+        vencidas = leituras.vencidas(con)
+    print('## ✦ Luzia · leituras com base')
+    bts = [BT_TRAJETORIA, {'rotulo': 'Ver entregas', 'descricao': 'entregas do git com a leitura de cada uma',
+                           'rodar': 'entregas'}, BT_PAINEL]
+    if not vencidas:
+        print('Todas as leituras estão em dia com os fatos.')
+    elif not modelo.pronto():
+        print(f'{len(vencidas)} leitura(s) vencida(s) ou faltando · '
+              'leitura indisponível: configure o modelo (`modelo`, ou Ajustes no painel).')
+    else:
+        pipeline.load_env()
+        with trajetoria.abrir() as con:
+            n = leituras.gerar(con, vencidas)
+        if n:
+            print(f'✦ {n} leitura(s) renovada(s) numa só chamada ao modelo, cada uma com a base, o modelo e a data.')
+        else:
+            print(f'Leitura indisponível: o modelo não respondeu e nada foi gravado '
+                  f'({len(vencidas)} leitura(s) seguem vencidas; os fatos continuam na tela).')
+    botoes(bts, 'O que você quer ver agora?')
 
 
 def cmd_identidade(args, restantes: list[str]) -> None:
@@ -703,6 +743,7 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
 COMANDOS = [
     'hoje', 'triage', 'trajetoria', 'next-level', 'rota',
     'entregas', 'entrega', 'acender-entrega', 'feedback-progress', 'feedback-skills-opportunities', 'identidade',
+    'leituras',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido',
     'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo',
@@ -836,6 +877,10 @@ def main() -> None:
         cmd_identidade(args, restantes)
         return
 
+    if args.comando == 'leituras':
+        cmd_leituras()
+        return
+
     if args.comando == 'acender-entrega':
         if not str(args.valor).isdigit():
             print('Informe o número da entrega: `acender-entrega <id>`')
@@ -923,7 +968,7 @@ def main() -> None:
             for p in lista_pedidos[:5]:
                 print(f"   - Pedido `#{p['id']}` · **{p['tipo']}** em **Prisma {p['prisma']}** — estado: **{p['estado']}**")
         avisar_degraus(plan)
-        botoes(proximos_botoes(plan), 'Por onde seguimos?')
+        botoes(com_leituras(proximos_botoes(plan)), 'Por onde seguimos?')
         return
 
     if args.comando in ('avancos', 'acoes'):

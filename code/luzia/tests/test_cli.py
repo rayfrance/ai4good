@@ -449,3 +449,43 @@ def test_acender_entrega_sem_modelo_nao_grava_nada(privado, monkeypatch):
         assert not [a for a in jogo.avancos(con) if a.get('entrega_id') == eid]
     s = rodar(monkeypatch, 'acender-entrega', '999')
     assert 'entrega não encontrada' in visivel(s) and tem_rodape_botoes(s)
+
+
+# ------------------------------------------------------------------ leituras pelo chat (A5)
+def _leituras_falsas(monkeypatch, chamadas):
+    def fake(payload, schema=None, **kw):
+        chamadas.append(payload)
+        lt = [{'alvo': a['alvo'], 'texto': f"Leitura de {a['alvo']}."} for a in payload['alvos']]
+        return SimpleNamespace(plan={'leituras': lt}, model='gemini/teste'), {'quando': '2026-11-12T10:00:00',
+                                                                               'modelo': 'gemini/teste'}
+    monkeypatch.setattr(pipeline, 'run_plan', fake)
+
+
+def test_leituras_pelo_chat(privado, monkeypatch):
+    from luzia import leituras, modelo
+    monkeypatch.setattr(modelo, 'pronto', lambda: False)
+    s = rodar(monkeypatch, 'leituras')
+    assert 'leitura indisponível: configure o modelo' in visivel(s) and tem_rodape_botoes(s)
+    assert all(b['rodar'] != 'leituras' for b in botoes_de(rodar(monkeypatch, 'hoje')))
+
+    monkeypatch.setattr(modelo, 'pronto', lambda: True)
+    with trajetoria.abrir() as con:
+        n = len(leituras.vencidas(con))
+    assert n == 3  # os 3 prismas do plano, ainda sem leitura
+    for cmd in ('hoje', 'trajetoria'):
+        bts = botoes_de(rodar(monkeypatch, cmd))
+        assert {'rotulo': 'Gerar 3 leitura(s)', 'rodar': 'leituras'}.items() <= next(
+            b for b in bts if b['rodar'] == 'leituras').items(), (cmd, bts)
+
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem internet')))
+    s = rodar(monkeypatch, 'leituras')
+    assert 'nada foi gravado' in visivel(s) and tem_rodape_botoes(s)
+
+    chamadas = []
+    _leituras_falsas(monkeypatch, chamadas)
+    s = rodar(monkeypatch, 'leituras')
+    assert '3 leitura(s) renovada(s)' in visivel(s) and len(chamadas) == 1  # um lote, uma chamada
+    assert 'Todas as leituras estão em dia' in visivel(rodar(monkeypatch, 'leituras'))
+    v = visivel(rodar(monkeypatch, 'trajetoria'))
+    assert f'Leitura de prisma:{DDD}.' in v and 'gemini/teste · 2026-11-12' in v
+    assert all(b['rodar'] != 'leituras' for b in botoes_de(rodar(monkeypatch, 'hoje')))

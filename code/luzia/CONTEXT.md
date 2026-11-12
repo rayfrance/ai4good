@@ -16,7 +16,7 @@
 | `pedidos.py` | fluxo formal de pedidos de mudança na trajetória (`abrir`, `propor`, `aceitar`, `recusar`, `listar`) |
 | `entregas.py` | detecção local via `git` (PR merges, tickets, commits), prismas atravessados, ligação com lúmens/avanços e detalhe completo |
 | `leituras.py` | geração em lote e cache de leituras assinadas por IA com base determinística, hash, modelo e data (prisma, entrega e pedido) |
-| `cli.py` | comandos (`hoje`, `trajetoria`, `pedido`, `avancos`, `acender`, `entregas`, `entrega`, `nivel`, `fazer`, `registrar`, `subir`, `dossie`...); toda saída termina em `LUZIA_BOTOES` |
+| `cli.py` | comandos (`hoje`, `trajetoria`, `pedido`, `avancos`, `acender`, `entregas`, `entrega`, `acender-entrega`, `identidade`, `leituras`, `nivel`, `fazer`, `registrar`, `subir`, `dossie`...); toda saída termina em `LUZIA_BOTOES` |
 | `jogo.py` | avanços, lúmens, níveis, lampejos, tetos diários, ritmo e dossiê formal de evidências |
 | `acoes.py` | catálogo de avanços derivado do plano, fila do painel, evidências P3/P4 e prompt autossuficiente |
 | `propriedade.py` | propriedade intelectual das entregas (P1–P4 e `p2_entrega` sobre a entrega consolidada) |

@@ -13,13 +13,15 @@ from __future__ import annotations
 import json
 import mimetypes
 import sys
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from luzia import acoes, arquivos, entregas, jogo, leituras, modelo, observer, pedidos, pipeline, propriedade, trajetoria  # noqa: E402
+from luzia import (acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos,  # noqa: E402
+                   pipeline, propriedade, trajetoria)
 
 HERE = Path(__file__).resolve().parent
 PAINEL = HERE / 'painel'
@@ -29,6 +31,7 @@ AGENTES = ('claude-code', 'codex', 'cursor', 'antigravity', 'outro')
 HOSTS_OK = {f'localhost:{PORT}', f'127.0.0.1:{PORT}'}
 ORIGENS_OK = {f'http://{h}' for h in HOSTS_OK}
 MAX_CORPO = 64 * 1024
+AUTO_LEITURAS_MIN = 10  # leituras automáticas do painel: no máximo uma rodada a cada 10 minutos
 
 
 def repo_cwd() -> str:
@@ -146,6 +149,10 @@ def estado() -> dict:
             'lumens_ligados': det.get('lumens_ligados', []),
         })
     indices = [e['indice'] for e in entregas_out if e.get('indice') is not None]
+    # Leituras vencidas ou faltando, contadas no que esta tela já calculou (sem recalcular as bases).
+    leituras_vencidas = sum(1 for p in todos_prismas_db if p['estado'] == 'ativo'
+                            and (not leituras_prismas.get(p['nome']) or leituras_prismas[p['nome']]['vencida']))
+    leituras_vencidas += sum(1 for e in entregas_out if not e.get('leitura') or e['leitura'].get('vencida'))
 
     lm_recentes = list(reversed(jogo.livro(limite=12)))
     modo_atual = pipeline.read_json(pipeline.OBSERVER_CFG, {}).get('modo', 'ativo')
@@ -171,6 +178,7 @@ def estado() -> dict:
         'ritmo': r_ritmo,
         'modelo': modelo.status(),
         'modelo_pronto': modelo.pronto(),
+        'leituras_vencidas': leituras_vencidas,
         'regras': {
             'limiar': jogo.LIMIAR_DEGRAU,
             'min_propria': int(jogo.MIN_PROPRIA * 100),
@@ -406,6 +414,15 @@ class Handler(BaseHTTPRequestHandler):
             alvos_raw = dados.get('alvos')
             alvos = [tuple(x) for x in alvos_raw] if isinstance(alvos_raw, list) else None
             with trajetoria.abrir() as con:
+                if dados.get('auto'):  # o painel pede sozinho ao abrir: só com modelo e no máximo 1 vez a cada 10 min
+                    if not modelo.pronto():
+                        return self._json({'ok': True, 'geradas': 0, 'sem_modelo': True})
+                    with banco.transacao(con):
+                        ultima = trajetoria.perfil_ler(con, 'leituras_auto_em') or ''
+                        agora = datetime.now()
+                        if ultima and agora - datetime.fromisoformat(ultima) < timedelta(minutes=AUTO_LEITURAS_MIN):
+                            return self._json({'ok': True, 'geradas': 0, 'adiado': True})
+                        trajetoria.perfil_gravar(con, 'leituras_auto_em', agora.isoformat(timespec='seconds'))
                 geradas = leituras.gerar(con, alvos=alvos)
             return self._json({'ok': True, 'geradas': geradas})
 

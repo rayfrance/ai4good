@@ -289,3 +289,29 @@ def test_acender_avancos_para_entrega_api(api, monkeypatch):
     assert sorted(a['dimensao'] for a in det['avancos_feitos']) == ['P3', 'P4']
     c, r = api('POST', '/api/entrega/acender', {'id': 'x'})
     assert c == 400
+
+
+def test_leituras_automaticas_do_painel(api, monkeypatch):
+    from luzia import modelo
+    monkeypatch.setattr(modelo, 'pronto', lambda: True)
+    _, st = api('GET', '/api/estado')
+    assert st['modelo_pronto'] is True and st['leituras_vencidas'] == 3
+    chamadas = []
+
+    def fake(payload, **kw):
+        chamadas.append(1)
+        lt = [{'alvo': a['alvo'], 'texto': 'Leitura automática.'} for a in payload['alvos']]
+        return SimpleNamespace(plan={'leituras': lt}, model='gemini/x'), {'quando': '2026-11-12T10:00:00', 'modelo': 'gemini/x'}
+
+    monkeypatch.setattr(pipeline, 'run_plan', fake)
+    c, r = api('POST', '/api/leituras', {'auto': True})
+    assert c == 200 and r['geradas'] == 3 and len(chamadas) == 1
+    with trajetoria.abrir() as con:  # a base muda: há leitura vencida de novo, mas o automático espera 10 min
+        jogo.lancar(DDD, 20, 'propria', 'feixe', 'x')
+    c, r = api('POST', '/api/leituras', {'auto': True})
+    assert c == 200 and r['geradas'] == 0 and r.get('adiado') and len(chamadas) == 1
+    c, r = api('POST', '/api/leituras', {})  # o botão da pessoa não espera
+    assert c == 200 and r['geradas'] == 1 and len(chamadas) == 2
+    monkeypatch.setattr(modelo, 'pronto', lambda: False)
+    _, st = api('GET', '/api/estado')
+    assert st['modelo_pronto'] is False

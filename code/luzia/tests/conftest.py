@@ -86,8 +86,8 @@ def caminhos_privados() -> dict[str, Path]:
     out = {f'arquivos.{n}': getattr(arquivos, n) for n in ('PRIVATE', 'ERROS', 'ESTADO')}
     out.update({f'jogo.{n}': getattr(jogo, n) for n in ('PRIVATE', 'DOSSIES')})
     out.update({f'acoes.{n}': getattr(acoes, n) for n in ('PRIVATE',)})
-    out.update({f'pipeline.{n}': getattr(pipeline, n) for n in ('PRIVATE', 'STATE_FILE', 'AUTOAVAL', 'OBSERVER_CFG')})
-    out.update({f'observer.{n}': getattr(observer, n) for n in ('PRIVATE', 'CFG', 'SEEN')})
+    out.update({f'pipeline.{n}': getattr(pipeline, n) for n in ('PRIVATE', 'STATE_FILE', 'OBSERVER_CFG')})
+    out.update({f'observer.{n}': getattr(observer, n) for n in ('PRIVATE', 'CFG')})
     out['modelo.CFG'] = modelo.CFG
     return out
 

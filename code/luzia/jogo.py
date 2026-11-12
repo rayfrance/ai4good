@@ -463,6 +463,10 @@ def conquistar(fid: str, nota: int, resumo: str, plan: dict) -> dict:
     return {'ganho': ganho, 'feixe': f, 'pode_revisitar': pode_revisitar(f)}
 
 
+# Lúmens passivos que ESTE processo mandou para os pendentes (prisma, dia) e o banco ainda não viu: entram no teto do dia.
+_PENDURADO: dict[tuple[str, str, str], int] = {}
+
+
 def passivo(skill: str, tipo: str, sessao: str = '') -> int:
     """Reconhecimento no dia a dia: 'refletida' (o agente aplicou), 'prompt' (você dirigiu) ou 'conversao'.
 
@@ -472,16 +476,39 @@ def passivo(skill: str, tipo: str, sessao: str = '') -> int:
     """
     cheio = PASSIVO[tipo]
     resultado = {'lm': cheio}
+    dia = agora()[:10]
+    marca = (str(banco.caminho()), skill, dia)  # por banco: nada vaza entre pastas privadas
+    dados = {'prisma': skill, 'lm': cheio, 'luz': 'refletida' if tipo == 'refletida' else 'propria',
+             'fonte': f'passivo-{tipo}', 'ref': sessao}
 
-    def no_teto(con, dados):
-        ja = int(con.execute("SELECT COALESCE(SUM(lm), 0) FROM lumen WHERE prisma = ? AND fonte LIKE 'passivo%' "
-                             'AND quando >= ?', (skill, agora()[:10])).fetchone()[0])
-        lm = cheio if tipo == 'conversao' else min(cheio, max(0, TETO_PASSIVO_DIA - ja))
+    def ja_hoje(con):
+        return int(con.execute("SELECT COALESCE(SUM(lm), 0) FROM lumen WHERE prisma = ? AND fonte LIKE 'passivo%' "
+                               'AND quando >= ?', (skill, dia)).fetchone()[0])
+
+    def limitar(ja):
+        return cheio if tipo == 'conversao' else min(cheio, max(0, TETO_PASSIVO_DIA - ja))
+
+    if banco.ocupado():  # a escrita nem tenta; mas leitura não bloqueia no WAL: o teto continua valendo
+        ja = _PENDURADO.get(marca, 0)
+        try:
+            with trajetoria.abrir(banco.ESPERA_CURTA_MS) as con:
+                ja += ja_hoje(con)
+        except Exception as e:
+            arquivos.registrar_erro('jogo.passivo teto', e)
+        lm = limitar(ja)
+        if lm and not banco.gravar_ou_pendurar('lumen', {**dados, 'lm': lm}):
+            _PENDURADO[marca] = _PENDURADO.get(marca, 0) + lm
+        return lm
+
+    def no_teto(con, d):
+        ja = ja_hoje(con)  # a transação absorveu os pendentes antes: o que este processo pendurou já está no livro
+        _PENDURADO.pop(marca, None)
+        lm = limitar(ja)
         resultado['lm'] = lm
-        return {**dados, 'lm': lm} if lm else None
+        return {**d, 'lm': lm} if lm else None
 
-    banco.gravar_ou_pendurar('lumen', {'prisma': skill, 'lm': cheio, 'luz': 'refletida' if tipo == 'refletida' else 'propria',
-                                       'fonte': f'passivo-{tipo}', 'ref': sessao}, ajustar=no_teto)
+    if not banco.gravar_ou_pendurar('lumen', dados, ajustar=no_teto):
+        _PENDURADO[marca] = _PENDURADO.get(marca, 0) + cheio  # foi para os pendentes com o valor cheio
     return resultado['lm']
 
 
@@ -631,6 +658,9 @@ def subir(skill: str, plan: dict) -> dict:
                 return {'erro': 'esta skill já está na meta'}
             p = progresso_skill(skill, d)
             if not p['pronto']:
+                recente = (datetime.now() - timedelta(seconds=30)).isoformat(timespec='seconds')
+                if d['origem_do_nivel'].get(skill) == 'conquistado' and d['desde'].get(skill, '') >= recente:
+                    return {'erro': 'já subiu: este nível acabou de ser confirmado'}
                 return {'erro': 'ainda não: falta ' + ', '.join(p['falta'])}
             novo = min(nv[skill]['meta'], nv[skill]['nivel'] + 1)
             if con.execute('SELECT 1 FROM prisma WHERE nome = ?', (skill,)).fetchone() is None:
@@ -680,16 +710,16 @@ def dossie(plan: dict, titulo: str = 'agora', con: sqlite3.Connection | None = N
     pedidos = con.execute(SQL_PEDIDOS_ACEITOS).fetchall()
     linhas = [
         f'# Dossiê de evidências · {titulo} · {agora()[:10]}', '',
-        f"Trajetória: **{r['niveis_feitos']} de {r['niveis_total']} níveis** até a meta · {r['lm_total']} lm de evidência acumulada · "
+        f"Trajetória: **{r['niveis_feitos']} de {r['niveis_total']} níveis** até a meta · {r['lm_total']} pontos de evidência acumulados · "
         f"{r['luz_propria']}% de autoria própria.", '',
         '## Níveis conquistados',
     ]
-    linhas += [f"- {h['quando'][:10]} · {h['skill']} → nível {h['para']} ({h['lm']} lm no período, {h['luz_propria']}% de autoria própria)"
+    linhas += [f"- {h['quando'][:10]} · {h['skill']} → nível {h['para']} ({h['lm']} pontos de evidência no período, {h['luz_propria']}% de autoria própria)"
                for h in d['historico']] or ['- nenhum ainda']
     linhas += ['', '## Ações concluídas (evidência avaliada pela rubrica 0–4)']
     for f in sorted(conq, key=lambda x: (x.get('historico') or [{}])[-1].get('quando', '')):
         linhas.append(f"- **{f.get('titulo')}** · {f.get('skill_plano') or f.get('skill')} · nota {f.get('nota')}/4 · "
-                      f"{f.get('lm_ganho')} lm — {f.get('resumo', '')}")
+                      f"{f.get('lm_ganho')} pontos de evidência — {f.get('resumo', '')}")
     if not conq:
         linhas.append('- nenhuma ainda')
     linhas += ['', '## Pedidos de mudança aceitos']
@@ -698,14 +728,16 @@ def dossie(plan: dict, titulo: str = 'agora', con: sqlite3.Connection | None = N
         if p['motivo']:
             linha += f" — {p['motivo']}"
         linhas.append(linha)
-        if p['texto']:
+        if p['texto'] and p['modelo']:
             linhas.append(f"  - Análise: {p['texto']} (com base em {p['modelo']}, {(p['leitura_em'] or '')[:10]})")
+        elif p['texto']:
+            linhas.append('  - Análise: leitura indisponível')
     if not pedidos:
         linhas.append('- nenhum')
     linhas += ['', '## Por skill']
     for s in r['skills']:
         declarado = ' · nível declarado pela pessoa' if d['origem_do_nivel'].get(s['nome']) == 'declarado' else ''
-        linhas.append(f"- {s['nome']}: nível {s['nivel']} (meta {s['meta']}) · {s['lm']} lm desde o último nível · "
+        linhas.append(f"- {s['nome']}: nível {s['nivel']} (meta {s['meta']}) · {s['lm']} pontos de evidência desde o último nível · "
                       f"{s['luz_propria']}% de autoria própria{declarado}")
     linhas += ['', '_Gerado localmente pela Luzia a partir das evidências registradas; não substitui a avaliação do seu líder._']
     DOSSIES.mkdir(parents=True, exist_ok=True)

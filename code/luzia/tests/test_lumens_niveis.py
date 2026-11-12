@@ -110,6 +110,7 @@ def test_dossie_em_linguagem_formal(plan):
     for proibida in ('feixe', 'degrau', 'prisma', 'lúmen', 'lampejo'):
         assert proibida not in texto
     assert 'skill' in texto and 'nível' in texto and 'ações' in texto
+    assert not re.search(r'lm', texto)
 
 
 def test_dossie_lista_pedidos_aceitos(plan):
@@ -259,6 +260,7 @@ def test_hook_com_banco_travado_pendura_sem_esperar_mais_que_o_teto(privado, pla
     try:
         inicio = time.monotonic()
         assert jogo.passivo(DDD, 'refletida', 's') == 10
+        assert jogo.passivo(TESTES, 'refletida', 's') == 10
         jogo.abrir_lampejo(DDD, 's')
         assert time.monotonic() - inicio < 2 * (banco.ESPERA_CURTA_MS / 1000 + 1.5)
         inicio = time.monotonic()
@@ -361,3 +363,82 @@ def test_passivo_com_banco_travado_custa_uma_espera_curta(privado, plan):
     finally:
         soltar.set()
         t.join()
+
+
+def test_subir_duas_threads_registram_um_so_nivel(plan):
+    jogo.lancar(DDD, 160, 'propria', 'feixe', 'teste')
+    antes = jogo.niveis(plan)[DDD]['nivel']
+    barreira = threading.Barrier(2)
+    resultados = []
+
+    def clicar():
+        barreira.wait(10)
+        resultados.append(jogo.subir(DDD, plan))
+    ts = [threading.Thread(target=clicar) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join(60)
+    regs = _consulta("SELECT de, para FROM nivel_registro WHERE prisma = ? AND origem = 'conquistado'", DDD)
+    assert [(r['de'], r['para']) for r in regs] == [(antes, antes + 1)]
+    assert sorted('erro' in r for r in resultados) == [False, True]
+    assert jogo.niveis(plan)[DDD]['nivel'] == antes + 1
+    assert 'já subiu' in next(r['erro'] for r in resultados if 'erro' in r)
+
+
+def test_marco_do_dossie_na_mesma_transacao_da_subida(plan, monkeypatch):
+    front = 'Front-end (JS / Razor / React)'
+    jogo.lancar(front, 160, 'propria', 'feixe', 'a')
+    assert 'erro' not in jogo.subir(front, plan)  # 1 de 6 níveis: ainda sem marco
+    jogo.lancar(DDD, 160, 'propria', 'feixe', 'teste')
+    antes = jogo.niveis(plan)[DDD]['nivel']
+
+    def quebrar(*a, **k):
+        raise RuntimeError('falhou')
+    monkeypatch.setattr(trajetoria, 'perfil_gravar', quebrar)
+    with pytest.raises(RuntimeError):
+        jogo.subir(DDD, plan)
+    assert _consulta("SELECT 1 FROM nivel_registro WHERE origem = 'conquistado' AND prisma = ?", DDD) == []
+    assert jogo.niveis(plan)[DDD]['nivel'] == antes
+
+
+def test_passivo_com_banco_ocupado_continua_respeitando_o_teto(privado, plan):
+    soltar, t = _travar_banco(privado, 30)
+    try:
+        vistos = [jogo.passivo(DDD, 'prompt', 's') for _ in range(3)]  # a leitura não bloqueia no WAL
+    finally:
+        soltar.set()
+        t.join()
+    assert vistos == [20, 20, 0]
+    _sql('SELECT 1')
+    assert sum(r['lm'] for r in _consulta('SELECT lm FROM lumen')) == 40
+
+
+def test_reconhecimento_uma_vez_por_sessao_no_banco_e_poda(privado, plan):
+    _sql("INSERT INTO sessao_visto (sessao, chave, prisma, quando) VALUES ('velha', 'agente', ?, ?)", DDD, _agora(dias=8))
+    assert observer.novas_na_sessao('abc', 'agente', [DDD, TESTES]) == [DDD, TESTES]
+    assert observer.novas_na_sessao('abc', 'agente', [DDD, TESTES]) == []
+    assert observer.novas_na_sessao('abc', 'prompt', [DDD]) == [DDD]  # outra origem
+    assert observer.novas_na_sessao('def', 'agente', [DDD]) == [DDD]  # outra sessão
+    assert _consulta("SELECT 1 FROM sessao_visto WHERE sessao = 'velha'") == []
+    assert not (privado / 'sessao_vistos.json').exists()
+
+
+def test_reconhecimento_falha_fechada_com_banco_travado(privado, plan):
+    soltar, t = _travar_banco(privado, 30)
+    try:
+        inicio = time.monotonic()
+        assert observer.novas_na_sessao('abc', 'agente', [DDD]) == []
+        assert time.monotonic() - inicio < 4
+    finally:
+        soltar.set()
+        t.join()
+
+
+def test_dossie_pedido_sem_modelo_mostra_leitura_indisponivel(plan):
+    _sql("INSERT INTO leitura (id, alvo_tipo, alvo_id, texto, base_json, base_hash, modelo, criado_em) "
+         "VALUES (1, 'pedido', '1', 'texto sem modelo', '{}', 'h', '', '2026-11-05T09:00:00')")
+    _sql("INSERT INTO pedido (tipo, prisma, motivo, leitura_id, estado, criado_em, decidido_em) "
+         "VALUES ('arquivar', ?, 'motivo', 1, 'aceito', '2026-11-05T09:00:00', '2026-11-06T09:00:00')", DDD)
+    pedidos = _secao(jogo.dossie(plan, 'teste').read_text(encoding='utf-8'), 'Pedidos de mudança aceitos')
+    assert 'leitura indisponível' in pedidos and 'texto sem modelo' not in pedidos and 'None' not in pedidos

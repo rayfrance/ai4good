@@ -214,6 +214,14 @@ ESQUEMA = (
         luz TEXT,
         interveio INTEGER
     )""",
+    # Um reconhecimento por prisma por sessão e por origem (prompt/agente): INSERT OR IGNORE decide quem chegou primeiro.
+    """CREATE TABLE IF NOT EXISTS sessao_visto (
+        sessao TEXT NOT NULL,
+        chave TEXT NOT NULL,
+        prisma TEXT NOT NULL,
+        quando TEXT NOT NULL,
+        PRIMARY KEY (sessao, chave, prisma)
+    )""",
     """CREATE TABLE IF NOT EXISTS chamada_modelo (
         id INTEGER PRIMARY KEY,
         quando TEXT NOT NULL,

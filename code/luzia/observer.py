@@ -22,6 +22,7 @@ import hashlib
 import json
 import re
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -31,7 +32,6 @@ from luzia import acoes, arquivos, banco, jogo, trajetoria  # noqa: E402
 
 PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
-SEEN = PRIVATE / 'sessao_vistos.json'
 CLI = arquivos.CLI
 
 PALAVRAS_PADRAO = {
@@ -87,11 +87,32 @@ def sessao_id(event: dict) -> str:
 
 
 def novas_na_sessao(sid: str, chave: str, skills: list[str]) -> list[str]:
-    vistos = read_json(SEEN, {})
-    ja = set(vistos.get(f'{sid}:{chave}', []))
-    novas = [s for s in skills if s not in ja]
-    vistos[f'{sid}:{chave}'] = sorted(ja | set(skills))
-    arquivos.gravar_json(SEEN, vistos, indent=None)
+    """Skills que ainda não foram reconhecidas nesta sessão (uma vez por prisma por sessão e por origem).
+
+    O registro vai para `sessao_visto` com `INSERT OR IGNORE` numa transação curta (quem chega primeiro ganha). Se o
+    banco não responder, ninguém é reconhecido (falha fechada: sem registro da sessão não há como garantir a regra).
+    Linhas com mais de 7 dias são apagadas.
+    """
+    if not skills or banco.ocupado():
+        return []
+    agora = datetime.now()
+    corte = (agora - timedelta(days=7)).isoformat(timespec='seconds')
+    novas = []
+    try:
+        con = banco.conectar(espera_ms=banco.ESPERA_CURTA_MS)
+        try:
+            with banco.transacao(con):
+                con.execute('DELETE FROM sessao_visto WHERE quando < ?', (corte,))
+                for s in dict.fromkeys(skills):
+                    c = con.execute('INSERT OR IGNORE INTO sessao_visto (sessao, chave, prisma, quando) VALUES (?, ?, ?, ?)',
+                                    (sid, chave, s, agora.isoformat(timespec='seconds')))
+                    if c.rowcount == 1:
+                        novas.append(s)
+        finally:
+            con.close()
+    except Exception as e:
+        arquivos.registrar_erro('observer sessao_visto', e)
+        return []
     return novas
 
 

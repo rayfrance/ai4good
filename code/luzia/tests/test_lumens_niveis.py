@@ -326,3 +326,38 @@ def test_banco_que_acabou_de_falhar_nao_faz_o_hook_esperar_de_novo(privado, plan
         t.join()
     _sql('SELECT 1')
     assert len(_consulta('SELECT 1 FROM lumen')) == 1 and len(_consulta('SELECT 1 FROM sessao_evento')) == 1
+
+
+# ------------------------------------------------------------------ fix round 1
+def test_dois_sim_ao_mesmo_tempo_sobem_um_nivel_so(plan, monkeypatch):
+    jogo.lancar(DDD, 160, 'propria', 'feixe', 'teste')
+    barreira = threading.Barrier(2, timeout=3)
+    original = jogo.garantir_base
+
+    def lento(*a, **k):
+        d = original(*a, **k)  # os dois leem "pronto" antes de qualquer um gravar (se não houver trava)
+        try:
+            barreira.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return d
+    monkeypatch.setattr(jogo, 'garantir_base', lento)
+    res = []
+    ts = [threading.Thread(target=lambda: res.append(jogo.subir(DDD, plan))) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert len(_consulta("SELECT 1 FROM nivel_registro WHERE origem = 'conquistado'")) == 1
+    assert sum('erro' not in r for r in res) == 1
+
+
+def test_passivo_com_banco_travado_custa_uma_espera_curta(privado, plan):
+    soltar, t = _travar_banco(privado, 30)
+    try:
+        inicio = time.monotonic()
+        assert jogo.passivo(TESTES, 'prompt', 's') == 20
+        assert time.monotonic() - inicio < banco.ESPERA_CURTA_MS / 1000 + 0.8
+    finally:
+        soltar.set()
+        t.join()

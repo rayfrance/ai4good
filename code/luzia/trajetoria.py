@@ -126,16 +126,26 @@ def plano(espera_ms: int | None = None) -> dict:
     return estado(espera_ms).get('plano', {})
 
 
+def acrescentar_subida(con: sqlite3.Connection, nome: str, de: int, para: int, lm: int, luz_propria: int) -> None:
+    """Como `registrar_subida`, dentro de uma transação já aberta; exige que o nível ainda seja `de` (senão ValueError)."""
+    atual = con.execute('SELECT nivel FROM prisma WHERE nome = ?', (nome,)).fetchone()
+    if atual is None:
+        raise ValueError(f'prisma desconhecido: {nome}')
+    if int(atual['nivel'] or 0) != int(de):
+        raise ValueError(f'o nível de {nome} mudou durante a subida')
+    quando = agora()
+    con.execute("INSERT INTO nivel_registro (prisma, de, para, quando, origem, lm, luz_propria) "
+                "VALUES (?, ?, ?, ?, 'conquistado', ?, ?)", (nome, atual['nivel'], para, quando, lm, luz_propria))
+    con.execute('UPDATE prisma SET nivel = ?, ultimo_nivel_em = ? WHERE nome = ?', (para, quando, nome))
+
+
 def registrar_subida(con: sqlite3.Connection, nome: str, para: int, lm: int, luz_propria: int) -> None:
     """Nível conquistado (150 lm, luz própria, avanço, sim da pessoa): registro `conquistado` com o saldo do momento."""
-    quando = agora()
     with banco.transacao(con):
         atual = con.execute('SELECT nivel FROM prisma WHERE nome = ?', (nome,)).fetchone()
         if atual is None:
             raise ValueError(f'prisma desconhecido: {nome}')
-        con.execute("INSERT INTO nivel_registro (prisma, de, para, quando, origem, lm, luz_propria) "
-                    "VALUES (?, ?, ?, ?, 'conquistado', ?, ?)", (nome, atual['nivel'], para, quando, lm, luz_propria))
-        con.execute('UPDATE prisma SET nivel = ?, ultimo_nivel_em = ? WHERE nome = ?', (para, quando, nome))
+        acrescentar_subida(con, nome, int(atual['nivel'] or 0), para, lm, luz_propria)
 
 
 def historico_subidas(con: sqlite3.Connection) -> list[dict]:

@@ -463,34 +463,26 @@ def conquistar(fid: str, nota: int, resumo: str, plan: dict) -> dict:
     return {'ganho': ganho, 'feixe': f, 'pode_revisitar': pode_revisitar(f)}
 
 
-def _passivo_do_dia(skill: str, espera_ms: int) -> int:
-    """Lúmens passivos que o prisma já ganhou hoje (conversões incluídas), lidos do banco com espera curta."""
-    with trajetoria.abrir(espera_ms) as con:
-        return int(con.execute("SELECT COALESCE(SUM(lm), 0) FROM lumen WHERE prisma = ? AND fonte LIKE 'passivo%' "
-                               'AND quando >= ?', (skill, agora()[:10])).fetchone()[0])
-
-
 def passivo(skill: str, tipo: str, sessao: str = '') -> int:
     """Reconhecimento no dia a dia: 'refletida' (o agente aplicou), 'prompt' (você dirigiu) ou 'conversao'.
 
-    Caminho quente do hook: lê o teto do dia com espera curta e grava por `banco.gravar_ou_pendurar` (nunca levanta).
-    Se o banco estiver ocupado, o evento vai para `pendentes.jsonl`; as linhas pendentes ainda não contam no teto
-    (o excesso possível fica limitado pela regra de um reconhecimento por prisma por sessão).
+    Caminho quente do hook: UMA tentativa curta (ESPERA_CURTA_MS) lê o teto do dia e grava o lúmen na mesma transação.
+    Se o banco estiver ocupado, o evento vai para `pendentes.jsonl` com o valor cheio do tipo; linhas pendentes ainda
+    não contam no teto (o excesso possível fica limitado pela regra de um reconhecimento por prisma por sessão).
     """
-    ja = 0
-    try:
-        if not banco.ocupado():  # banco que acabou de falhar: não espera de novo só para ler o teto
-            ja = _passivo_do_dia(skill, banco.ESPERA_CURTA_MS)
-    except Exception as e:  # sem ler o teto, o reconhecimento segue (e fica registrado o erro)
-        arquivos.registrar_erro('jogo.passivo teto', e)
-    if tipo != 'conversao' and ja >= TETO_PASSIVO_DIA:
-        return 0
-    lm = PASSIVO[tipo] if tipo != 'conversao' else PASSIVO['conversao']
-    lm = min(lm, max(0, TETO_PASSIVO_DIA - ja)) if tipo != 'conversao' else lm
-    if lm:
-        banco.gravar_ou_pendurar('lumen', {'prisma': skill, 'lm': lm, 'luz': 'refletida' if tipo == 'refletida' else 'propria',
-                                           'fonte': f'passivo-{tipo}', 'ref': sessao})
-    return lm
+    cheio = PASSIVO[tipo]
+    resultado = {'lm': cheio}
+
+    def no_teto(con, dados):
+        ja = int(con.execute("SELECT COALESCE(SUM(lm), 0) FROM lumen WHERE prisma = ? AND fonte LIKE 'passivo%' "
+                             'AND quando >= ?', (skill, agora()[:10])).fetchone()[0])
+        lm = cheio if tipo == 'conversao' else min(cheio, max(0, TETO_PASSIVO_DIA - ja))
+        resultado['lm'] = lm
+        return {**dados, 'lm': lm} if lm else None
+
+    banco.gravar_ou_pendurar('lumen', {'prisma': skill, 'lm': cheio, 'luz': 'refletida' if tipo == 'refletida' else 'propria',
+                                       'fonte': f'passivo-{tipo}', 'ref': sessao}, ajustar=no_teto)
+    return resultado['lm']
 
 
 # ------------------------------------------------------------------ lampejos (tabela `lampejo`)
@@ -625,31 +617,34 @@ def rota(plan: dict, con: sqlite3.Connection | None = None, espera_ms: int | Non
 def subir(skill: str, plan: dict) -> dict:
     """Confirma um nível pronto: sobe o nível (registro `conquistado`), zera o progresso do prisma e checa marco.
 
-    Só é chamada depois do sim da pessoa (CLI `subir` / botão do painel).
+    Só é chamada depois do sim da pessoa (CLI `subir` / botão do painel). Tudo numa transação (BEGIN IMMEDIATE):
+    o nível e o progresso são relidos com a trava na mão, então dois "sim" ao mesmo tempo sobem um nível só.
     """
+    marco_titulo = None
     with trajetoria.abrir() as con:
-        d = garantir_base(plan, con)
-        nv = niveis(plan, con)
-        if skill not in nv:
-            return {'erro': 'skill não encontrada no seu plano'}
-        if nv[skill]['nivel'] >= nv[skill]['meta']:
-            return {'erro': 'esta skill já está na meta'}
-        p = progresso_skill(skill, d)
-        if not p['pronto']:
-            return {'erro': 'ainda não: falta ' + ', '.join(p['falta'])}
-        novo = min(nv[skill]['meta'], nv[skill]['nivel'] + 1)
-        if con.execute('SELECT 1 FROM prisma WHERE nome = ?', (skill,)).fetchone() is None:
-            return {'erro': 'skill não encontrada na sua trajetória'}
-        trajetoria.registrar_subida(con, skill, novo, p['lm'], p['luz_propria'])
-        r = rota(plan, con)
-        marco = None
-        marcos_feitos = list(d.get('marcos_dossie', []))
-        for i, m in enumerate(r['marcos'], 1):
-            if r['niveis_feitos'] >= m and i not in marcos_feitos:
-                marcos_feitos.append(i)
-                with banco.transacao(con):
+        with banco.transacao(con):
+            d = garantir_base(plan, con)
+            nv = niveis(plan, con)
+            if skill not in nv:
+                return {'erro': 'skill não encontrada no seu plano'}
+            if nv[skill]['nivel'] >= nv[skill]['meta']:
+                return {'erro': 'esta skill já está na meta'}
+            p = progresso_skill(skill, d)
+            if not p['pronto']:
+                return {'erro': 'ainda não: falta ' + ', '.join(p['falta'])}
+            novo = min(nv[skill]['meta'], nv[skill]['nivel'] + 1)
+            if con.execute('SELECT 1 FROM prisma WHERE nome = ?', (skill,)).fetchone() is None:
+                return {'erro': 'skill não encontrada na sua trajetória'}
+            trajetoria.acrescentar_subida(con, skill, nv[skill]['nivel'], novo, p['lm'], p['luz_propria'])
+            r = rota(plan, con)
+            marcos_feitos = list(d.get('marcos_dossie', []))
+            for i, m in enumerate(r['marcos'], 1):
+                if r['niveis_feitos'] >= m and i not in marcos_feitos:
+                    marcos_feitos.append(i)
                     trajetoria.perfil_gravar(con, 'marcos_dossie', marcos_feitos)
-                marco = {'n': i, 'dossie': str(dossie(plan, f'marco {i} de 3', con))}
+                    marco_titulo = i
+        marco = None if marco_titulo is None else {
+            'n': marco_titulo, 'dossie': str(dossie(plan, f'marco {marco_titulo} de 3', con))}
     return {'skill': skill, 'para': novo, 'rota': r, 'marco': marco}
 
 

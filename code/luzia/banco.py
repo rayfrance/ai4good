@@ -559,12 +559,15 @@ def ocupado() -> bool:
     return time.monotonic() < _OCUPADO_ATE.get(caminho(), 0.0)
 
 
-def gravar_ou_pendurar(operacao: str, dados: dict) -> bool:
+def gravar_ou_pendurar(operacao: str, dados: dict, ajustar=None) -> bool:
     """Caminho quente do hook: grava o evento com espera curta (ESPERA_CURTA_MS) e devolve True.
 
     Se o banco não abre, não migra ou está travado (qualquer falha do SQLite, do disco ou da migração), acrescenta
     o evento em `pendentes.jsonl` e devolve False, sem levantar. Operação, coluna ou valor fora do previsto é erro
     de programação: levanta ValueError e não vai para os pendentes.
+
+    `ajustar(con, dados)` (opcional) roda dentro da mesma transação curta, antes do INSERT: devolve os dados finais
+    ou None (nada a gravar). Se o banco falhar, os dados originais vão para os pendentes.
     """
     dados = _validar(operacao, dados)
     quando = datetime.now().isoformat(timespec='seconds')
@@ -577,7 +580,9 @@ def gravar_ou_pendurar(operacao: str, dados: dict) -> bool:
         con = conectar(espera_ms=ESPERA_CURTA_MS)
         con.execute(f'PRAGMA busy_timeout = {_restante_ms(limite)}')
         with transacao(con):
-            _inserir(con, operacao, dados, quando)
+            finais = ajustar(con, dict(dados)) if ajustar is not None else dados
+            if finais is not None:
+                _inserir(con, operacao, _validar(operacao, finais), quando)
         return True
     except Exception as e:  # a sessão nunca trava por causa do banco
         arquivos.registrar_erro('banco.gravar_ou_pendurar', e)

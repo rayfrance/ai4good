@@ -164,6 +164,23 @@ LEITURAS_SCHEMA = """Devolva exatamente este JSON:
 Para cada item recebido em "alvos", devolva um item em "leituras" copiando exatamente o identificador "alvo".
 "texto": no máximo 3 frases curtas, escritas somente a partir dos fatos recebidos naquele alvo (o que a Luzia observa nos fatos e o próximo foco). Nunca invente dados e nunca cite nomes da empresa, produtos internos, clientes, colegas, hashes ou números de PR/ticket."""
 
+PEDIDO_SCHEMA = f"""Devolva exatamente este JSON:
+{{
+  "nivel_partida": int,
+  "meta": int,
+  "palavras_chave": [str],
+  "acoes": [
+    {ACAO_SCHEMA}
+  ],
+  "analise": str
+}}
+"nivel_partida": 0 a 5 (se a pessoa pediu um nível específico, respeite-o; em mudança de meta, mantenha o nível atual).
+"meta": 0 a 5 (se a pessoa pediu uma meta específica, respeite-a).
+"palavras_chave": 8 a 12 termos em português e em inglês que aparecem em código, arquivos ou prompts quando este prisma está em jogo.
+"acoes": 3 avanços iniciais concretos para este prisma ("skill" copia o nome do prisma, "dimensao" = null).
+"analise": até 3 frases curtas analisando o pedido somente a partir dos fatos da trajetória recebidos, sem citar nomes da empresa, produtos internos, clientes ou colegas.
+{REGRAS_ACOES}"""
+
 
 @dataclass
 class LLMResult:

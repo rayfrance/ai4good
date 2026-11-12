@@ -87,6 +87,8 @@ def estado() -> dict:
         avancos_todos = jogo.avancos(con)  # uma só lista de avanços para todas as entregas
         detalhes_git = [entregas.detalhe(con, e['id'], todos_avancos=avancos_todos) for e in entregas_git[:ENTREGAS_NA_TELA]]
         diag_entregas = None if entregas_git else entregas.diagnostico(con)
+        tri = con.execute("SELECT modelo, quando FROM chamada_modelo WHERE rotulo LIKE '%triage%' ORDER BY id DESC LIMIT 1").fetchone()
+        triagem_modelo = {'modelo': tri['modelo'], 'quando': tri['quando']} if tri and tri['modelo'] else None
 
     diag = plan.get('diagnostico_fontes', {})
     plan_skills_map = {s['nome']: s for s in plan.get('skills', []) if isinstance(s, dict) and s.get('nome')}
@@ -180,6 +182,7 @@ def estado() -> dict:
         'ritmo': r_ritmo,
         'modelo': modelo.status(),
         'modelo_pronto': modelo.pronto(),
+        'triagem_modelo': triagem_modelo,  # modelo e data da chamada da triagem (None se o registro não existe)
         'leituras_vencidas': leituras_vencidas,
         'regras': {
             'limiar': jogo.LIMIAR_DEGRAU,
@@ -451,7 +454,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'ok': True, 'avancos': [a['id'] for a in res['avancos']]})
 
         if path == '/api/entregas/ampliar':
-            dias = max(1, min(3650, int(dados.get('dias', 180) or 180)))
+            try:
+                dias = max(1, min(3650, int(dados.get('dias', 180) or 180)))
+            except (TypeError, ValueError):
+                return self._json({'erro': 'número de dias inválido'}, 400)
             with trajetoria.abrir() as con:
                 res = entregas.atualizar(con, dias=dias)
             return self._json({'ok': True, 'atualizacao': res})

@@ -177,6 +177,10 @@ def _feixe(r: sqlite3.Row, historico: list[dict]) -> dict:
              tentativas=r['tentativas'], revisitas=r['revisitas'], criado_em=r['criado_em'], skill_plano=r['prisma'],
              entrega_id=r['entrega_id'],
              conta=json.loads(r['conta_json']) if r['conta_json'] else None, historico=historico)
+    if f.get('origem') == 'entrega' and r['entrega_id'] is None:
+        # vem do que a IA montou na triagem, não do git: o título "da entrega" que ela inventou nunca aparece como entrega
+        f.pop('entrega', None)
+        f['da_triagem'] = True
     if r['revisita_aberta']:
         f['revisita_aberta'] = True
     else:

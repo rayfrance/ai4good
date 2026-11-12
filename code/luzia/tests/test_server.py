@@ -412,3 +412,9 @@ def test_acender_sem_modelo_devolve_400_e_nao_grava_avancos(api, monkeypatch):
 def test_subir_sem_nivel_pronto_devolve_o_motivo(api):
     c, r = api('POST', '/api/subir', {'prisma': DDD})
     assert c == 400 and 'lm' in r['erro'] and 'feixe' not in r['erro'].lower()
+
+
+def test_ampliar_entregas_com_dias_invalidos_devolve_400(api):
+    for dias in ('abc', [1], {'a': 1}):
+        c, r = api('POST', '/api/entregas/ampliar', {'dias': dias})
+        assert c == 400 and 'dias' in r['erro'], (dias, c, r)

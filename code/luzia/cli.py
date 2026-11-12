@@ -379,7 +379,8 @@ def linhas_propriedade(prop: dict) -> list[str]:
     for k in ('P1', 'P2', 'P3', 'P4'):
         d = (prop.get('dimensoes') or {}).get(k)
         if d:
-            out.append(f"   - {k} · {NOME_DIMENSAO[k]}: **{d['nota']}** ({d.get('tipo', '')}) — {d.get('base', '')}")
+            out.append(f"   - {k} · {NOME_DIMENSAO[k]}: **{d['nota']}** ({d.get('tipo', '')})"
+                       + (f" — {d['base']}" if d.get('base') else ''))
         else:
             out.append(f"   - {k} · {NOME_DIMENSAO[k]}: {SEM_BASE_DIMENSAO[k]}")
     return out
@@ -426,7 +427,9 @@ def roteiro(a: dict) -> None:
         print(f"Você levou {a.get('lm_ganho')} de {a.get('valor_lm')} lm (nota {a.get('nota')}/4). Nesta revisita vale só a diferença.")
     else:
         print('Vale: ' + ' + '.join(f"{c[0]} {c[2]} ({c[1]})" for c in a.get('conta', [])))
-    if a.get('entrega'):
+    if a.get('da_triagem'):
+        print('▸ da triagem')
+    elif a.get('entrega'):
         print(f"▸ entrega: {a['entrega']}" + (f" · acende {a['dimensao']}" if a.get('dimensao') else ''))
     print(f"\n**Por quê:** {a.get('por_que', '')}")
     print(f"**Conceitos:** {', '.join(a.get('conceitos', []))}")

@@ -200,7 +200,7 @@ function blocoLeitura(leitura, fallbackFatos = '', compacto = false, indisponive
     </div>`;
   }
   const resumo = esc(resumoBaseLeitura(leitura, fallbackFatos));
-  const data = esc(String(leitura.criado_em || '').slice(0, 10) || 'hoje');
+  const data = esc(String(leitura.criado_em || '').slice(0, 10) || 'data desconhecida');
   const modelo = esc(leitura.modelo);
   const vencida = leitura.vencida ? ` · <span class="tag luz">base mudou</span>` : '';
   const detalhesBase = !compacto && leitura.base
@@ -282,7 +282,7 @@ function abrirAvanco(id) {
     </div>
     <h3>${esc(a.titulo)}</h3>
     <p>${esc(a.por_que)}</p>
-    ${a.entrega ? `<div class="etiquetas"><span class="tag">${ic('pacote', 'p')}${esc(a.entrega)}${a.dimensao ? ` · acende ${esc(a.dimensao)}` : ''}</span></div>` : ''}
+    ${a.da_triagem ? `<div class="etiquetas"><span class="tag">da triagem</span></div>` : a.entrega ? `<div class="etiquetas"><span class="tag">${ic('pacote', 'p')}${esc(a.entrega)}${a.dimensao ? ` · acende ${esc(a.dimensao)}` : ''}</span></div>` : ''}
     <h4>Vale ${a.valor_lm} lm</h4>
     <p class="lacuna">${motivoValor(a)} Explicando bem, você leva tudo; explicando em parte, leva uma parte.</p>
     <details class="calculo"><summary>${ic('info', 'p')} Como chegamos a ${a.valor_lm} lm</summary>
@@ -315,7 +315,7 @@ function abrirPrisma(nome) {
     <h4>Progresso até o próximo nível</h4>${barraNivel(s)}
     <h4>Leitura personalizada deste prisma</h4>
     ${blocoLeitura(s.leitura, fatosPrisma, false)}
-    ${s.evidencia ? `<h4>Evidência inicial da triagem</h4><p class="lacuna">${esc(s.evidencia)}</p>` : ''}
+    ${s.evidencia ? `<h4>Evidência inicial da triagem</h4>${blocoLeitura({ texto: s.evidencia, alvo_tipo: 'triagem', modelo: E.triagem_modelo?.modelo || 'modelo desconhecido', criado_em: E.triagem_modelo?.quando || '' }, 'triagem: currículo, commits e histórico autorizados (anonimizados)', true)}` : ''}
     ${subidas ? `<h4>Níveis conquistados</h4><ul class="lacuna" style="padding-left:18px">${subidas}</ul>` : ''}
     <h4>Avanços deste prisma</h4><div class="acoes">${doPrisma.map(cartaoAvanco).join('') || '<span class="vazio">Nenhum avanço aberto ainda.</span>'}</div>
     ${s.na_meta || s.estado === 'arquivado' ? '' : `<p style="margin-top:var(--e4)">${botaoAcender(s)}</p>`}`;

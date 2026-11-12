@@ -126,7 +126,7 @@ def chamar(prompt: str, system: str) -> dict:
     prov = PROVEDORES[cfg['provedor']]
     chave = os.environ.get(prov['chave'], '')
     if not chave and cfg['provedor'] != 'openai':
-        raise RuntimeError(f"Falta a chave {prov['chave']}: configure em Ajustes > Modelo da Luzia.")
+        raise RuntimeError(f"Falta a chave {prov['chave']}: configure em Ajustes > Modelo da Luzia")
     if importlib.util.find_spec(prov['sdk'].split('.')[0]) is None:
         raise RuntimeError(f"O SDK de {prov['nome']} não está instalado: pip install {prov['pip']}")
     t0 = time.perf_counter()
@@ -158,7 +158,7 @@ def resumo_erro(e: Exception) -> str:
         return 'modelo não encontrado para esta chave'
     if 'PERMISSION' in s or '403' in s or 'API_KEY' in s.upper() and 'INVALID' in s.upper():
         return 'chave sem permissão ou inválida'
-    return s[:160]
+    return s[:160].rstrip(' .')  # quem monta a frase põe o ponto final
 
 
 def _gemini(modelo: str, prompt: str, system: str, chave: str):

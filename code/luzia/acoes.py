@@ -168,7 +168,8 @@ def derivadas(plan: dict) -> list[dict]:
                         'id': aid('rota', a.get('titulo', ''))})
     for t in plan.get('tarefas_recentes', []):
         for a in t.get('acoes', []):
-            out.append({**a, 'origem': 'entrega', 'entrega': t.get('tarefa', ''),
+            # o id continua o mesmo (estado e histórico), mas o título "da entrega" que a IA montou não é uma entrega
+            out.append({**a, 'origem': 'entrega', 'da_triagem': True,
                         'id': aid('entrega', t.get('tarefa', '') + a.get('titulo', ''))})
     for op in plan.get('oportunidades_tarefa_atual', []):
         a = op.get('acao') or {}

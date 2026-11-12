@@ -3,7 +3,9 @@
 Hook, CLI e painel escrevem ao mesmo tempo, então:
 - modo WAL (leitores não bloqueiam quem escreve) e `busy_timeout` de 5 s (quem chega espera a vez);
 - toda escrita acontece dentro de `transacao(con)`, que abre `BEGIN IMMEDIATE` e confirma ou desfaz tudo;
-- a conexão fica em autocommit do Python (`isolation_level=None`): só os `BEGIN` explícitos abrem transação.
+- a conexão fica em autocommit do Python (`isolation_level=None`): só os `BEGIN` explícitos abrem transação;
+- o hook grava por `gravar_ou_pendurar`, com espera curta: se o banco não abre ou está travado, o evento vai para
+  `private/pendentes.jsonl` e a próxima `transacao` o absorve (a sessão nunca trava e nenhum evento se perde).
 
 Livros só de acréscimo (`lumen`, `avanco_evento`, `nivel_registro`, `trajetoria_versao`, `chamada_modelo`):
 o código só insere neles, nunca reescreve nem apaga (um teste procura isso nas consultas dos módulos).
@@ -12,6 +14,8 @@ O estado atual (estado de um avanço, nível de um prisma) fica em colunas e tem
 
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -23,6 +27,17 @@ from . import arquivos
 
 ESQUEMA_VERSAO = 1
 ESPERA_MS = 5000
+ESPERA_CURTA_MS = 1500  # caminho quente do hook: abrir e gravar cabem no tempo dele
+PENDENTES = 'pendentes.jsonl'
+RESERVA = 'pendentes-{ns:020d}-{pid}.absorvendo'  # arquivo reservado por uma absorção (o nome ordena pelo tempo)
+MARCA = 'pendentes:'  # meta('pendentes:<reserva>'): aquela reserva já foi aplicada num COMMIT
+
+# O que o hook pode gravar: tabela → colunas aceitas (só dados do evento já mascarados; nunca texto de prompt ou código).
+OPERACOES = {
+    'lumen': ('quando', 'prisma', 'lm', 'luz', 'fonte', 'ref'),
+    'sessao_evento': ('quando', 'sessao', 'prisma', 'extensao', 'ferramenta', 'modo', 'lm', 'luz', 'interveio'),
+    'lampejo': ('prisma', 'sessao', 'quando', 'estado', 'usado_em'),
+}
 
 ESQUEMA = (
     """CREATE TABLE IF NOT EXISTS meta (
@@ -202,30 +217,39 @@ def caminho() -> Path:
     return Path(arquivos.PRIVATE) / 'luzia.db'
 
 
-def conectar(arquivo: Path | None = None) -> sqlite3.Connection:
-    """Abre o banco (por padrão `caminho()`), configura WAL, espera e chaves estrangeiras e garante o esquema."""
+def _restante_ms(limite: float) -> int:
+    return max(0, int((limite - time.monotonic()) * 1000))
+
+
+def conectar(arquivo: Path | None = None, espera_ms: int = ESPERA_MS) -> sqlite3.Connection:
+    """Abre o banco (por padrão `caminho()`), configura WAL, espera e chaves estrangeiras e garante o esquema.
+
+    `espera_ms` é o prazo total da abertura (ligar o WAL e esperar a trava da migração) e o `busy_timeout` da conexão.
+    """
     arquivo = Path(arquivo) if arquivo is not None else caminho()
     arquivo.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(arquivo, timeout=ESPERA_MS / 1000, isolation_level=None)
+    limite = time.monotonic() + espera_ms / 1000
+    con = sqlite3.connect(arquivo, timeout=espera_ms / 1000, isolation_level=None)
     try:
         con.row_factory = sqlite3.Row
-        con.execute(f'PRAGMA busy_timeout = {ESPERA_MS}')
-        _ligar_wal(con)
+        con.execute(f'PRAGMA busy_timeout = {int(espera_ms)}')
+        _ligar_wal(con, limite)
         con.execute('PRAGMA foreign_keys = ON')
+        con.execute(f'PRAGMA busy_timeout = {_restante_ms(limite)}')  # o que sobrou do prazo, para a trava de garantir
         garantir(con)
+        con.execute(f'PRAGMA busy_timeout = {int(espera_ms)}')
     except BaseException:
         con.close()
         raise
     return con
 
 
-def _ligar_wal(con: sqlite3.Connection) -> None:
-    """Liga o WAL tentando de novo até ESPERA_MS: num banco novo, quem chega junto recebe BUSY na hora.
+def _ligar_wal(con: sqlite3.Connection, limite: float) -> None:
+    """Liga o WAL tentando de novo até `limite`: num banco novo, quem chega junto recebe BUSY na hora.
 
     `PRAGMA journal_mode = WAL` precisa de trava exclusiva e o SQLite não chama o busy handler para ela,
     então hook, statusline, painel e CLI abrindo o banco pela primeira vez ao mesmo tempo falhariam.
     """
-    limite = time.monotonic() + ESPERA_MS / 1000
     while True:
         try:
             modo = con.execute('PRAGMA journal_mode = WAL').fetchone()[0]
@@ -240,12 +264,20 @@ def _ligar_wal(con: sqlite3.Connection) -> None:
 
 
 @contextmanager
-def transacao(con: sqlite3.Connection, modo: str = 'IMMEDIATE') -> Iterator[sqlite3.Connection]:
-    """`with transacao(con):` abre `BEGIN IMMEDIATE` (ou `EXCLUSIVE`); confirma no fim ou desfaz se der erro."""
+def transacao(con: sqlite3.Connection, modo: str = 'IMMEDIATE',
+              absorver: bool = True) -> Iterator[sqlite3.Connection]:
+    """`with transacao(con):` abre `BEGIN IMMEDIATE` (ou `EXCLUSIVE`); confirma no fim ou desfaz se der erro.
+
+    Logo depois do BEGIN, na mesma transação, absorve os eventos pendentes do hook (`absorver=False` só em
+    `garantir`, quando o esquema ainda pode não existir); os arquivos absorvidos só são apagados depois do COMMIT.
+    """
     if modo not in ('IMMEDIATE', 'EXCLUSIVE'):
         raise ValueError(f'modo de transação inválido: {modo}')
     con.execute(f'BEGIN {modo}')
+    absorvidos: list[Path] = []
     try:
+        if absorver:
+            absorvidos = _absorver(con)[1]
         yield con
     except BaseException:
         con.rollback()
@@ -256,6 +288,191 @@ def transacao(con: sqlite3.Connection, modo: str = 'IMMEDIATE') -> Iterator[sqli
         if con.in_transaction:  # o COMMIT falhou (ex.: chave adiada, trava): não deixa a conexão presa
             con.rollback()
         raise
+    _apagar(absorvidos)
+
+
+# --- Pendentes do hook ---------------------------------------------------------------------------------------------
+# Quem absorve reserva o arquivo renomeando-o (`pendentes.jsonl` → `pendentes-<ns>-<pid>.absorvendo`) com a trava de
+# escrita do banco na mão; o hook seguinte cria um `pendentes.jsonl` novo, então nada que chega depois se perde.
+# A reserva aplicada ganha uma marca em `meta` no mesmo COMMIT das linhas: se o processo morrer antes de apagar o
+# arquivo, a próxima absorção vê a marca e só apaga (nunca aplica duas vezes); se a transação desfizer, não há marca
+# e o arquivo reservado é aplicado na próxima. No Windows, renomear um arquivo aberto falha: aí a absorção daquele
+# arquivo fica para a próxima transação, sem esperar.
+
+def _validar(operacao: str, dados: dict) -> dict:
+    """Confere operação, colunas e tipos (erro de programação → ValueError) e devolve uma cópia dos dados."""
+    if operacao not in OPERACOES:
+        raise ValueError(f'operação desconhecida para o banco: {operacao!r}')
+    if not isinstance(dados, dict):
+        raise ValueError(f'dados de {operacao} precisam ser um dict')
+    estranhas = set(dados) - set(OPERACOES[operacao])
+    if estranhas:
+        raise ValueError(f'colunas desconhecidas em {operacao}: {sorted(estranhas)}')
+    if any(v is not None and not isinstance(v, (str, int, float)) for v in dados.values()):
+        raise ValueError(f'valores de {operacao} precisam ser texto, número ou nulo')
+    return dict(dados)
+
+
+def _inserir(con: sqlite3.Connection, operacao: str, dados: dict, quando: str) -> None:
+    """Uma linha na tabela da operação; sem `quando` nos dados, vale a hora em que o evento aconteceu."""
+    linha = dict(dados)
+    if 'quando' in OPERACOES[operacao] and not linha.get('quando'):
+        linha['quando'] = quando
+    colunas = list(linha)  # nomes já conferidos contra OPERACOES
+    con.execute(f'INSERT INTO {operacao} ({", ".join(colunas)}) VALUES ({", ".join(["?"] * len(colunas))})',
+                [linha[c] for c in colunas])
+
+
+def _pendurar(arquivo: Path, operacao: str, dados: dict, quando: str) -> None:
+    """Acrescenta uma linha `{"operacao", "dados", "quando"}`; nunca levanta (se nem isso der, fica no erros.log)."""
+    linha = json.dumps({'operacao': operacao, 'dados': dados, 'quando': quando}, ensure_ascii=False) + '\n'
+    erro: OSError | None = None
+    for _ in range(5):
+        try:
+            arquivo.parent.mkdir(parents=True, exist_ok=True)
+            with arquivo.open('ab') as f:
+                f.write(linha.encode('utf-8'))
+            return
+        except PermissionError as e:  # Windows: uma absorção renomeando o arquivo neste instante
+            erro = e
+            time.sleep(0.02)
+        except OSError as e:
+            erro = e
+            break
+    arquivos.registrar_erro('banco.pendurar', erro or 'falhou')
+
+
+def _pasta_do_banco(con: sqlite3.Connection) -> Path | None:
+    """Pasta do arquivo principal da conexão (os pendentes moram ao lado do banco); None para banco em memória."""
+    for linha in con.execute('PRAGMA database_list'):
+        if linha[1] == 'main':
+            return Path(linha[2]).parent if linha[2] else None
+    return None
+
+
+def _decodificar(texto: str) -> tuple[str, dict, str]:
+    """Uma linha do arquivo de pendentes → (operação, dados conferidos, quando); ValueError se não servir."""
+    linha = json.loads(texto)
+    if not isinstance(linha, dict) or not isinstance(linha.get('operacao'), str):
+        raise ValueError('linha sem operação')
+    quando = linha.get('quando')
+    return linha['operacao'], _validar(linha['operacao'], linha.get('dados')), quando if isinstance(quando, str) else ''
+
+
+def _aplicar(con: sqlite3.Connection, arquivo: Path) -> int:
+    """Aplica as linhas de um arquivo reservado, em ordem; linha ruim é pulada e registrada (só o tipo do problema)."""
+    n = 0
+    for texto in arquivo.read_bytes().decode('utf-8', errors='replace').splitlines():
+        if not texto.strip():
+            continue
+        try:
+            operacao, dados, quando = _decodificar(texto)
+        except ValueError:  # inclui JSON cortado ou inválido
+            arquivos.registrar_erro('banco.absorver_pendentes', 'linha_invalida')
+            continue
+        con.execute('SAVEPOINT pendente_linha')
+        try:
+            _inserir(con, operacao, dados, quando)
+        except (sqlite3.IntegrityError, sqlite3.ProgrammingError, sqlite3.InterfaceError) as e:  # nunca vai entrar
+            con.execute('ROLLBACK TO pendente_linha')
+            arquivos.registrar_erro('banco.absorver_pendentes', e)
+            continue
+        finally:
+            con.execute('RELEASE pendente_linha')
+        n += 1
+    return n
+
+
+def _absorver(con: sqlite3.Connection) -> tuple[int, list[Path]]:
+    """Aplica os pendentes na transação aberta; devolve (linhas aplicadas, arquivos a apagar depois do COMMIT).
+
+    Roda num SAVEPOINT: se o banco falhar aqui, desfaz só a absorção (os arquivos ficam para a próxima vez) e a
+    escrita de quem chamou segue.
+    """
+    pasta = _pasta_do_banco(con)
+    if pasta is None:
+        return 0, []
+    con.execute('SAVEPOINT pendentes')
+    try:
+        marcadas = {r[0][len(MARCA):] for r in
+                    con.execute('SELECT chave FROM meta WHERE substr(chave, 1, ?) = ?', (len(MARCA), MARCA))}
+        for nome in marcadas:  # aplicadas num COMMIT anterior: só falta apagar o arquivo
+            try:
+                (pasta / nome).unlink(missing_ok=True)
+            except OSError:
+                continue
+            con.execute('DELETE FROM meta WHERE chave = ?', (MARCA + nome,))
+        try:
+            os.replace(pasta / PENDENTES, pasta / RESERVA.format(ns=time.time_ns(), pid=os.getpid()))
+        except OSError:  # não existe, ou (Windows) um hook está escrevendo agora: fica para a próxima transação
+            pass
+        n, feitos = 0, []
+        for arquivo in sorted(pasta.glob('pendentes-*.absorvendo')):
+            if arquivo.name in marcadas:
+                continue
+            try:
+                n += _aplicar(con, arquivo)
+            except OSError as e:
+                arquivos.registrar_erro('banco.absorver_pendentes', e)
+                continue
+            con.execute('INSERT INTO meta (chave, valor) VALUES (?, ?)',
+                        (MARCA + arquivo.name, datetime.now().isoformat(timespec='seconds')))
+            feitos.append(arquivo)
+    except sqlite3.Error as e:
+        con.execute('ROLLBACK TO pendentes')
+        con.execute('RELEASE pendentes')
+        arquivos.registrar_erro('banco.absorver_pendentes', e)
+        return 0, []
+    con.execute('RELEASE pendentes')
+    return n, feitos
+
+
+def _apagar(feitos: list[Path]) -> None:
+    """Depois do COMMIT: apaga os arquivos absorvidos (se falhar, a marca em meta impede aplicar de novo)."""
+    for arquivo in feitos:
+        try:
+            arquivo.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def absorver_pendentes(con: sqlite3.Connection) -> int:
+    """Aplica os eventos pendentes do hook na transação de escrita já aberta; devolve quantos entraram.
+
+    `transacao` chama isto sozinha no início. Chamada direta: os arquivos aplicados somem na próxima absorção.
+    """
+    if not con.in_transaction:
+        raise RuntimeError('absorver_pendentes precisa de uma transação de escrita aberta (use transacao)')
+    return _absorver(con)[0]
+
+
+def gravar_ou_pendurar(operacao: str, dados: dict) -> bool:
+    """Caminho quente do hook: grava o evento com espera curta (ESPERA_CURTA_MS) e devolve True.
+
+    Se o banco não abre, não migra ou está travado (qualquer falha do SQLite, do disco ou da migração), acrescenta
+    o evento em `pendentes.jsonl` e devolve False, sem levantar. Operação, coluna ou valor fora do previsto é erro
+    de programação: levanta ValueError e não vai para os pendentes.
+    """
+    dados = _validar(operacao, dados)
+    quando = datetime.now().isoformat(timespec='seconds')
+    limite = time.monotonic() + ESPERA_CURTA_MS / 1000
+    con = None
+    try:
+        con = conectar(espera_ms=ESPERA_CURTA_MS)
+        con.execute(f'PRAGMA busy_timeout = {_restante_ms(limite)}')
+        with transacao(con):
+            _inserir(con, operacao, dados, quando)
+        return True
+    except Exception as e:  # a sessão nunca trava por causa do banco
+        arquivos.registrar_erro('banco.gravar_ou_pendurar', e)
+        _pendurar(caminho().parent / PENDENTES, operacao, dados, quando)
+        return False
+    finally:
+        if con is not None:
+            try:
+                con.close()
+            except Exception:
+                pass
 
 
 def _meta(con: sqlite3.Connection) -> dict[str, str]:
@@ -282,7 +499,7 @@ def garantir(con: sqlite3.Connection) -> None:
     """
     if _pronto(con):
         return
-    with transacao(con, 'EXCLUSIVE'):
+    with transacao(con, 'EXCLUSIVE', absorver=False):
         if _pronto(con):  # outro processo terminou enquanto esperávamos a trava
             return
         for sql in ESQUEMA:

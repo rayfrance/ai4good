@@ -20,7 +20,7 @@ TABELAS = {
     'avanco': {'id', 'prisma', 'tipo', 'titulo', 'conteudo_json', 'duracao_min', 'valor_lm', 'conta_json', 'origem',
                'entrega_id', 'dimensao', 'estado', 'nota', 'lm_ganho', 'tentativas', 'revisitas', 'revisita_aberta',
                'criado_em'},
-    'avanco_evento': {'id', 'avanco_id', 'quando', 'evento', 'onde', 'nota', 'resumo', 'motivo'},
+    'avanco_evento': {'id', 'avanco_id', 'quando', 'evento', 'onde', 'nota', 'resumo', 'motivo', 'extra_json'},
     'lumen': {'id', 'quando', 'prisma', 'lm', 'luz', 'fonte', 'ref'},
     'nivel_registro': {'id', 'prisma', 'de', 'para', 'quando', 'origem', 'lm', 'luz_propria'},
     'lampejo': {'id', 'prisma', 'sessao', 'quando', 'estado', 'usado_em'},
@@ -165,11 +165,12 @@ def test_livros_sem_update():
 
 def test_transacao_desfaz_em_erro(privado):
     con = banco.conectar()
+    antes = con.execute('SELECT COUNT(*) FROM perfil').fetchone()[0]  # a migração já trouxe o plano da fixture
     with pytest.raises(RuntimeError):
         with banco.transacao(con):
-            con.execute("INSERT INTO perfil (chave, valor_json) VALUES ('horizonte', '\"12 meses\"')")
+            con.execute("INSERT INTO perfil (chave, valor_json) VALUES ('teste_desfazer', '\"12 meses\"')")
             raise RuntimeError('falhou no meio')
-    assert con.execute('SELECT COUNT(*) FROM perfil').fetchone()[0] == 0
+    assert con.execute('SELECT COUNT(*) FROM perfil').fetchone()[0] == antes
     assert not con.in_transaction
     con.close()
 

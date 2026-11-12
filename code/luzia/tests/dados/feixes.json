@@ -1,0 +1,347 @@
+{
+  "3fb7": {
+    "titulo": "Modelar um agregado de exemplo",
+    "tipo": "praticar",
+    "skill": "Domain-Driven Design (DDD)",
+    "dimensao": null,
+    "por_que": "Fechar a lacuna de Domain-Driven Design (DDD).",
+    "conceitos": [
+      "Domain-Driven Design (DDD)"
+    ],
+    "como": [
+      "Escolha um trecho do código.",
+      "Explique a decisão com suas palavras."
+    ],
+    "onde_explorar": "Uma mudança recente do repositório.",
+    "prompt": "Me faça uma pergunta sobre Domain-Driven Design (DDD) e espere minha resposta.",
+    "duracao_min": 15,
+    "origem": "rota",
+    "horizonte": "3 meses",
+    "id": "3fb7",
+    "estado": "conquistado",
+    "criado_em": "2026-11-02T09:00:00",
+    "tentativas": 1,
+    "lm_ganho": 53,
+    "revisitas": 0,
+    "valor_lm": 70,
+    "conta": [
+      [
+        "esforço",
+        "15 min",
+        15
+      ],
+      [
+        "lacuna",
+        "1 → 4",
+        45
+      ],
+      [
+        "prioridade",
+        "uma das maiores lacunas",
+        10
+      ]
+    ],
+    "skill_plano": "Domain-Driven Design (DDD)",
+    "nota": 3,
+    "resumo": "Explicou por que o agregado protege a regra.",
+    "historico": [
+      {
+        "quando": "2026-11-02T09:10:00",
+        "evento": "enviado ao agente"
+      },
+      {
+        "quando": "2026-11-02T09:20:00",
+        "evento": "iniciado",
+        "onde": "aqui"
+      },
+      {
+        "quando": "2026-11-02T09:40:00",
+        "evento": "tente de novo",
+        "nota": 1,
+        "resumo": "Descreveu o código."
+      },
+      {
+        "quando": "2026-11-02T10:05:00",
+        "evento": "conquistado",
+        "nota": 3,
+        "lm": 53,
+        "resumo": "Explicou por que o agregado protege a regra."
+      }
+    ]
+  },
+  "dbe9": {
+    "titulo": "Escrever um teste de unidade guiado",
+    "tipo": "praticar",
+    "skill": "Testes e Qualidade / SQL",
+    "dimensao": null,
+    "por_que": "Fechar a lacuna de Testes e Qualidade / SQL.",
+    "conceitos": [
+      "Testes e Qualidade / SQL"
+    ],
+    "como": [
+      "Escolha um trecho do código.",
+      "Explique a decisão com suas palavras."
+    ],
+    "onde_explorar": "Uma mudança recente do repositório.",
+    "prompt": "Me faça uma pergunta sobre Testes e Qualidade / SQL e espere minha resposta.",
+    "duracao_min": 20,
+    "origem": "rota",
+    "horizonte": "3 meses",
+    "id": "dbe9",
+    "estado": "em_andamento",
+    "criado_em": "2026-11-02T09:00:00",
+    "tentativas": 0,
+    "lm_ganho": 0,
+    "revisitas": 0,
+    "valor_lm": 55,
+    "conta": [
+      [
+        "esforço",
+        "20 min",
+        20
+      ],
+      [
+        "lacuna",
+        "2 → 4",
+        30
+      ],
+      [
+        "prioridade",
+        "uma das maiores lacunas",
+        5
+      ]
+    ],
+    "skill_plano": "Testes e Qualidade / SQL",
+    "historico": [
+      {
+        "quando": "2026-11-07T14:00:00",
+        "evento": "iniciado",
+        "onde": "sessão nova"
+      }
+    ]
+  },
+  "4aad": {
+    "titulo": "Extrair um componente de tela",
+    "tipo": "praticar",
+    "skill": "Front-end (JS / Razor / React)",
+    "dimensao": null,
+    "por_que": "Fechar a lacuna de Front-end (JS / Razor / React).",
+    "conceitos": [
+      "Front-end (JS / Razor / React)"
+    ],
+    "como": [
+      "Escolha um trecho do código.",
+      "Explique a decisão com suas palavras."
+    ],
+    "onde_explorar": "Uma mudança recente do repositório.",
+    "prompt": "Me faça uma pergunta sobre Front-end (JS / Razor / React) e espere minha resposta.",
+    "duracao_min": 10,
+    "origem": "rota",
+    "horizonte": "3 meses",
+    "id": "4aad",
+    "estado": "descartado",
+    "criado_em": "2026-11-02T09:00:00",
+    "tentativas": 0,
+    "lm_ganho": 0,
+    "revisitas": 0,
+    "valor_lm": 30,
+    "conta": [
+      [
+        "esforço",
+        "10 min",
+        10
+      ],
+      [
+        "lacuna",
+        "3 → 4",
+        15
+      ],
+      [
+        "prioridade",
+        "uma das maiores lacunas",
+        5
+      ]
+    ],
+    "skill_plano": "Front-end (JS / Razor / React)",
+    "historico": [
+      {
+        "quando": "2026-11-03T08:00:00",
+        "evento": "descartado",
+        "motivo": "já domino"
+      }
+    ]
+  },
+  "3878": {
+    "titulo": "Nomear um objeto de valor",
+    "tipo": "explicar",
+    "skill": "Domain-Driven Design (DDD)",
+    "dimensao": null,
+    "por_que": "Fechar a lacuna de DDD.",
+    "conceitos": [
+      "objeto de valor"
+    ],
+    "como": [
+      "Escolha um tipo simples."
+    ],
+    "onde_explorar": "Um tipo primitivo repetido.",
+    "prompt": "Me pergunte sobre objetos de valor.",
+    "duracao_min": 10,
+    "origem": "trecho",
+    "horizonte": "nível 3",
+    "id": "3878",
+    "estado": "conquistado",
+    "criado_em": "2026-11-05T12:00:00",
+    "tentativas": 0,
+    "lm_ganho": 25,
+    "revisitas": 0,
+    "revisita_aberta": true,
+    "valor_lm": 50,
+    "conta": [
+      [
+        "esforço",
+        "10 min",
+        10
+      ],
+      [
+        "lacuna",
+        "2 → 4",
+        30
+      ],
+      [
+        "prioridade",
+        "uma das maiores lacunas",
+        10
+      ]
+    ],
+    "skill_plano": "Domain-Driven Design (DDD)",
+    "nota": 2,
+    "resumo": "Explicou o porquê do tipo.",
+    "historico": [
+      {
+        "quando": "2026-11-05T12:10:00",
+        "evento": "iniciado",
+        "onde": ""
+      },
+      {
+        "quando": "2026-11-05T12:30:00",
+        "evento": "conquistado",
+        "nota": 2,
+        "lm": 25,
+        "resumo": "Explicou o porquê do tipo."
+      },
+      {
+        "quando": "2026-11-09T10:00:00",
+        "evento": "revisita enviada ao agente"
+      },
+      {
+        "quando": "2026-11-09T10:05:00",
+        "evento": "revisita iniciada",
+        "onde": "aqui"
+      }
+    ]
+  },
+  "c04e": {
+    "titulo": "Por que este repositório devolve uma entidade inteira?",
+    "tipo": "explicar",
+    "skill": "Domain-Driven Design (DDD)",
+    "dimensao": null,
+    "por_que": "Oportunidade de DDD que a Luzia viu na sua sessão.",
+    "conceitos": [
+      "Domain-Driven Design (DDD)"
+    ],
+    "como": [
+      "Abra a mudança em que isto apareceu.",
+      "Responda à pergunta com suas palavras."
+    ],
+    "onde_explorar": "A mudança da sessão em que a Luzia interveio.",
+    "prompt": "Luzia me deixou esta pergunta sobre DDD. Me faça a pergunta e espere minha resposta.",
+    "duracao_min": 5,
+    "origem": "guardada",
+    "guardada_em": "2026-11-06T15:00:00",
+    "id": "c04e",
+    "estado": "na_fila",
+    "criado_em": "2026-11-06T15:00:00",
+    "tentativas": 0,
+    "lm_ganho": 0,
+    "revisitas": 0,
+    "valor_lm": 40,
+    "conta": [
+      [
+        "esforço",
+        "5 min",
+        5
+      ],
+      [
+        "lacuna",
+        "2 → 4",
+        30
+      ],
+      [
+        "prioridade",
+        "uma das maiores lacunas",
+        10
+      ]
+    ],
+    "skill_plano": "Domain-Driven Design (DDD)",
+    "historico": [
+      {
+        "quando": "2026-11-06T15:05:00",
+        "evento": "enviado ao agente"
+      }
+    ]
+  },
+  "e1a0": {
+    "titulo": "Revisar a modelagem de um evento de domínio",
+    "tipo": "praticar",
+    "skill": "DDD",
+    "dimensao": "p4",
+    "por_que": "Feixe antigo de uma entrega.",
+    "conceitos": [
+      "evento de domínio"
+    ],
+    "como": [
+      "Leia o evento."
+    ],
+    "onde_explorar": "Uma entrega recente.",
+    "prompt": "Me pergunte sobre o evento.",
+    "duracao_min": 15,
+    "origem": "entrega",
+    "entrega": "feat: cadastro de exemplo",
+    "id": "e1a0",
+    "estado": "sugerido",
+    "criado_em": "2026-11-04T10:00:00",
+    "tentativas": 0,
+    "lm_ganho": 0,
+    "revisitas": 0,
+    "valor_lm": 60,
+    "conta": [
+      [
+        "esforço",
+        "15 min",
+        15
+      ],
+      [
+        "lacuna",
+        "2 → 4",
+        30
+      ],
+      [
+        "prioridade",
+        "uma das maiores lacunas",
+        10
+      ]
+    ],
+    "renomeado": true,
+    "historico": [
+      {
+        "quando": "2026-11-04T11:00:00",
+        "evento": "descartado",
+        "motivo": "agora não"
+      },
+      {
+        "quando": "2026-11-04T12:00:00",
+        "evento": "restaurado"
+      }
+    ]
+  }
+}

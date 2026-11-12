@@ -1,0 +1,23 @@
+{
+  "base": {
+    "Domain-Driven Design (DDD)": 1,
+    "Testes e Qualidade / SQL": 2
+  },
+  "desde": {
+    "Domain-Driven Design (DDD)": "2026-11-05T13:00:00",
+    "Testes e Qualidade / SQL": "",
+    "Front-end (JS / Razor / React)": ""
+  },
+  "historico": [
+    {
+      "quando": "2026-11-05T13:00:00",
+      "skill": "Domain-Driven Design (DDD)",
+      "para": 2,
+      "lm": 171,
+      "luz_propria": 71
+    }
+  ],
+  "marcos_dossie": [
+    1
+  ]
+}

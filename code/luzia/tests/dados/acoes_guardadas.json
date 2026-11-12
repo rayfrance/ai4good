@@ -1,0 +1,42 @@
+[
+  {
+    "titulo": "Por que este repositório devolve uma entidade inteira?",
+    "tipo": "explicar",
+    "skill": "Domain-Driven Design (DDD)",
+    "dimensao": null,
+    "por_que": "Oportunidade de DDD que a Luzia viu na sua sessão.",
+    "conceitos": [
+      "Domain-Driven Design (DDD)"
+    ],
+    "como": [
+      "Abra a mudança em que isto apareceu.",
+      "Responda à pergunta com suas palavras."
+    ],
+    "onde_explorar": "A mudança da sessão em que a Luzia interveio.",
+    "prompt": "Luzia me deixou esta pergunta sobre DDD. Me faça a pergunta e espere minha resposta.",
+    "duracao_min": 5,
+    "origem": "guardada",
+    "guardada_em": "2026-11-06T15:00:00",
+    "id": "c04e"
+  },
+  {
+    "titulo": "Onde o teste deveria verificar o efeito colateral?",
+    "tipo": "explicar",
+    "skill": "Testes e Qualidade / SQL",
+    "dimensao": null,
+    "por_que": "Oportunidade de testes que a Luzia viu na sua sessão.",
+    "conceitos": [
+      "Testes e Qualidade / SQL"
+    ],
+    "como": [
+      "Abra a mudança em que isto apareceu.",
+      "Responda à pergunta com suas palavras."
+    ],
+    "onde_explorar": "A mudança da sessão em que a Luzia interveio.",
+    "prompt": "Luzia me deixou esta pergunta sobre DDD. Me faça a pergunta e espere minha resposta.",
+    "duracao_min": 5,
+    "origem": "guardada",
+    "guardada_em": "2026-11-08T11:30:00",
+    "id": "f479"
+  }
+]

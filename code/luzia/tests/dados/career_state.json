@@ -1,0 +1,169 @@
+{
+  "atualizado_em": "2026-11-01T10:00:00",
+  "plano": {
+    "onde_esta": {
+      "resumo": "Pessoa desenvolvedora fictícia no nível Júnior 3."
+    },
+    "aonde_quer_chegar": {
+      "resumo": "Chegar a Plena.",
+      "lacuna_principal": "Modelagem de domínio."
+    },
+    "skills": [
+      {
+        "nome": "Domain-Driven Design (DDD)",
+        "autoavaliacao": null,
+        "luzia_sugere": 1,
+        "alvo": 4,
+        "evidencia": "Entidades e repositórios aparecem nos commits, sem agregados explícitos.",
+        "palavras_chave": [
+          "Aggregate",
+          "ValueObject"
+        ]
+      },
+      {
+        "nome": "Testes e Qualidade / SQL",
+        "autoavaliacao": null,
+        "luzia_sugere": 2,
+        "alvo": 4,
+        "evidencia": "Poucos testes automatizados nos commits recentes.",
+        "palavras_chave": [
+          "xunit",
+          "Assert"
+        ]
+      },
+      {
+        "nome": "Front-end (JS / Razor / React)",
+        "autoavaliacao": null,
+        "luzia_sugere": 3,
+        "alvo": 4,
+        "evidencia": "Telas entregues com componentes reutilizados.",
+        "palavras_chave": [
+          "useState",
+          "componente"
+        ]
+      }
+    ],
+    "tarefas_recentes": [
+      {
+        "tarefa": "feat: cadastro de exemplo",
+        "skills": [
+          "Domain-Driven Design (DDD)"
+        ],
+        "indice_propriedade": 60,
+        "p1_direcao_prompt": 65,
+        "p2_coesao_commit": 80,
+        "p3_aplicacao_conceitual": 40,
+        "p4_dominio_arquitetural": 30,
+        "risco_debito_tecnico": "medio",
+        "passos_para_100": []
+      },
+      {
+        "tarefa": "test: cobertura do relatório de exemplo",
+        "skills": [
+          "Testes e Qualidade / SQL"
+        ],
+        "indice_propriedade": 55,
+        "p1_direcao_prompt": 65,
+        "p2_coesao_commit": 70,
+        "p3_aplicacao_conceitual": 35,
+        "p4_dominio_arquitetural": 25,
+        "risco_debito_tecnico": "baixo",
+        "passos_para_100": []
+      }
+    ],
+    "p1_direcao_prompt": {
+      "nota": 65
+    },
+    "plano": [
+      {
+        "horizonte": "3 meses",
+        "titulo": "Primeiro trecho da rota",
+        "acoes": [
+          {
+            "titulo": "Modelar um agregado de exemplo",
+            "tipo": "praticar",
+            "skill": "Domain-Driven Design (DDD)",
+            "dimensao": null,
+            "por_que": "Fechar a lacuna de Domain-Driven Design (DDD).",
+            "conceitos": [
+              "Domain-Driven Design (DDD)"
+            ],
+            "como": [
+              "Escolha um trecho do código.",
+              "Explique a decisão com suas palavras."
+            ],
+            "onde_explorar": "Uma mudança recente do repositório.",
+            "prompt": "Me faça uma pergunta sobre Domain-Driven Design (DDD) e espere minha resposta.",
+            "duracao_min": 15
+          },
+          {
+            "titulo": "Escrever um teste de unidade guiado",
+            "tipo": "praticar",
+            "skill": "Testes e Qualidade / SQL",
+            "dimensao": null,
+            "por_que": "Fechar a lacuna de Testes e Qualidade / SQL.",
+            "conceitos": [
+              "Testes e Qualidade / SQL"
+            ],
+            "como": [
+              "Escolha um trecho do código.",
+              "Explique a decisão com suas palavras."
+            ],
+            "onde_explorar": "Uma mudança recente do repositório.",
+            "prompt": "Me faça uma pergunta sobre Testes e Qualidade / SQL e espere minha resposta.",
+            "duracao_min": 20
+          },
+          {
+            "titulo": "Extrair um componente de tela",
+            "tipo": "praticar",
+            "skill": "Front-end (JS / Razor / React)",
+            "dimensao": null,
+            "por_que": "Fechar a lacuna de Front-end (JS / Razor / React).",
+            "conceitos": [
+              "Front-end (JS / Razor / React)"
+            ],
+            "como": [
+              "Escolha um trecho do código.",
+              "Explique a decisão com suas palavras."
+            ],
+            "onde_explorar": "Uma mudança recente do repositório.",
+            "prompt": "Me faça uma pergunta sobre Front-end (JS / Razor / React) e espere minha resposta.",
+            "duracao_min": 10
+          }
+        ]
+      }
+    ],
+    "trechos": [
+      {
+        "skill": "Domain-Driven Design (DDD)",
+        "para": 3,
+        "acoes": [
+          {
+            "titulo": "Nomear um objeto de valor",
+            "tipo": "explicar",
+            "skill": "Domain-Driven Design (DDD)",
+            "dimensao": null,
+            "por_que": "Fechar a lacuna de DDD.",
+            "conceitos": [
+              "objeto de valor"
+            ],
+            "como": [
+              "Escolha um tipo simples."
+            ],
+            "onde_explorar": "Um tipo primitivo repetido.",
+            "prompt": "Me pergunte sobre objetos de valor.",
+            "duracao_min": 10
+          }
+        ]
+      }
+    ]
+  },
+  "payload_anonimizado": {
+    "triagem": {
+      "nivel_atual_declarado": "Júnior nível 3",
+      "objetivo_declarado": "quero chegar a Plena",
+      "horizonte": "12 meses"
+    },
+    "commits_recentes": []
+  }
+}

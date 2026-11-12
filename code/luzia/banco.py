@@ -128,7 +128,8 @@ ESQUEMA = (
         onde TEXT,
         nota INTEGER,
         resumo TEXT,
-        motivo TEXT
+        motivo TEXT,
+        extra_json TEXT  -- campos antigos sem coluna própria (ex.: skill, entrega e dimensão das evidências)
     )""",
     """CREATE TABLE IF NOT EXISTS lumen (
         id INTEGER PRIMARY KEY,

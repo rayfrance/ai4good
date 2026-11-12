@@ -1,0 +1,4 @@
+{"quando": "2026-11-02T09:20:00", "id": "3fb7", "evento": "iniciada", "skill": "Domain-Driven Design (DDD)", "origem": "rota"}
+{"quando": "2026-11-02T10:05:00", "id": "3fb7", "evento": "concluida", "nota": 3, "resumo": "Explicou por que o agregado protege a regra.", "skill": "Domain-Driven Design (DDD)", "entrega": null, "dimensao": null, "origem": "rota"}
+{"quando": "2026-11-04T09:45:00", "id": "a3a8", "evento": "concluida", "nota": 3, "resumo": "Ligou a regra ao agregado.", "skill": "Domain-Driven Design (DDD)", "origem": "cartao"}
+{"quando": "2026-11-07T14:00:00", "id": "dbe9", "evento": "iniciada", "skill": "Testes e Qualidade / SQL", "origem": "painel"}

@@ -1,0 +1,4 @@
+{"quando": "2026-11-03T16:00:00", "sessao": "sessao01", "skill": "Domain-Driven Design (DDD)", "extensao": ".cs", "ferramenta": "Edit", "modo": "ativo", "lm": 10, "luz": "refletida", "interveio": true}
+{"quando": "2026-11-03T16:00:00", "sessao": "sessao01", "skill": "Testes e Qualidade / SQL", "extensao": ".cs", "ferramenta": "Edit", "modo": "ativo", "lm": 10, "luz": "refletida", "interveio": false}
+{"quando": "2026-11-04T09:30:00", "sessao": "sessao02", "skill": "Domain-Driven Design (DDD)", "extensao": "prompt", "ferramenta": "prompt", "modo": "ativo", "lm": 20, "luz": "propria", "interveio": true}
+{"quando": "2026-11-06T10:00:00", "sessao": "sessao03", "skill": "Domain-Driven Design (DDD)", "extensao": "commit", "ferramenta": "Bash", "modo": "passivo", "lm": 0, "luz": "refletida", "interveio": false}

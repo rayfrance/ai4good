@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import arquivos
 
-PRIVATE = Path(__file__).resolve().parent / 'private'
+PRIVATE = arquivos.PRIVATE
 FEIXES = PRIVATE / 'feixes.json'
 LUMENS = PRIVATE / 'lumens.jsonl'
 DEGRAUS = PRIVATE / 'degraus.json'

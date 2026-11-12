@@ -27,7 +27,7 @@ sys.path.insert(0, str(HERE.parent))
 
 from luzia import arquivos, jogo  # noqa: E402
 
-PRIVATE = HERE / 'private'
+PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
 LOG = PRIVATE / 'sessao.jsonl'
 SEEN = PRIVATE / 'sessao_vistos.json'

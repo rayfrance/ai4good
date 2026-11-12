@@ -20,7 +20,7 @@ from . import arquivos
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-CFG = HERE / 'private' / 'modelo.json'
+CFG = arquivos.PRIVATE / 'modelo.json'
 ENVS = [ROOT / '.env', ROOT.parent / 'ai4good' / '.env']
 
 PROVEDORES = {

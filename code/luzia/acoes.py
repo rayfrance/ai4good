@@ -14,7 +14,7 @@ from urllib.parse import quote
 
 from . import arquivos
 
-PRIVATE = Path(__file__).resolve().parent / 'private'
+PRIVATE = arquivos.PRIVATE
 EVID = PRIVATE / 'evidencias.jsonl'
 SALVAS = PRIVATE / 'acoes_guardadas.json'
 FILA = PRIVATE / 'fila.json'

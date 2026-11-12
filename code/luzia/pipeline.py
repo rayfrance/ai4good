@@ -19,7 +19,7 @@ from . import arquivos, planner, triage
 from .privacy import Redactor
 
 ROOT = Path(__file__).resolve().parents[2]
-PRIVATE = Path(__file__).resolve().parent / 'private'
+PRIVATE = arquivos.PRIVATE
 RUNS = ROOT / 'outputs' / 'sem2' / 'runs.jsonl'
 STATE_FILE = arquivos.ESTADO  # privado (fora do git); outputs/sem2 guarda só a foto do seminário
 AUTOAVAL = PRIVATE / 'autoavaliacao.json'

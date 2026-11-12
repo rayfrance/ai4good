@@ -17,7 +17,8 @@ from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PRIVATE = HERE / 'private'
+# Pasta dos dados pessoais (fora do git). LUZIA_PRIVATE troca o lugar (os testes apontam para uma pasta temporária).
+PRIVATE = Path(os.environ['LUZIA_PRIVATE']) if os.environ.get('LUZIA_PRIVATE') else HERE / 'private'
 ERROS = PRIVATE / 'erros.log'
 # Estado vivo da carreira (plano, entregas, trechos): privado, muda a cada chamada.
 ESTADO = PRIVATE / 'career_state.json'

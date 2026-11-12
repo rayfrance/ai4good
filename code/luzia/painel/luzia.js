@@ -353,6 +353,7 @@ async function abrirEntregaDetalhe(id) {
     </div>
     <h4>Prismas (skills) atravessados</h4>
     <div class="prismas-entrega">${prismasTags}</div>
+    ${botaoAcenderEntrega(det.id, (det.propriedade || {}).dimensoes, det.avancos_feitos)}
     <h4>Leitura da Luzia sobre esta entrega</h4>
     ${blocoLeitura(det.leitura, resumoFatos, false)}
     <h4>Lúmens ligados no período (${(det.lumens_ligados || []).length})</h4>
@@ -361,6 +362,15 @@ async function abrirEntregaDetalhe(id) {
     <h4>Avanços úteis dos mesmos prismas</h4>
     <div class="acoes">${uteis || '<span class="vazio">Nenhum avanço aberto para os prismas desta entrega.</span>'}</div>`;
   $('#gaveta').hidden = false;
+}
+
+// P3/P4 sem evidência e sem avanço aberto que as acenda: oferece acender 2 avanços ligados a esta entrega.
+function botaoAcenderEntrega(id, dimensoes, feitos) {
+  const lacunas = ['P3', 'P4'].filter((d) => !(dimensoes || {})[d]);
+  const abertas = new Set((feitos || []).filter((a) => a && ['sugerido', 'na_fila', 'em_andamento'].includes(a.estado))
+    .map((a) => a.dimensao));
+  if (!id || !lacunas.length || lacunas.every((d) => abertas.has(d))) return '';
+  return `<button class="btn prim mini" data-acender-entrega="${id}">${ic('raio', 'p')}Acender avanços para esta entrega (${lacunas.join(' e ')})</button>`;
 }
 
 function barraNivel(s) {
@@ -680,6 +690,7 @@ function telaEntregas() {
         ${e.indice == null ? '' : `<div class="anel-leg"><span><i style="background:var(--luz)"></i>sua ${e.indice}%</span><span><i style="background:var(--refletida)"></i>do agente ${100 - e.indice}%</span></div>`}
         <small class="anel-base">medido em ${esc(e.base || 'P1, P2')}</small>
         ${e.id ? `<button class="btn sec mini" data-entrega-detalhe="${e.id}">Detalhe completo</button>` : ''}
+        ${botaoAcenderEntrega(e.id, e.dimensoes, feitosIds.map(avancoPorId))}
       </div>
       <div>
         <h3>${esc(e.titulo || e.tarefa)}</h3>
@@ -829,7 +840,7 @@ document.addEventListener('click', async (ev) => {
     '[data-filtro-tipo]', '#salvar-niveis', '[data-abrir-pedido-form]', '#ped-enviar',
     '[data-pedido-aceitar]', '[data-pedido-ajustar]', '[data-pedido-recusar]',
     '[data-reativar-prisma]', '[data-gerar-leituras]', '[data-ampliar-entregas]',
-    '[data-entrega-detalhe]', '#ent-identidade-salvar',
+    '[data-entrega-detalhe]', '#ent-identidade-salvar', '[data-acender-entrega]',
   ].join(',');
   const t = ev.target.closest(seletor);
   if (!t) return;
@@ -882,6 +893,16 @@ document.addEventListener('click', async (ev) => {
     const r = await api('/api/entregas/ampliar', { dias });
     toast(r.erro ? `Falhou: ${r.erro}` : `Janela ampliada (${r.atualizacao?.novas ?? 0} nova(s), ${r.atualizacao?.atualizadas ?? 0} atualizada(s)).`);
     await carregar();
+    return;
+  }
+  if (ds.acenderEntrega) {
+    ev.stopPropagation();
+    t.disabled = true;
+    toast('Acendendo 2 avanços para esta entrega (P3 e P4)…');
+    const r = await api('/api/entrega/acender', { id: Number(ds.acenderEntrega) });
+    toast(r.erro ? `Não acendeu: ${r.erro}` : `${(r.avancos || []).length} avanços ligados a esta entrega`, r.erro ? '' : 'celebra');
+    await carregar();
+    if (!$('#gaveta').hidden && !r.erro) abrirEntregaDetalhe(ds.acenderEntrega);
     return;
   }
   if (ds.entregaDetalhe) {

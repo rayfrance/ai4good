@@ -417,6 +417,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({'erro': str(e)}, 400)
                 return self._json({'ok': True, 'identidades': entregas.diagnostico(con)['identidades']})
 
+        if path == '/api/entrega/acender':
+            eid = str(dados.get('id', ''))
+            if not eid.isdigit():
+                return self._json({'erro': 'id de entrega inválido'}, 400)
+            from luzia import cli
+            res = cli.acender_entrega(int(eid), 'painel-acender-entrega')
+            if res.get('erro'):
+                return self._json({'erro': res['erro']}, 400)
+            return self._json({'ok': True, 'avancos': [a['id'] for a in res['avancos']]})
+
         if path == '/api/entregas/ampliar':
             dias = max(1, min(3650, int(dados.get('dias', 180) or 180)))
             with trajetoria.abrir() as con:

@@ -131,6 +131,21 @@ OPPORTUNITIES_SCHEMA = f"""Devolva exatamente este JSON:
 3 oportunidades, priorizando as skills detectadas nos eventos da sessão e as maiores lacunas (alvo - nível).
 {REGRAS_ACOES}"""
 
+ENTREGA_SCHEMA = f"""Devolva exatamente este JSON:
+{{
+  "acoes": [
+    {ACAO_SCHEMA}
+  ]
+}}
+Exatamente 2 ações para a entrega recebida, feitas só a partir dos fatos dela (título mascarado, período, arquivos,
+linhas, áreas e prismas atravessados com os termos achados):
+1. "dimensao" = "P3", "tipo" = "explicar": a pessoa explica com as próprias palavras o conceito aplicado nesta entrega.
+2. "dimensao" = "P4": a pessoa defende a decisão tomada nesta entrega e as alternativas que tinha.
+"skill" de cada ação copia exatamente um dos nomes em "prismas" da entrega. Não invente nomes de arquivo, classe ou
+pessoa; o "onde_explorar" aponta para as áreas e termos da entrega. Nunca cite nomes da empresa, produtos internos,
+clientes, colegas, hashes ou números de PR/ticket.
+{REGRAS_ACOES}"""
+
 LEITURAS_SCHEMA = """Devolva exatamente este JSON:
 {
   "leituras": [

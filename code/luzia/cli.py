@@ -1,7 +1,8 @@
 """CLI da Luzia (agnóstica de harness; no Claude Code é chamada pelos comandos /luzia:*).
 
 O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de cada prisma (skill); os níveis formam a trajetória até a meta.
-- `hoje`, `triage`, `trajetoria` (`next-level`/`rota`), `entregas` (`feedback-progress`), `entrega <id>`, `identidade`,
+- `hoje`, `triage`, `trajetoria` (`next-level`/`rota`), `entregas` (`feedback-progress`), `entrega <id>`,
+  `acender-entrega <id>`, `identidade`,
   `feedback-skills-opportunities`
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
 - `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
@@ -17,7 +18,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import acoes, arquivos, entregas, jogo, leituras, modelo, observer, pedidos, pipeline, planner, propriedade, trajetoria, triage
+from . import (acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos, pipeline, planner, propriedade,
+               trajetoria, triage)
 from .privacy import Redactor
 
 PAINEL = 'http://localhost:8501'
@@ -160,6 +162,69 @@ def gerar_trecho(skill: str, rotulo: str = 'cmd-trecho') -> dict:
 
 gerar_acender = gerar_trecho
 
+ABERTOS = ('sugerido', 'na_fila', 'em_andamento')
+
+
+def acender_entrega(entrega_id: int, rotulo: str = 'cmd-acender-entrega') -> dict:
+    """2 avanços ligados a uma entrega: P3 (explicar o conceito aplicado) e P4 (defender a decisão e as alternativas).
+
+    Uma chamada ao modelo só com os fatos da entrega (título mascarado, período, arquivos/áreas, prismas atravessados).
+    O prisma de cada avanço é sempre um dos prismas ativos da entrega. Sem modelo: erro claro e nada gravado.
+    """
+    pipeline.load_env()
+    plan = pipeline.load_state().get('plano', {})
+    jogo.sincronizar(plan)
+    with trajetoria.abrir() as con:
+        det = entregas.detalhe(con, int(entrega_id), incluir_leitura=False)
+        if det is None:
+            return {'erro': 'entrega não encontrada'}
+        nv = jogo.niveis(plan, con)
+        prismas = [p for p in det['prismas'] if p['prisma'] in nv]
+        if not prismas:
+            return {'erro': 'esta entrega não atravessa nenhum prisma ativo da sua trajetória'}
+        abertos = [a for a in det['avancos_feitos'] if a.get('dimensao') in ('P3', 'P4') and a.get('estado') in ABERTOS]
+        if {a['dimensao'] for a in abertos} >= {'P3', 'P4'}:
+            return {'erro': 'esta entrega já tem avanços P3 e P4 abertos', 'avancos': abertos, 'entrega': det}
+        redator = leituras._redator()
+        titulo = leituras._limpar_texto(det['titulo'], redator)
+        f = det['fatos']
+        payload = {'entrega': {
+            'titulo': titulo,
+            'periodo': {'inicio': f['inicio'][:10], 'fim': f['fim'][:10], 'duracao_dias': f['duracao_dias']},
+            'fatos': {'commits': f['commits'], 'arquivos': f['arquivos'], 'linhas': f['linhas'], 'areas': f['areas']},
+            'prismas': [{'prisma': p['prisma'], 'termos': p['termos']} for p in prismas],
+        }}
+    t0 = time.perf_counter()
+    try:
+        result, record = pipeline.run_plan(payload, prep_seconds=time.perf_counter() - t0, label=rotulo,
+                                           save_current_state=False, schema=planner.ENTREGA_SCHEMA,
+                                           intro='Fatos medidos no git de uma entrega da pessoa (anonimizados por LGPD):')
+    except Exception as e:  # sem modelo, sem chave ou sem internet
+        arquivos.registrar_erro('cli.acender_entrega', e)
+        return {'erro': f'não deu para acender avanços sem o modelo ({modelo.resumo_erro(e)})', 'entrega': det}
+    brutas = [a for a in ((result.plan or {}).get('acoes') or []) if isinstance(a, dict) and a.get('titulo')]
+    if len(brutas) < 2:
+        return {'erro': 'o modelo não devolveu os 2 avanços; tente de novo', 'entrega': det}
+    p3, p4 = brutas[0], brutas[1]  # pelo esquema: a primeira é a P3 e a segunda a P4 (a posição manda)
+    nomes_entrega = [p['prisma'] for p in prismas]
+    nomes = list(nv)
+    quando = jogo.agora()
+    ids = []
+    with trajetoria.abrir() as con, banco.transacao(con):
+        for dim, a in (('P3', p3), ('P4', p4)):
+            prisma = jogo.skill_de(str(a.get('skill') or ''), plan, nomes)
+            prisma = prisma if prisma in nomes_entrega else nomes_entrega[0]
+            novo = {**a, 'titulo': leituras._limpar_texto(a['titulo'], redator)[:120], 'dimensao': dim,
+                    'skill': prisma, 'skill_plano': prisma, 'origem': 'entrega', 'entrega': titulo,
+                    'entrega_id': int(det['id']), 'estado': 'sugerido', 'criado_em': quando}
+            novo['id'] = acoes.aid('entrega', f"{det['id']}|{dim}|{novo['titulo']}")
+            novo['valor_lm'], novo['conta'] = jogo.valor(novo, plan, nv, nomes)
+            jogo._inserir_avanco(con, novo)
+            ids.append(novo['id'])
+    with trajetoria.abrir() as con:
+        gerados = [jogo._um(i, con) for i in ids]
+    return {'entrega': det, 'avancos': [g for g in gerados if g], 'record': record}
+
 
 # ------------------------------------------------------------------ apresentação
 def bar(value, total: int = 5, width: int = 5) -> str:
@@ -171,8 +236,9 @@ def bar(value, total: int = 5, width: int = 5) -> str:
 def footer(rec: dict, hits: dict | None = None) -> None:
     masked = sum((hits or {}).values())
     print(
-        f"\n`{rec['tempo_total_s']} s · {rec['pico_memoria_mib']} MiB · {rec['tokens_entrada']}→{rec['tokens_saida']} tokens"
-        f" · {masked} itens mascarados · {rec.get('modelo', '')} · versão {rec['versao']}`"
+        f"\n`{rec.get('tempo_total_s', '?')} s · {rec.get('pico_memoria_mib', '?')} MiB · "
+        f"{rec.get('tokens_entrada', '?')}→{rec.get('tokens_saida', '?')} tokens"
+        f" · {masked} itens mascarados · {rec.get('modelo', '')} · versão {rec.get('versao', '?')}`"
     )
 
 
@@ -608,7 +674,7 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
     if det['avancos_feitos']:
         print('\n**Avanços feitos para esta entrega**')
         for a in det['avancos_feitos']:
-            print(f'   {feixe_linha(a)}')
+            print(f'   {feixe_linha(a)}' + (f" → acende {a['dimensao']}" if a.get('dimensao') else ''))
     if det['avancos_uteis']:
         print('\n**Avanços úteis abertos nos mesmos prismas**')
         for a in det['avancos_uteis']:
@@ -619,7 +685,15 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
         for l in det['lumens_ligados'][:5]:
             print(f"- {l['quando'][:10]} · Prisma {l['prisma']} · +{l['lm']} lm ({l['luz']} · {l['fonte']})")
 
-    bts = [bt_feixe(a) for a in det['avancos_uteis'][:2]]
+    dims = prop.get('dimensoes') or {}
+    lacunas = [d for d in ('P3', 'P4') if not dims.get(d)]
+    abertos = [a for a in det['avancos_feitos'] if a.get('dimensao') in lacunas and a.get('estado') in ABERTOS]
+    bts = [bt_feixe(a) for a in abertos[:2]]
+    if lacunas and {a['dimensao'] for a in abertos} < set(lacunas):
+        bts.append({'rotulo': 'Acender avanços para esta entrega',
+                    'descricao': f"2 avanços que acendem {' e '.join(lacunas)} (o modelo leva ~10 s)",
+                    'rodar': f"acender-entrega {det['id']}"})
+    bts += [bt_feixe(a) for a in det['avancos_uteis'][:2]]
     bts.append({'rotulo': 'Voltar às entregas', 'descricao': 'ver lista de entregas', 'rodar': 'entregas'})
     bts.append(BT_PAINEL)
     botoes(bts, 'Quer praticar um avanço ligado a esta entrega?')
@@ -628,7 +702,7 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
 # ------------------------------------------------------------------ main
 COMANDOS = [
     'hoje', 'triage', 'trajetoria', 'next-level', 'rota',
-    'entregas', 'entrega', 'feedback-progress', 'feedback-skills-opportunities', 'identidade',
+    'entregas', 'entrega', 'acender-entrega', 'feedback-progress', 'feedback-skills-opportunities', 'identidade',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido',
     'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo',
@@ -760,6 +834,26 @@ def main() -> None:
 
     if args.comando == 'identidade':
         cmd_identidade(args, restantes)
+        return
+
+    if args.comando == 'acender-entrega':
+        if not str(args.valor).isdigit():
+            print('Informe o número da entrega: `acender-entrega <id>`')
+            botoes([{'rotulo': 'Ver entregas', 'descricao': 'listar entregas detectadas', 'rodar': 'entregas'}, BT_PAINEL])
+            return
+        res = acender_entrega(int(args.valor), rotulo)
+        voltar = {'rotulo': f'Ver entrega #{args.valor}', 'descricao': 'fatos, propriedade e avanços ligados',
+                  'rodar': f'entrega {args.valor}'}
+        if res.get('erro'):
+            print(f"◐ Não acendi avanços para a entrega `#{args.valor}`: {res['erro']}.")
+            botoes([*[bt_feixe(a) for a in res.get('avancos', [])][:2], voltar, BT_PAINEL], 'Como seguimos?')
+            return
+        det = res['entrega']
+        print(f"## ✦ Luzia · 2 avanços acesos para a Entrega `#{det['id']}` · {det['titulo']}")
+        for a in res['avancos']:
+            print(f"{feixe_linha(a)} → acende {a.get('dimensao')}")
+        footer(res['record'])
+        botoes([bt_feixe(a) for a in res['avancos']] + [voltar], 'Qual avanço desta entrega você quer fazer?')
         return
 
     if args.comando == 'entrega':

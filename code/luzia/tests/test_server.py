@@ -264,3 +264,28 @@ def test_estado_sem_entrega_git_nao_usa_tarefas_da_ia(api):
     assert c == 200 and r['identidades'] == ['Pessoa Teste', 'o***@***']
     c, r = api('POST', '/api/identidade', {'identidade': ''})
     assert c == 400 and r['erro']
+
+
+def test_acender_avancos_para_entrega_api(api, monkeypatch):
+    with trajetoria.abrir() as con:
+        with banco.transacao(con):
+            cur = con.execute("INSERT INTO entrega (chave, titulo, inicio, fim, fonte, commits, arquivos, linhas, areas_json) "
+                              "VALUES ('pr:9', 'Ajusta agregado', '2026-11-10T10:00:00', '2026-11-11T16:00:00', 'merge-pr', "
+                              "1, 2, 30, '[]')")
+            eid = int(cur.lastrowid)
+            con.execute('INSERT INTO entrega_prisma (entrega_id, prisma, termos_json) VALUES (?, ?, ?)',
+                        (eid, DDD, json.dumps(['aggregate'])))
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem internet')))
+    c, r = api('POST', '/api/entrega/acender', {'id': eid})
+    assert c == 400 and 'sem internet' in r['erro']
+    acao = {'titulo': 'Explicar o agregado', 'tipo': 'explicar', 'skill': DDD, 'por_que': 'p', 'conceitos': ['c'],
+            'como': ['1'], 'onde_explorar': 'o', 'prompt': 'x', 'duracao_min': 10}
+    reg = {'quando': '2026-11-12T16:00:00', 'modelo': 'gemini/x'}
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (
+        SimpleNamespace(plan={'acoes': [acao, {**acao, 'titulo': 'Defender a decisão'}]}, model='gemini/x'), reg))
+    c, r = api('POST', '/api/entrega/acender', {'id': eid})
+    assert c == 200 and len(r['avancos']) == 2
+    _, det = api('GET', f'/api/entrega?id={eid}')
+    assert sorted(a['dimensao'] for a in det['avancos_feitos']) == ['P3', 'P4']
+    c, r = api('POST', '/api/entrega/acender', {'id': 'x'})
+    assert c == 400

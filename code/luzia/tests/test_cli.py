@@ -384,3 +384,68 @@ def test_identidade_confere_e_acrescenta_sem_mostrar_email(privado, monkeypatch)
     assert tem_rodape_botoes(s) and any(b['rodar'] == 'entregas' for b in botoes_de(s))
     with trajetoria.abrir() as con:
         assert 'pessoa.segunda@exemplo.test' in entregas.identidades(con)
+
+
+# ------------------------------------------------------------------ avanços ligados a uma entrega: P3/P4 (A3)
+def _acao_entrega(titulo, skill, dimensao):
+    return {'titulo': titulo, 'tipo': 'explicar', 'skill': skill, 'dimensao': dimensao, 'por_que': 'Dono da decisão.',
+            'conceitos': ['agregado'], 'como': ['Abra a entrega.', 'Explique com suas palavras.'],
+            'onde_explorar': 'Os arquivos de domínio da entrega.', 'prompt': 'Me pergunte uma coisa por vez.',
+            'duracao_min': 15}
+
+
+def _modelo_entrega(monkeypatch, chamadas):
+    def fake(payload, schema=None, **kw):
+        chamadas.append({'payload': payload, 'schema': schema})
+        acoes_ = [_acao_entrega('Explicar o agregado desta entrega', 'Prisma inventado', None),
+                  _acao_entrega('Defender a separação do agregado', DDD, 'P3')]
+        reg = {'quando': '2026-11-12T15:00:00', 'modelo': 'gemini/teste', 'tempo_total_s': 0.1, 'pico_memoria_mib': 1,
+               'tokens_entrada': 1, 'tokens_saida': 1, 'versao': 't'}
+        return SimpleNamespace(plan={'acoes': acoes_}, model='gemini/teste'), reg
+
+    monkeypatch.setattr(pipeline, 'run_plan', fake)
+
+
+def test_acender_entrega_liga_avancos_e_acende_p3(privado, monkeypatch):
+    from luzia import planner
+    chamadas = []
+    _modelo_entrega(monkeypatch, chamadas)
+    with trajetoria.abrir() as con:
+        eid = _semear_entrega(con)
+    s = rodar(monkeypatch, 'entrega', str(eid))
+    assert f'acender-entrega {eid}' in [b['rodar'] for b in botoes_de(s)]
+
+    s = rodar(monkeypatch, 'acender-entrega', str(eid))
+    assert tem_rodape_botoes(s) and len(chamadas) == 1 and chamadas[0]['schema'] == planner.ENTREGA_SCHEMA
+    enviado = chamadas[0]['payload']
+    assert set(enviado) == {'entrega'} and set(enviado['entrega']) == {'titulo', 'periodo', 'fatos', 'prismas'}
+    assert enviado['entrega']['prismas'] == [{'prisma': DDD, 'termos': ['aggregate', 'domain']}]
+    with trajetoria.abrir() as con:
+        ligados = [a for a in jogo.avancos(con) if a.get('entrega_id') == eid]
+    assert sorted(a['dimensao'] for a in ligados) == ['P3', 'P4']
+    assert {a['skill_plano'] for a in ligados} == {DDD} and {a['origem'] for a in ligados} == {'entrega'}
+    assert all(a['estado'] == 'sugerido' and 10 <= a['valor_lm'] <= 100 for a in ligados)
+    p3 = next(a for a in ligados if a['dimensao'] == 'P3')
+    assert p3['titulo'] == 'Explicar o agregado desta entrega'  # a primeira é sempre a P3
+
+    s = rodar(monkeypatch, 'acender-entrega', str(eid))  # já há P3 e P4 abertos: não chama o modelo de novo
+    assert 'já tem avanços P3 e P4 abertos' in visivel(s) and len(chamadas) == 1 and tem_rodape_botoes(s)
+
+    rodar(monkeypatch, 'fazer', p3['id'])
+    s = rodar(monkeypatch, 'registrar', p3['id'], '--nota', '4', '--resumo', 'Explicou as invariantes do agregado')
+    assert 'propriedade agora' in visivel(s)
+    v = visivel(rodar(monkeypatch, 'entrega', str(eid)))
+    assert 'P3 · aplicação conceitual: **100** (evidência)' in v and 'Explicou as invariantes do agregado' in v
+    assert 'P4 · domínio arquitetural: sem base' in v
+
+
+def test_acender_entrega_sem_modelo_nao_grava_nada(privado, monkeypatch):
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('Falta a chave X')))
+    with trajetoria.abrir() as con:
+        eid = _semear_entrega(con)
+    s = rodar(monkeypatch, 'acender-entrega', str(eid))
+    assert 'Falta a chave X' in visivel(s) and tem_rodape_botoes(s)
+    with trajetoria.abrir() as con:
+        assert not [a for a in jogo.avancos(con) if a.get('entrega_id') == eid]
+    s = rodar(monkeypatch, 'acender-entrega', '999')
+    assert 'entrega não encontrada' in visivel(s) and tem_rodape_botoes(s)

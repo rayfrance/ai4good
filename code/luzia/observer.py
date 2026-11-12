@@ -76,14 +76,17 @@ def plano() -> dict:
 
 
 def lacunas(plan: dict) -> dict[str, dict]:
-    """Prismas (skills) com lacuna (nível < meta), com palavras-chave do plano + padrão em português."""
+    """Prismas (skills) com lacuna (nível < meta), com palavras do banco + do plano + padrão em português."""
+    with trajetoria.abrir(banco.ESPERA_CURTA_MS) as con:
+        niveis = jogo.niveis(plan, con)
+        do_banco = {p['nome']: p['palavras'] for p in trajetoria.prismas(con)}
     out = {}
-    for nome, v in jogo.niveis(plan, espera_ms=banco.ESPERA_CURTA_MS).items():
+    for nome, v in niveis.items():
         if v['nivel'] >= v['meta']:
             continue
         s = next((x for x in plan.get('skills', []) if x['nome'] == nome), {})
-        out[nome] = {'palavras': list(dict.fromkeys((s.get('palavras_chave') or []) + PALAVRAS_PADRAO.get(nome, []))),
-                     'nivel': v['nivel'], 'meta': v['meta']}
+        palavras = (do_banco.get(nome) or []) + (s.get('palavras_chave') or []) + PALAVRAS_PADRAO.get(nome, [])
+        out[nome] = {'palavras': list(dict.fromkeys(str(w) for w in palavras if w)), 'nivel': v['nivel'], 'meta': v['meta']}
     return out or {k: {'palavras': p, 'nivel': None, 'meta': None} for k, p in PALAVRAS_PADRAO.items()}
 
 
@@ -110,12 +113,6 @@ def sessao_id(event: dict) -> str:
     return hashlib.sha256(event.get('session_id', '').encode()).hexdigest()[:8]
 
 
-def registrar(sid: str, skill: str, ext: str, origem: str, modo: str, lm: int, luz: str, interveio: bool) -> bool:
-    """Evento mascarado da sessão no banco (ou em `pendentes.jsonl` se o banco estiver ocupado)."""
-    return banco.gravar_ou_pendurar('sessao_evento', {'sessao': sid, 'prisma': skill, 'extensao': ext, 'ferramenta': origem,
-                                                      'modo': modo, 'lm': lm, 'luz': luz, 'interveio': 1 if interveio else 0})
-
-
 def saida(evento: str, contexto: str) -> None:
     print(json.dumps({'hookSpecificOutput': {'hookEventName': evento, 'additionalContext': contexto}}, ensure_ascii=True))
 
@@ -131,7 +128,40 @@ def sem_quebrar(funcao):
     return protegida
 
 
-def cartao_refletida(skill: str, pergunta: str = '<a pergunta>', nivel: str = 'lacuna da trajetória', lm: int = 10) -> str:
+def reconhecer_em(texto: str, origem: str, sid: str, modo: str, ext: str, ferramenta: str, gaps: dict) -> list[dict]:
+    """O reconhecimento do foco, uma só implementação (hooks e comando `foco`).
+
+    `origem` é 'prompt' (a pessoa dirigiu o conceito: luz própria, +20) ou 'agente' (o agente aplicou: luz refletida, +10).
+    Vale uma vez por prisma por sessão e por origem, dentro do teto de 40 lm passivos por prisma por dia. Só no modo `ativo`
+    o primeiro reconhecimento da mudança com lúmens abre um lampejo. Devolve só o que rendeu lúmens, com o valor real:
+    `skill`, `lm`, `luz`, `lampejo` (True se abriu), `provisorio` (True se o banco estava ocupado e o valor não foi confirmado).
+    """
+    tipo = 'prompt' if origem == 'prompt' else 'refletida'
+    achados, abriu = [], False
+    for skill in detectar(texto, gaps):
+        quer = modo == 'ativo' and tipo == 'refletida' and not abriu  # só o primeiro vira luz própria, uma vez
+        estado: dict = {}
+        lm = jogo.reconhecer(sid, origem if tipo == 'prompt' else 'agente', skill, tipo, ext, ferramenta, modo,
+                             interveio=quer or (tipo == 'prompt' and modo == 'ativo'), lampejo=quer, estado=estado)
+        if not lm:  # None: este prisma já foi reconhecido na sessão; 0: teto do dia cheio (nada a mostrar)
+            continue
+        abriu = abriu or quer
+        achados.append({'skill': skill, 'lm': lm, 'luz': 'propria' if tipo == 'prompt' else 'refletida',
+                        'lampejo': quer, 'provisorio': bool(estado.get('provisorio'))})
+    return achados
+
+
+def nivel_txt(info: dict) -> str:
+    return f"você {info.get('nivel')} → meta {info.get('meta')}" if info.get('nivel') is not None else 'lacuna da trajetória'
+
+
+def cartao_refletida(skill: str, pergunta: str = '<a pergunta>', nivel: str = 'lacuna da trajetória', lm: int = 10,
+                     provisorio: bool = False) -> str:
+    if provisorio:  # banco ocupado: o valor e o lampejo ainda não foram confirmados, então não convida a responder
+        return (f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica Prisma {skill} ({nivel}). '
+                f'Rendeu +{lm} lm de luz REFLETIDA para a pessoa, a confirmar (o banco estava ocupado; a Luzia confirma na próxima '
+                'gravação). Termine a tarefa normalmente e, no FIM, em UMA linha, sem fazer perguntas: '
+                f'"✦ Luzia · Prisma {skill} reconhecido nesta mudança · +{lm} lm (luz refletida, a confirmar)."')
     return (
         f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica Prisma {skill} ({nivel}). Isso rendeu '
         f'+{lm} lm de luz REFLETIDA para a pessoa: quem aplicou foi o agente. Termine a tarefa normalmente. No FIM da resposta, '
@@ -153,13 +183,11 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
     sid, modo = sessao_id(event), cfg.get('modo', 'ativo')
     partes = []
     if modo != 'sob_demanda':
-        plan = plano()
-        gaps = lacunas(plan)
-        for skill in detectar(event.get('prompt', ''), gaps):
-            lm = jogo.reconhecer(sid, 'prompt', skill, 'prompt', 'prompt', 'prompt', modo, modo == 'ativo')
-            if lm and modo == 'ativo':
-                partes.append(f'[Luzia · em foco · luz própria] A pessoa DIRIGIU Prisma "{skill}" neste pedido (+{lm} lm de luz própria). '
-                              f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · Prisma {skill}: você dirigiu isto, +{lm} lm de luz própria."')
+        gaps = lacunas(plano())
+        for r in reconhecer_em(event.get('prompt', ''), 'prompt', sid, modo, 'prompt', 'prompt', gaps):
+            if modo == 'ativo':
+                partes.append(f'[Luzia · em foco · luz própria] A pessoa DIRIGIU Prisma "{r["skill"]}" neste pedido (+{r["lm"]} lm de luz própria). '
+                              f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · Prisma {r["skill"]}: você dirigiu isto, +{r["lm"]} lm de luz própria."')
     try:  # espera curta: o hook não pode travar a sessão; sem a fila, o resto do aviso sai igual
         pend = [f for f in acoes.fila(banco.ESPERA_CURTA_MS) if sid not in f.get('oferecida_em', [])]
     except Exception as e:
@@ -199,20 +227,13 @@ def ao_usar_ferramenta(event: dict, cfg: dict) -> None:
         edits = ' '.join(e.get('new_string', '') for e in ti.get('edits', []) if isinstance(e, dict))
         texto = ' '.join([Path(caminho).name, ti.get('content', ''), ti.get('new_string', ''), edits])
         ext = Path(caminho).suffix.lower() or 'arquivo'
-    plan = plano()
-    gaps = lacunas(plan)
-    sid = sessao_id(event)
-    novas = []
-    for skill in detectar(texto, gaps):
-        primeira = modo == 'ativo' and not novas  # só o primeiro reconhecido abre lampejo (vira luz própria uma vez)
-        if jogo.reconhecer(sid, 'agente', skill, 'refletida', ext, tool, modo, primeira, lampejo=primeira) is not None:
-            novas.append(skill)
-    if not novas or modo != 'ativo':
+    gaps = lacunas(plano())
+    achados = reconhecer_em(texto, 'agente', sessao_id(event), modo, ext, tool, gaps)
+    if modo != 'ativo' or not achados:
         return
-    skill = novas[0]
-    info = gaps.get(skill, {})
-    nivel = f"você {info.get('nivel')} → meta {info.get('meta')}" if info.get('nivel') is not None else 'lacuna da trajetória'
-    saida('PostToolUse', cartao_refletida(skill, '<pergunta concreta de líder técnico sobre o porquê desta decisão>', nivel=nivel, lm=10))
+    r = next((x for x in achados if x['lampejo']), achados[0])
+    saida('PostToolUse', cartao_refletida(r['skill'], '<pergunta concreta de líder técnico sobre o porquê desta decisão>',
+                                          nivel=nivel_txt(gaps.get(r['skill'], {})), lm=r['lm'], provisorio=r['provisorio']))
 
 
 @sem_quebrar

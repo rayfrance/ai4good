@@ -516,13 +516,14 @@ def passivo(skill: str, tipo: str, sessao: str = '') -> int:
 
 
 def reconhecer(sessao: str, chave: str, skill: str, tipo: str, extensao: str = '', ferramenta: str = '',
-               modo: str = '', interveio: bool = False, lampejo: bool = False) -> int | None:
+               modo: str = '', interveio: bool = False, lampejo: bool = False, estado: dict | None = None) -> int | None:
     """Um reconhecimento do observador, inteiro e numa tentativa curta: uma vez por prisma por sessão e por origem
     (`chave`: 'prompt' ou 'agente'), lúmen passivo dentro do teto do dia, evento da sessão e, se pedido, lampejo.
 
     Devolve o lm ganho (0 se o teto já encheu) ou None se a sessão já tinha reconhecido este prisma. Se o banco estiver
     ocupado, o reconhecimento inteiro vai para os pendentes (nada se perde) e a função devolve o valor cheio do tipo,
     provisório: na absorção vale o primeiro que chegar e o teto do dia. Nunca levanta por causa do banco.
+    `estado` (opcional) recebe `provisorio=True` quando o reconhecimento foi para os pendentes (valor e lampejo não confirmados).
     """
     dados = {'sessao': sessao, 'chave': chave, 'prisma': skill, 'lm': PASSIVO[tipo],
              'luz': 'refletida' if tipo == 'refletida' else 'propria', 'fonte': f'passivo-{tipo}', 'ref': sessao,
@@ -531,6 +532,8 @@ def reconhecer(sessao: str, chave: str, skill: str, tipo: str, extensao: str = '
     retorno: dict = {}
     if banco.gravar_ou_pendurar('reconhecimento', dados, retorno=retorno):
         return retorno.get('resultado')
+    if estado is not None:
+        estado['provisorio'] = True
     return PASSIVO[tipo]
 
 

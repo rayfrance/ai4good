@@ -385,7 +385,7 @@ def _reconhecer(con: sqlite3.Connection, d: dict) -> int | None:
                 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                 (quando, d['sessao'], d['prisma'], d.get('extensao'), d.get('ferramenta'), d.get('modo'), lm, d['luz'],
                  1 if d.get('interveio') and lm > 0 else 0))
-    if d.get('lampejo'):
+    if d.get('lampejo') and lm > 0:  # sem lúmen (teto do dia cheio) não há card, então também não há lampejo a converter
         con.execute("INSERT INTO lampejo (prisma, sessao, quando, estado) VALUES (?, ?, ?, 'aberto')",
                     (d['prisma'], d['sessao'], quando))
     return lm

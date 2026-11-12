@@ -29,25 +29,6 @@ MODOS = ('ativo', 'passivo', 'sob_demanda')
 CLI = arquivos.CLI
 
 
-def _vocab_novo(texto: str) -> str:
-    """Converte termos internos legados para o vocabulário novo nas mensagens visíveis."""
-    out = str(texto)
-    for velho, novo in (
-        ('este feixe', 'este avanço'),
-        ('conquistar 1 feixe desta skill', 'conquistar 1 avanço deste prisma'),
-        ('Feixe', 'Avanço'),
-        ('feixes', 'avanços'),
-        ('feixe', 'avanço'),
-        ('Degrau', 'Nível'),
-        ('degraus', 'níveis'),
-        ('degrau', 'nível'),
-        ('cartões', 'lampejos'),
-        ('cartão', 'lampejo'),
-    ):
-        out = out.replace(velho, novo)
-    return out
-
-
 def espectro_txt(nivel: int, total: int = 5) -> str:
     n = max(0, min(total, int(nivel or 0)))
     return '▰' * n + '▱' * (total - n)
@@ -324,12 +305,12 @@ def rota_texto(plan: dict, state: dict | None = None) -> None:
     with trajetoria.abrir() as con:
         leit_map = {s['nome']: leituras.obter(con, 'prisma', s['nome']) for s in r['skills']}
     for idx, s in enumerate(r['skills']):
-        rotulo_p = f"Prisma {s['nome']} (prisma (skill))" if idx == 0 else f"Prisma {s['nome']}"
+        rotulo_p = f"Prisma {s['nome']} (skill)" if idx == 0 else f"Prisma {s['nome']}"
         esp = espectro_txt(s['nivel'])
         if s['na_meta']:
             print(f"   ✦ {rotulo_p} · `{esp}` nível {s['nivel']}/{s['meta']} · na meta")
             continue
-        pronto = ' · **nível pronto para subir**' if s['pronto'] else f" · falta: {_vocab_novo(', '.join(s['falta']))}"
+        pronto = ' · **nível pronto para subir**' if s['pronto'] else f" · falta: {' · '.join(s['falta'])}"
         print(f"   {rotulo_p} · `{esp}` nível {s['nivel']} → meta {s['meta']}  `{bar(min(s['lm'], s['limiar']), s['limiar'], 10)}` "
               f"{s['lm']}/{s['limiar']} lm · luz própria {s['luz_propria']}%{pronto}")
         print('      ' + leitura_txt(leit_map.get(s['nome'])))
@@ -1017,7 +998,7 @@ def main() -> None:
             try:
                 trajetoria.declarar_nivel(con, skill, int(nv_arg))
             except ValueError as e:
-                print(_vocab_novo(str(e)))
+                print(str(e))
                 botoes(proximos_botoes(plan))
                 return
         nv_int = int(nv_arg)
@@ -1104,7 +1085,7 @@ def main() -> None:
     if args.comando in ('acender', 'trecho'):
         res = gerar_trecho(args.valor or args.prisma or args.skill, rotulo)
         if res.get('erro'):
-            print(f"◐ {_vocab_novo(res['erro'])}.")
+            print(f"◐ {res['erro']}.")
             botoes(proximos_botoes(plan))
             return
         print(f"## ✦ Luzia · 3 avanços novos acesos para Prisma {curto(res['skill'])}")
@@ -1171,7 +1152,7 @@ def main() -> None:
             return
         res = jogo.conquistar(a['id'], args.nota, args.resumo[:200], plan)
         if res.get('erro'):
-            print(f"◐ {_vocab_novo(res['erro'])}.")
+            print(f"◐ {res['erro']}.")
             botoes(proximos_botoes(plan))
             return
         if res.get('tente_de_novo'):
@@ -1225,7 +1206,7 @@ def main() -> None:
         skill = jogo.skill_de(args.valor or args.prisma or args.skill, plan)
         res = jogo.subir(skill, plan)
         if res.get('erro'):
-            print(f"◐ Prisma {curto(skill)}: {_vocab_novo(res['erro'])}.")
+            print(f"◐ Prisma {curto(skill)}: {res['erro']}.")
             botoes(proximos_botoes(plan))
             return
         r = res['rota']
@@ -1265,7 +1246,7 @@ def main() -> None:
             return
         res = jogo.converter(skill, args.nota, (args.pergunta or args.resumo or '')[:60])
         if res.get('erro'):
-            print(f"◐ {_vocab_novo(res['erro'])}.")
+            print(f"◐ {res['erro']}.")
             botoes(proximos_botoes(plan))
             return
         nota, lm = res['nota'], res['lm']

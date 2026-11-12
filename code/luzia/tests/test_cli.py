@@ -213,7 +213,7 @@ def test_vocabulario_sem_termos_antigos(privado, monkeypatch):
         assert achado is None, f'Termo antigo "{achado.group(0)}" encontrado na saída visível:\n{texto}'
 
     v_traj = visivel(rodar(monkeypatch, 'trajetoria'))
-    assert 'prisma (skill)' in v_traj.lower()
+    assert v_traj.count('(skill)') == 1 and 'prisma (skill)' not in v_traj.lower()
     assert '▰' in v_traj or '▱' in v_traj
 
     v_modo = visivel(rodar(monkeypatch, 'modo'))
@@ -489,3 +489,28 @@ def test_leituras_pelo_chat(privado, monkeypatch):
     v = visivel(rodar(monkeypatch, 'trajetoria'))
     assert f'Leitura de prisma:{DDD}.' in v and 'gemini/teste · 2026-11-12' in v
     assert all(b['rodar'] != 'leituras' for b in botoes_de(rodar(monkeypatch, 'hoje')))
+
+
+def test_erros_do_motor_ja_nascem_no_vocabulario_novo(privado, monkeypatch):
+    """Sem tradução na hora de exibir: o painel (que recebe o texto cru) e o chat mostram as mesmas palavras."""
+    plan = pipeline.load_state()['plano']
+    jogo.sincronizar(plan)
+    fid = next(f['id'] for f in jogo.catalogo(plan))
+    mensagens = [
+        jogo.conquistar('zzzz', 3, 'x', plan)['erro'],            # avanço inexistente
+        jogo.conquistar(fid, 3, 'x', plan)['erro'],               # ainda não iniciado
+        *jogo.progresso_skill(DDD)['falta'],
+    ]
+    for m in mensagens:
+        assert RE_TERMOS_ANTIGOS.search(m) is None, m
+    assert '1 avanço conquistado' in mensagens
+    saida = visivel(rodar(monkeypatch, 'registrar', fid, '--nota', '3', '--resumo', 'x'))
+    assert RE_TERMOS_ANTIGOS.search(saida) is None and 'avanço' in saida
+    assert not hasattr(cli, '_vocab_novo')
+
+
+def test_trajetoria_compacta_a_falta_e_nomeia_skill_so_na_primeira_vez(privado, monkeypatch):
+    saida = visivel(rodar(monkeypatch, 'trajetoria'))
+    assert saida.count('(skill)') == 1 and '(prisma (skill))' not in saida
+    falta = [l for l in saida.splitlines() if ' falta: ' in l]
+    assert falta and all('conquistar 1' not in l and len(l) < 230 for l in falta), falta

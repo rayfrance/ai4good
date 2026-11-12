@@ -60,7 +60,7 @@ def _feixes():
 
 # ------------------------------------------------------------------ lote 1 · revisita paga só uma vez
 def test_registrar_sem_iniciar_e_recusado(plan, sugeridos):
-    assert jogo.conquistar(sugeridos[0], 4, 't', plan).get('erro', '').startswith('este feixe ainda não foi iniciado')
+    assert jogo.conquistar(sugeridos[0], 4, 't', plan).get('erro', '').startswith('este avanço ainda não foi iniciado')
 
 
 def test_nota_3_rende_75_por_cento(plan, sugeridos):
@@ -166,7 +166,7 @@ def test_160_lm_so_passivos_nao_sobem_degrau(plan):
     _passivos_160(sk2)
     p = jogo.progresso_skill(sk2)
     assert not p['pronto']
-    assert 'conquistar 1 feixe desta skill' in p['falta']
+    assert '1 avanço conquistado' in p['falta']
 
 
 def test_com_um_feixe_conquistado_o_degrau_fica_pronto(plan):

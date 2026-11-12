@@ -717,8 +717,8 @@ def garantir(con: sqlite3.Connection) -> None:
     Se a migração levantar um erro inesperado, tudo é desfeito e fica uma marca `migracao-falhou.json` ao lado do
     banco (versão do código da migração, hora, tipo do erro e onde): enquanto ela valer para o código atual, abrir o
     banco levanta `RuntimeError('migração bloqueada: ...')` na hora, sem tentar de novo nem copiar os originais outra
-    vez (o hook segue pendurando eventos em `pendentes.jsonl`). Trava ou falha de disco (`OperationalError`) não marca:
-    a próxima abertura tenta de novo.
+    vez (o hook segue pendurando eventos em `pendentes.jsonl`). Trava ou falha de disco (`OperationalError`, ou
+    `OSError` ao copiar os originais para o backup) não marca: a próxima abertura tenta de novo.
     """
     if _pronto(con):
         _completar(con)
@@ -740,7 +740,7 @@ def garantir(con: sqlite3.Connection) -> None:
             if not _meta(con).get('migrado_em'):
                 try:
                     migrar.migrar(con)
-                except sqlite3.OperationalError:  # trava, disco: tenta de novo na próxima abertura
+                except (sqlite3.OperationalError, OSError):  # trava, disco, cópia de backup: tenta de novo depois
                     raise
                 except Exception as e:
                     falha = e

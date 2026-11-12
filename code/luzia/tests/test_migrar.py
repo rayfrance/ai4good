@@ -253,6 +253,32 @@ def test_trava_nao_bloqueia_a_migracao(antigos, monkeypatch):
     banco.conectar().close()
 
 
+def test_falha_de_disco_no_backup_nao_bloqueia(antigos, monkeypatch):
+    """OSError ao copiar os originais (disco cheio, arquivo preso): como a trava, a próxima abertura tenta de novo."""
+    def disco(*_, **__):
+        raise OSError('disco cheio')
+
+    monkeypatch.setattr(migrar, '_copiar_originais', disco)
+    with pytest.raises(OSError):
+        banco.conectar()
+    assert not (antigos / banco.MIGRACAO_FALHOU).exists()
+    monkeypatch.undo()
+    con = banco.conectar()
+    assert migrar.totais_banco(con) == migrar.totais_json(antigos)
+    con.close()
+
+
+def test_erro_de_programacao_nao_vira_aviso():
+    """ProgrammingError/InterfaceError são defeitos do código: falham alto, nunca viram 'registro fora do formato'."""
+    assert sqlite3.ProgrammingError not in migrar.RUINS
+    assert sqlite3.InterfaceError not in migrar.RUINS
+    d = {'avisos': []}
+    with pytest.raises(sqlite3.ProgrammingError):
+        with migrar._registro(d, 'teste'):
+            raise sqlite3.ProgrammingError('SQL errado')
+    assert d['avisos'] == []
+
+
 def test_linha_cortada_no_meio_de_um_acento(antigos):
     """Gravação interrompida no meio de um caractere de 2 bytes: só aquela linha fica de fora."""
     with (antigos / 'lumens.jsonl').open('ab') as f:

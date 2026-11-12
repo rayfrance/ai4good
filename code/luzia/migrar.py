@@ -61,8 +61,8 @@ TEXTO_OBRIGATORIO = {'lumen': ('quando', 'prisma', 'fonte', 'ref'), 'lampejo': (
                      'avanco': ('criado_em',), 'avanco_evento': ('quando', 'evento'), 'fila': ('quando',),
                      'sessao_evento': ('quando',), 'nivel_registro': ('quando',), 'trajetoria_versao': ('criada_em',)}
 # Formato inesperado num registro: pula o registro e avisa. Erros do banco (trava, disco) não estão aqui: esses sobem.
-RUINS = (TypeError, ValueError, KeyError, AttributeError, IndexError, OverflowError,
-         sqlite3.IntegrityError, sqlite3.InterfaceError, sqlite3.ProgrammingError)
+# ProgrammingError/InterfaceError também não: são defeito do código e precisam falhar alto, nunca virar aviso.
+RUINS = (TypeError, ValueError, KeyError, AttributeError, IndexError, OverflowError, sqlite3.IntegrityError)
 INT_MAX = 2 ** 63 - 1
 
 

@@ -1,48 +1,70 @@
 """Ações executáveis da Luzia: ids estáveis, status, evidências e links que abrem o Claude Code.
 
-As evidências ficam em `private/evidencias.jsonl` (fora do git). Ações guardadas pelo observador
-(cartão "guardar para depois") ficam em `private/acoes_guardadas.json`.
+Tudo mora no banco (`private/luzia.db`, fora do git): a fila do painel em `fila`, as evidências (eventos
+'iniciada'/'concluida') em `avanco_evento` e as ações guardadas pelo observador (cartão "guardar para depois")
+como avanços de origem 'lampejo'. Os arquivos antigos só são lidos pela migração.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from . import arquivos
+from . import arquivos, banco, trajetoria
 
 PRIVATE = arquivos.PRIVATE
+# Caminhos antigos: só a migração os lê; nada mais grava neles.
 EVID = PRIVATE / 'evidencias.jsonl'
 SALVAS = PRIVATE / 'acoes_guardadas.json'
 FILA = PRIVATE / 'fila.json'
 
 
 # ------------------------------------------------------------------ fila painel → harness
+def _agora() -> str:
+    return datetime.now().isoformat(timespec='seconds')
+
+
+def _lista(texto) -> list:
+    try:
+        valor = json.loads(texto or '[]')
+    except ValueError:
+        return []
+    return valor if isinstance(valor, list) else []
+
+
 def fila() -> list[dict]:
     """Ações que a pessoa mandou do painel para o agente e ainda não começou."""
-    return _read_json(FILA, [])
+    with trajetoria.abrir() as con:
+        return [{'id': r['avanco_id'], 'titulo': r['titulo'], 'quando': r['quando'], 'oferecida_em': _lista(r['oferecida_json'])}
+                for r in con.execute('SELECT * FROM fila ORDER BY quando, rowid')]
 
 
 def enfileirar(acao_id: str, titulo: str = '') -> None:
-    itens = [f for f in fila() if f['id'] != acao_id]
-    itens.append({'id': acao_id, 'titulo': titulo, 'quando': datetime.now().isoformat(timespec='seconds'), 'oferecida_em': []})
-    arquivos.gravar_json(FILA, itens)
+    with trajetoria.abrir() as con, banco.transacao(con):
+        con.execute('DELETE FROM fila WHERE avanco_id = ?', (acao_id,))
+        con.execute('INSERT INTO fila (avanco_id, titulo, quando, oferecida_json) VALUES (?, ?, ?, ?)',
+                    (acao_id, titulo, _agora(), '[]'))
 
 
 def desenfileirar(acao_id: str) -> None:
-    if FILA.exists():
-        arquivos.gravar_json(FILA, [f for f in fila() if f['id'] != acao_id])
+    with trajetoria.abrir() as con, banco.transacao(con):
+        con.execute('DELETE FROM fila WHERE avanco_id = ?', (acao_id,))
 
 
 def marcar_oferecida(acao_id: str, sessao: str) -> None:
-    itens = fila()
-    for f in itens:
-        if f['id'] == acao_id and sessao not in f['oferecida_em']:
-            f['oferecida_em'].append(sessao)
-    arquivos.gravar_json(FILA, itens)
+    with trajetoria.abrir() as con, banco.transacao(con):
+        r = con.execute('SELECT oferecida_json FROM fila WHERE avanco_id = ?', (acao_id,)).fetchone()
+        if r is None:
+            return
+        oferecidas = _lista(r['oferecida_json'])
+        if sessao not in oferecidas:
+            oferecidas.append(sessao)
+            con.execute('UPDATE fila SET oferecida_json = ? WHERE avanco_id = ?',
+                        (json.dumps(oferecidas, ensure_ascii=False), acao_id))
 
 
 def aid(origem: str, titulo: str) -> str:
@@ -53,44 +75,64 @@ def _read_json(path: Path, default):
     return arquivos.ler_json(path, default)
 
 
+# ------------------------------------------------------------------ eventos e evidências (livro `avanco_evento`)
+COLUNAS_EVENTO = ('nota', 'resumo', 'onde', 'motivo')
+
+
 def eventos() -> list[dict]:
-    if not EVID.exists():
-        return []
+    """Eventos de evidência ('iniciada', 'concluida'...) no formato antigo; a história do feixe fica de fora."""
     out = []
-    for line in EVID.read_text(encoding='utf-8').splitlines():
-        try:
-            out.append(json.loads(line))
-        except Exception:
-            continue
+    with trajetoria.abrir() as con:
+        for r in con.execute('SELECT * FROM avanco_evento ORDER BY id'):
+            try:
+                extra = json.loads(r['extra_json'] or '{}')
+            except ValueError:
+                extra = {}
+            extra = extra if isinstance(extra, dict) else {}
+            if extra.get('fonte') == 'historico':
+                continue
+            rec = {'quando': r['quando'], 'id': r['avanco_id'], 'evento': r['evento']}
+            rec.update({c: r[c] for c in COLUNAS_EVENTO if r[c] is not None})
+            rec.update({k: v for k, v in extra.items() if k != 'fonte'})
+            out.append(rec)
     return out
 
 
 def registrar_evento(acao_id: str, evento: str, **extra) -> dict:
-    PRIVATE.mkdir(parents=True, exist_ok=True)
-    rec = {'quando': datetime.now().isoformat(timespec='seconds'), 'id': acao_id, 'evento': evento, **extra}
-    with EVID.open('a', encoding='utf-8') as f:
-        f.write(json.dumps(rec, ensure_ascii=False) + '\n')
+    rec = {'quando': _agora(), 'id': acao_id, 'evento': evento, **extra}
+    colunas = {c: extra.get(c) for c in COLUNAS_EVENTO}
+    resto = {k: v for k, v in extra.items() if k not in COLUNAS_EVENTO}
+    if colunas['nota'] is not None:
+        colunas['nota'] = int(colunas['nota'])
+    with trajetoria.abrir() as con, banco.transacao(con):
+        con.execute('INSERT INTO avanco_evento (avanco_id, quando, evento, onde, nota, resumo, motivo, extra_json)'
+                    ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    (acao_id, rec['quando'], evento, colunas['onde'], colunas['nota'], colunas['resumo'],
+                     colunas['motivo'], json.dumps({'fonte': 'evidencias', **resto}, ensure_ascii=False)))
     return rec
 
 
 def evidencias() -> list[dict]:
-    """Ações concluídas com nota (as que contam para P3/P4)."""
+    """Ações concluídas com nota (as que contam para P3/P4): só os eventos 'concluida', nunca o histórico do feixe."""
     return [e for e in eventos() if e.get('evento') == 'concluida']
 
 
-def status_map() -> dict[str, dict]:
+def status_map(con: sqlite3.Connection | None = None) -> dict[str, dict]:
+    if con is None:
+        with trajetoria.abrir() as nova:
+            return status_map(nova)
     st: dict[str, dict] = {}
-    for e in eventos():
-        cur = st.setdefault(e['id'], {'status': 'pendente'})
-        if e['evento'] == 'iniciada' and cur['status'] != 'feita':
+    for r in con.execute("SELECT avanco_id, quando, evento, nota, resumo FROM avanco_evento "
+                         "WHERE evento IN ('iniciada', 'concluida') ORDER BY id"):
+        cur = st.setdefault(r['avanco_id'], {'status': 'pendente'})
+        if r['evento'] == 'iniciada' and cur['status'] != 'feita':
             cur['status'] = 'em andamento'
-        elif e['evento'] == 'concluida':
-            cur.update(status='feita', nota=e.get('nota'), resumo=e.get('resumo', ''), quando=e['quando'])
+        elif r['evento'] == 'concluida':
+            cur.update(status='feita', nota=r['nota'], resumo=r['resumo'] or '', quando=r['quando'])
     return st
 
 
 def guardar(skill: str, pergunta: str, contexto: str = '') -> dict:
-    salvas = _read_json(SALVAS, [])
     acao = {
         'titulo': pergunta[:70],
         'tipo': 'explicar',
@@ -106,9 +148,9 @@ def guardar(skill: str, pergunta: str, contexto: str = '') -> dict:
         'guardada_em': datetime.now().isoformat(timespec='seconds'),
     }
     acao['id'] = aid('guardada', acao['titulo'])
-    if not any(a['id'] == acao['id'] for a in salvas):
-        salvas.append(acao)
-        arquivos.gravar_json(SALVAS, salvas)
+    from . import jogo  # a ação guardada é um avanço de origem 'lampejo'; valor e skill do plano vêm do próximo sync
+    with trajetoria.abrir() as con, banco.transacao(con):
+        jogo._inserir_avanco(con, {**acao, 'skill_plano': skill, 'estado': 'sugerido', 'criado_em': _agora()})
     return acao
 
 
@@ -138,8 +180,7 @@ def derivadas(plan: dict) -> list[dict]:
         for a in t.get('acoes', []):
             out.append({**a, 'skill': t.get('skill') or a.get('skill', ''), 'dimensao': None, 'origem': 'trecho',
                         'horizonte': f"nível {t.get('para', '')}", 'id': aid('trecho', t.get('skill', '') + a.get('titulo', ''))})
-    out.extend(_read_json(SALVAS, []))
-    return out
+    return out  # as ações guardadas já são avanços no banco: o catálogo as mantém
 
 
 def find(plan: dict, acao_id: str) -> dict | None:

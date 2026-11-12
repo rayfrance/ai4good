@@ -25,7 +25,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from luzia import arquivos, jogo, trajetoria  # noqa: E402
+from luzia import acoes, arquivos, jogo, trajetoria  # noqa: E402
 
 PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
@@ -118,12 +118,13 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
             if lm and modo == 'ativo':
                 partes.append(f'[Luzia · luz própria] A pessoa DIRIGIU "{skill}" neste pedido (+{lm} lm de luz própria). '
                               f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · {skill}: você dirigiu isto, +{lm} lm de luz própria."')
-    fila = read_json(PRIVATE / 'fila.json', [])
-    pend = [f for f in fila if sid not in f.get('oferecida_em', [])]
+    pend = [f for f in acoes.fila() if sid not in f.get('oferecida_em', [])]
     if pend:
         item = pend[0]
-        item.setdefault('oferecida_em', []).append(sid)
-        arquivos.gravar_json(PRIVATE / 'fila.json', fila)
+        try:
+            acoes.marcar_oferecida(item['id'], sid)
+        except Exception as e:  # o aviso sai mesmo se o banco estiver ocupado; o erro fica registrado
+            arquivos.registrar_erro('observer fila', e)
         partes.append(
             f'[Luzia · fila] A pessoa enviou do painel o feixe #{item["id"]} ("{item.get("titulo", "")}"). Responda primeiro ao '
             'que ela pediu. No FIM, em uma linha começando com "✦ Luzia:", lembre o feixe e use AskUserQuestion com '
@@ -188,10 +189,9 @@ def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
     plan = plano()
     if not plan:
         return
-    cat = read_json(jogo.FEIXES, {})
-    andamento = [f for f in cat.values() if f.get('estado') == 'em_andamento']
+    andamento = jogo.em_andamento()
     prontas = [s['nome'].split('(')[0].strip() for s in jogo.rota(plan)['skills'] if s['pronto'] and not s['na_meta']]
-    fila = read_json(PRIVATE / 'fila.json', [])
+    fila = acoes.fila()
     partes = []
     if prontas:
         partes.append(f"{', '.join(prontas)} pronta para subir de degrau")

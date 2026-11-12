@@ -46,7 +46,7 @@ def linha(evento: dict) -> str:
         cor = LARANJA if s['luz_propria'] >= 40 else LILAS
         partes.append(f"{s['nome'].split('(')[0].strip()} {cor}{barra(s['lm'], s['limiar'])}{FIM} {s['lm']}/{s['limiar']} lm")
     partes.append(f"{APAGADO}{r['degraus_feitos']}/{r['degraus_total']} degraus{FIM}")
-    andamento = sum(1 for f in arquivos.ler_json(jogo.FEIXES, {}).values() if f.get('estado') == 'em_andamento')
+    andamento = len(jogo.em_andamento())
     if andamento:
         partes.append(f'{APAGADO}{andamento} em andamento{FIM}')
     return ' · '.join(partes)

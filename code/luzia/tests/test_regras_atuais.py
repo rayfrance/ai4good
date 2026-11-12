@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from luzia import acoes, cli, instalar, jogo, observer, pipeline
+from luzia import acoes, banco, cli, instalar, jogo, observer, pipeline
 
 DDD = 'Domain-Driven Design (DDD)'
 TESTES = 'Testes e Qualidade / SQL'
@@ -43,7 +43,11 @@ def _revisitado(plan, fid):
 
 
 def _feixes():
-    return jogo._ler(jogo.FEIXES, {})
+    con = banco.conectar()
+    try:
+        return {f['id']: f for f in jogo.avancos(con)}
+    finally:
+        con.close()
 
 
 # ------------------------------------------------------------------ lote 1 · revisita paga só uma vez
@@ -118,9 +122,10 @@ def test_segunda_tentativa_na_mesma_sessao_e_aceita(plan, sugeridos):
 
 def test_feixe_com_lumens_e_estado_perdido_nao_paga_de_novo(plan, sugeridos):
     f3 = sugeridos[2]
-    c = _feixes()
-    c[f3].update(estado='em_andamento', lm_ganho=20, nota=4)
-    jogo._gravar(jogo.FEIXES, c)
+    con = banco.conectar()
+    with banco.transacao(con):
+        con.execute("UPDATE avanco SET estado = 'em_andamento', lm_ganho = 20, nota = 4 WHERE id = ?", (f3,))
+    con.close()
     assert 'erro' in jogo.conquistar(f3, 4, 't', plan)
 
 
@@ -165,10 +170,11 @@ def test_com_um_feixe_conquistado_o_degrau_fica_pronto(plan):
 
 # ------------------------------------------------------------------ lote 1 · arquivos
 def test_catalogo_sem_mudanca_nao_e_regravado(plan, sugeridos):
-    antes = jogo.FEIXES.stat().st_mtime_ns
-    time.sleep(0.05)
+    espiao = banco.conectar()  # data_version muda quando outra conexão confirma uma gravação
+    antes = espiao.execute('PRAGMA data_version').fetchone()[0]
     jogo.catalogo(plan)
-    assert jogo.FEIXES.stat().st_mtime_ns == antes
+    assert espiao.execute('PRAGMA data_version').fetchone()[0] == antes
+    espiao.close()
 
 
 def _corromper():

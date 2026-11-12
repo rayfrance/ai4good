@@ -199,3 +199,49 @@ def test_concorrencia_nada_some_nada_duplica(privado):
     refs = [r[4] for r in _lumens(con)]
     assert sorted(refs) == sorted(f'{q}-{i}' for q in range(3) for i in range(25))
     assert _linhas_no_disco(privado) == []
+
+
+def test_absorver_de_novo_na_mesma_transacao_e_desfazer(privado, travado):
+    """Uma segunda absorção no mesmo bloco não apaga o que a primeira marcou: se a transação desfizer, nada some."""
+    con, outra = travado
+    assert banco.gravar_ou_pendurar('lumen', dict(LUMEN)) is False
+    outra.rollback()
+    with pytest.raises(RuntimeError):
+        with banco.transacao(con):
+            assert banco.absorver_pendentes(con) == 0  # o início da transacao já aplicou a linha
+            raise RuntimeError('falha depois da absorção')
+    assert _lumens(con) == []
+    assert [l['dados'] for l in _linhas_no_disco(privado)] == [LUMEN]
+    with banco.transacao(con):
+        pass
+    assert len(_lumens(con)) == 1
+    assert _linhas_no_disco(privado) == []
+
+
+def test_absorver_de_novo_na_mesma_transacao_e_confirmar(privado, travado):
+    con, outra = travado
+    assert banco.gravar_ou_pendurar('lumen', dict(LUMEN)) is False
+    outra.rollback()
+    with banco.transacao(con):
+        assert banco.absorver_pendentes(con) == 0
+    assert len(_lumens(con)) == 1
+    assert _linhas_no_disco(privado) == []  # apagados depois do COMMIT
+    with banco.transacao(con):
+        pass
+    assert len(_lumens(con)) == 1
+
+
+@pytest.mark.parametrize('operacao, dados', [
+    ('lumen', {k: v for k, v in LUMEN.items() if k != 'prisma'}),
+    ('lumen', {**LUMEN, 'lm': None}),
+    ('lumen', {k: v for k, v in LUMEN.items() if k != 'fonte'}),
+    ('lumen', {**LUMEN, 'luz': 'outra'}),
+    ('lampejo', {'sessao': 's1'}),
+    ('lampejo', {'prisma': 'Prisma DDD', 'estado': 'apagado'}),
+    ('sessao_evento', {'sessao': 's1', 'luz': 'outra'}),
+])
+def test_dados_invalidos_levantam(privado, operacao, dados):
+    banco.conectar().close()
+    with pytest.raises(ValueError):
+        banco.gravar_ou_pendurar(operacao, dados)
+    assert _linhas_no_disco(privado) == []

@@ -38,6 +38,14 @@ OPERACOES = {
     'sessao_evento': ('quando', 'sessao', 'prisma', 'extensao', 'ferramenta', 'modo', 'lm', 'luz', 'interveio'),
     'lampejo': ('prisma', 'sessao', 'quando', 'estado', 'usado_em'),
 }
+# Colunas NOT NULL sem padrão (`quando` vem da hora do evento quando falta) e valores aceitos pelos CHECK do esquema.
+OBRIGATORIAS = {'lumen': ('prisma', 'lm', 'luz', 'fonte'), 'sessao_evento': (), 'lampejo': ('prisma',)}
+VALORES = {'luz': ('propria', 'refletida'), 'estado': ('aberto', 'convertido', 'guardado')}
+
+# Reservas marcadas em meta pela transação aberta de cada conexão (id(con) → arquivos): só podem ser apagadas
+# depois do COMMIT dela. `sqlite3.Connection` não aceita atributo nem weakref; `transacao` zera a entrada no BEGIN
+# e a retira no fim, então um id reaproveitado no máximo adia a limpeza (nunca apaga antes da hora).
+_RESERVAS_ABERTAS: dict[int, list[Path]] = {}
 
 ESQUEMA = (
     """CREATE TABLE IF NOT EXISTS meta (
@@ -274,21 +282,23 @@ def transacao(con: sqlite3.Connection, modo: str = 'IMMEDIATE',
     if modo not in ('IMMEDIATE', 'EXCLUSIVE'):
         raise ValueError(f'modo de transação inválido: {modo}')
     con.execute(f'BEGIN {modo}')
-    absorvidos: list[Path] = []
+    _RESERVAS_ABERTAS[id(con)] = []  # transação nova: nada dela marcado ainda
     try:
         if absorver:
-            absorvidos = _absorver(con)[1]
+            _absorver(con)
         yield con
     except BaseException:
+        _RESERVAS_ABERTAS.pop(id(con), None)
         con.rollback()
         raise
     try:
         con.commit()
     except BaseException:
+        _RESERVAS_ABERTAS.pop(id(con), None)
         if con.in_transaction:  # o COMMIT falhou (ex.: chave adiada, trava): não deixa a conexão presa
             con.rollback()
         raise
-    _apagar(absorvidos)
+    _apagar(_RESERVAS_ABERTAS.pop(id(con), []))  # inclui o que `absorver_pendentes` aplicou dentro do bloco
 
 
 # --- Pendentes do hook ---------------------------------------------------------------------------------------------
@@ -310,6 +320,12 @@ def _validar(operacao: str, dados: dict) -> dict:
         raise ValueError(f'colunas desconhecidas em {operacao}: {sorted(estranhas)}')
     if any(v is not None and not isinstance(v, (str, int, float)) for v in dados.values()):
         raise ValueError(f'valores de {operacao} precisam ser texto, número ou nulo')
+    faltando = [c for c in OBRIGATORIAS[operacao] if dados.get(c) is None]
+    if faltando:
+        raise ValueError(f'colunas obrigatórias faltando em {operacao}: {faltando}')
+    for coluna, aceitos in VALORES.items():
+        if dados.get(coluna) is not None and dados[coluna] not in aceitos:
+            raise ValueError(f'{coluna} inválido em {operacao}; aceitos: {list(aceitos)}')
     return dict(dados)
 
 
@@ -383,20 +399,23 @@ def _aplicar(con: sqlite3.Connection, arquivo: Path) -> int:
     return n
 
 
-def _absorver(con: sqlite3.Connection) -> tuple[int, list[Path]]:
-    """Aplica os pendentes na transação aberta; devolve (linhas aplicadas, arquivos a apagar depois do COMMIT).
+def _absorver(con: sqlite3.Connection) -> int:
+    """Aplica os pendentes na transação aberta e devolve quantas linhas entraram.
 
-    Roda num SAVEPOINT: se o banco falhar aqui, desfaz só a absorção (os arquivos ficam para a próxima vez) e a
-    escrita de quem chamou segue.
+    Os arquivos aplicados ficam em `_RESERVAS_ABERTAS` para serem apagados só depois do COMMIT. Roda num SAVEPOINT:
+    se o banco falhar aqui, desfaz só a absorção (os arquivos ficam para a próxima vez) e a escrita de quem chamou segue.
     """
     pasta = _pasta_do_banco(con)
     if pasta is None:
-        return 0, []
+        return 0
+    abertas = _RESERVAS_ABERTAS.setdefault(id(con), [])
+    desta_transacao = {a.name for a in abertas}
+    novas: list[Path] = []
     con.execute('SAVEPOINT pendentes')
     try:
         marcadas = {r[0][len(MARCA):] for r in
                     con.execute('SELECT chave FROM meta WHERE substr(chave, 1, ?) = ?', (len(MARCA), MARCA))}
-        for nome in marcadas:  # aplicadas num COMMIT anterior: só falta apagar o arquivo
+        for nome in marcadas - desta_transacao:  # aplicadas num COMMIT anterior: só falta apagar o arquivo
             try:
                 (pasta / nome).unlink(missing_ok=True)
             except OSError:
@@ -406,9 +425,9 @@ def _absorver(con: sqlite3.Connection) -> tuple[int, list[Path]]:
             os.replace(pasta / PENDENTES, pasta / RESERVA.format(ns=time.time_ns(), pid=os.getpid()))
         except OSError:  # não existe, ou (Windows) um hook está escrevendo agora: fica para a próxima transação
             pass
-        n, feitos = 0, []
+        n = 0
         for arquivo in sorted(pasta.glob('pendentes-*.absorvendo')):
-            if arquivo.name in marcadas:
+            if arquivo.name in marcadas:  # inclui as marcadas por esta mesma transação
                 continue
             try:
                 n += _aplicar(con, arquivo)
@@ -417,14 +436,15 @@ def _absorver(con: sqlite3.Connection) -> tuple[int, list[Path]]:
                 continue
             con.execute('INSERT INTO meta (chave, valor) VALUES (?, ?)',
                         (MARCA + arquivo.name, datetime.now().isoformat(timespec='seconds')))
-            feitos.append(arquivo)
+            novas.append(arquivo)
     except sqlite3.Error as e:
         con.execute('ROLLBACK TO pendentes')
         con.execute('RELEASE pendentes')
         arquivos.registrar_erro('banco.absorver_pendentes', e)
-        return 0, []
+        return 0
     con.execute('RELEASE pendentes')
-    return n, feitos
+    abertas.extend(novas)
+    return n
 
 
 def _apagar(feitos: list[Path]) -> None:
@@ -439,11 +459,12 @@ def _apagar(feitos: list[Path]) -> None:
 def absorver_pendentes(con: sqlite3.Connection) -> int:
     """Aplica os eventos pendentes do hook na transação de escrita já aberta; devolve quantos entraram.
 
-    `transacao` chama isto sozinha no início. Chamada direta: os arquivos aplicados somem na próxima absorção.
+    `transacao` chama isto sozinha no início; chamada de novo dentro do bloco, não repete nem apaga o que esta
+    transação marcou. Os arquivos somem depois do COMMIT de `transacao` (fora dela, na próxima absorção).
     """
     if not con.in_transaction:
         raise RuntimeError('absorver_pendentes precisa de uma transação de escrita aberta (use transacao)')
-    return _absorver(con)[0]
+    return _absorver(con)
 
 
 def gravar_ou_pendurar(operacao: str, dados: dict) -> bool:

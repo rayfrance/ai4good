@@ -514,7 +514,11 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/api/acender', '/api/trecho'):
             from luzia import cli
             alvo = str(dados.get('prisma') or dados.get('skill') or '')[:120]
-            res = cli.gerar_trecho(alvo, 'painel-acender')
+            try:
+                res = cli.gerar_trecho(alvo, 'painel-acender')
+            except Exception as e:  # sem modelo, sem chave ou sem internet: mensagem clara, nada gravado
+                arquivos.registrar_erro('server acender', e)
+                return self._json({'erro': f'não deu para acender avanços sem o modelo ({modelo.resumo_erro(e)})'}, 400)
             if res.get('erro'):
                 return self._json({'erro': res['erro']}, 400)
             ids = [f['id'] for f in res['feixes']]

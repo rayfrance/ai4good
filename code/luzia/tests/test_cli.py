@@ -121,9 +121,13 @@ def test_avancos_filtros(privado, monkeypatch):
 
 
 def test_pedido_fluxo_completo_pelo_chat(privado, monkeypatch):
+    recebidos = []
+
     def fake_run_plan(payload, schema=None, intro='', **kw):
-        nivel = payload.get('nivel_sugerido_pela_pessoa') or 1
-        meta = payload.get('meta_sugerida_pela_pessoa') or 3
+        recebidos.append(payload)  # o payload é o que o código de verdade monta: pedido.nivel_solicitado / meta_solicitada
+        ped = payload.get('pedido') or {}
+        nivel = ped.get('nivel_solicitado') if ped.get('nivel_solicitado') is not None else 1
+        meta = ped.get('meta_solicitada') if ped.get('meta_solicitada') is not None else 3
         res = {
             'nivel_partida': nivel,
             'meta': meta,
@@ -172,7 +176,10 @@ def test_pedido_fluxo_completo_pelo_chat(privado, monkeypatch):
 
     s_ajustar = rodar(monkeypatch, 'pedido', 'ajustar', str(pid), '--nivel', '2', '--meta', '4')
     assert tem_rodape_botoes(s_ajustar)
-    assert '2' in visivel(s_ajustar) and '4' in visivel(s_ajustar)
+    # o modelo recebeu o pedido de verdade (nível 2, meta 4) e a proposta impressa traz exatamente esses números
+    assert recebidos[-1]['pedido']['nivel_solicitado'] == 2 and recebidos[-1]['pedido']['meta_solicitada'] == 4
+    assert 'nível **2 → meta 4/5**' in visivel(s_ajustar)
+    assert 'Partida no nível 2 rumo à meta 4' in visivel(s_ajustar)
 
     s_aceitar = rodar(monkeypatch, 'pedido', 'aceitar', str(pid))
     assert tem_rodape_botoes(s_aceitar)
@@ -514,3 +521,12 @@ def test_trajetoria_compacta_a_falta_e_nomeia_skill_so_na_primeira_vez(privado, 
     assert saida.count('(skill)') == 1 and '(prisma (skill))' not in saida
     falta = [l for l in saida.splitlines() if ' falta: ' in l]
     assert falta and all('conquistar 1' not in l and len(l) < 230 for l in falta), falta
+
+
+def test_acender_sem_modelo_no_chat_nao_quebra_nem_grava(privado, monkeypatch):
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem modelo')))
+    jogo.sincronizar(pipeline.load_state()['plano'])
+    antes = len(jogo.catalogo(pipeline.load_state()['plano']))
+    s = rodar(monkeypatch, 'acender', DDD)
+    assert 'não deu para acender' in visivel(s) and tem_rodape_botoes(s)
+    assert len(jogo.catalogo(pipeline.load_state()['plano'])) == antes

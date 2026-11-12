@@ -1141,7 +1141,11 @@ def main() -> None:
         return
 
     if args.comando in ('acender', 'trecho'):
-        res = gerar_trecho(args.valor or args.prisma or args.skill, rotulo)
+        try:
+            res = gerar_trecho(args.valor or args.prisma or args.skill, rotulo)
+        except Exception as e:  # sem modelo, sem chave ou sem internet: mensagem clara e botões, nada gravado
+            arquivos.registrar_erro('cli acender', e)
+            res = {'erro': f'não deu para acender avanços sem o modelo ({modelo.resumo_erro(e)})'}
         if res.get('erro'):
             print(f"◐ {res['erro']}.")
             botoes(proximos_botoes(plan))

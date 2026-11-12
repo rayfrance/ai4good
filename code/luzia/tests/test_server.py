@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 import pytest
 
-from luzia import banco, entregas, jogo, leituras, pipeline, server, trajetoria
+from luzia import banco, entregas, jogo, leituras, pipeline, planner, server, trajetoria
 
 DDD = 'Domain-Driven Design (DDD)'
 TESTES = 'Testes e Qualidade / SQL'
@@ -47,6 +47,17 @@ def api(privado, monkeypatch):
         conn.close()
         return resp.status, data
 
+    def bruto(method: str, path: str, corpo: bytes = b'', headers: dict | None = None) -> tuple[int, dict]:
+        """Requisição sem passar pelo json.dumps do teste: corpo e cabeçalhos exatamente como dados."""
+        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        hdrs = {'Host': f'127.0.0.1:{port}', 'Origin': f'http://127.0.0.1:{port}', **(headers or {})}
+        conn.request(method, path, body=corpo, headers=hdrs)
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode('utf-8') or '{}')
+        conn.close()
+        return resp.status, data
+
+    req.bruto = bruto
     yield req
     httpd.shutdown()
     httpd.server_close()
@@ -113,9 +124,13 @@ def test_entrega_detalhe_e_ampliar(api):
 
 
 def test_pedido_fluxo_api(api, monkeypatch):
+    recebidos = []
+
     def fake_run_plan(payload, schema=None, intro='', **kw):
-        nivel = payload.get('nivel_sugerido_pela_pessoa') or 1
-        meta = payload.get('meta_sugerida_pela_pessoa') or 3
+        recebidos.append(payload)  # as chaves são as que o código de verdade monta (pedido.nivel_solicitado...)
+        ped = payload.get('pedido') or {}
+        nivel = ped.get('nivel_solicitado') if ped.get('nivel_solicitado') is not None else 1
+        meta = ped.get('meta_solicitada') if ped.get('meta_solicitada') is not None else 3
         res = {
             'nivel_partida': nivel,
             'meta': meta,
@@ -156,8 +171,10 @@ def test_pedido_fluxo_api(api, monkeypatch):
 
     c2, r2 = api('POST', '/api/pedido', {'acao': 'ajustar', 'id': pid, 'nivel': 2, 'meta': 4})
     assert c2 == 200
+    assert recebidos[-1]['pedido']['nivel_solicitado'] == 2 and recebidos[-1]['pedido']['meta_solicitada'] == 4
     assert r2['pedido']['proposta']['nivel_partida'] == 2
     assert r2['pedido']['proposta']['meta'] == 4
+    assert 'Início no nível 2 até 4' in r2['pedido']['leitura']['texto']
 
     c3, r3 = api('POST', '/api/pedido', {'acao': 'aceitar', 'id': pid})
     assert c3 == 200
@@ -202,9 +219,22 @@ def test_nivel_acender_leituras_api(api, monkeypatch):
     c_ac, r_ac = api('POST', '/api/acender', {'prisma': DDD})
     assert c_ac == 200 and len(r_ac.get('avancos', [])) == 3
 
-    monkeypatch.setattr(leituras, 'gerar', lambda con, alvos=None: 2)
+    # `leituras.gerar` roda de verdade; só o modelo é falso
+    def modelo_de_leituras(payload, **kw):
+        itens = [{'alvo': a['alvo'], 'texto': f"Leitura de {a['id']}."} for a in payload['alvos']]
+        res = planner.LLMResult(plan={'leituras': itens}, raw='{}', seconds=0.1, tokens_in=1, tokens_out=1, model='gemini/x')
+        return res, {'quando': '2026-11-12T16:20:00', 'modelo': 'gemini/x'}
+
+    monkeypatch.setattr(pipeline, 'run_plan', modelo_de_leituras)
+    _, antes = api('GET', '/api/estado')
+    esperadas = antes['leituras_vencidas']
+    assert esperadas >= 3
     c_lt, r_lt = api('POST', '/api/leituras', {})
-    assert c_lt == 200 and r_lt.get('geradas') == 2
+    assert c_lt == 200 and r_lt.get('geradas') == esperadas
+    _, depois = api('GET', '/api/estado')
+    assert depois['leituras_vencidas'] == 0
+    leitura = next(p for p in depois['prismas'] if p['nome'] == DDD)['leitura']
+    assert leitura['texto'] == f'Leitura de {DDD}.' and leitura['modelo'] == 'gemini/x' and leitura['vencida'] is False
 
 
 def test_seguranca_origem_e_host_403(api):
@@ -336,3 +366,49 @@ def test_reativar_pelo_painel_so_abre_o_pedido_e_o_prisma_segue_arquivado(api, m
         assert con.execute('SELECT estado FROM prisma WHERE nome = ?', (TESTES,)).fetchone()['estado'] == 'ativo'
     finally:
         con.close()
+
+
+
+# ------------------------------------------------------------------ caminhos de erro da API
+def test_corpo_invalido_tipo_errado_e_rota_desconhecida(api):
+    assert api.bruto('POST', '/api/modo', b'{nao e json', {'Content-Type': 'application/json'}) == (400, {'erro': 'json inválido'})
+    c, r = api.bruto('POST', '/api/modo', b'{"modo": "passivo"}', {'Content-Type': 'text/plain'})
+    assert c == 415 and 'application/json' in r['erro']
+    assert api('POST', '/api/inexistente', {})[0] == 404
+    grande = json.dumps({'modo': 'x' * 2_000_000}).encode('utf-8')
+    assert api.bruto('POST', '/api/modo', grande, {'Content-Type': 'application/json'})[0] == 413
+
+
+def test_validacoes_de_cada_acao_devolvem_400_ou_404_sem_gravar(api, privado):
+    casos = [
+        ('/api/modo', {'modo': 'inventado'}, 400, 'modo inválido'),
+        ('/api/agente', {'agente': 'inventado'}, 400, 'agente inválido'),
+        ('/api/nivel', {'prisma': DDD, 'nivel': 'alto'}, 400, 'nível inválido'),
+        ('/api/nivel', {'prisma': 'Prisma que não existe', 'nivel': 2}, 400, 'prisma desconhecido'),
+        ('/api/descartar', {'id': 'abcd', 'motivo': 'qualquer'}, 400, 'motivo inválido'),
+        ('/api/enviar', {'id': 'zzzz'}, 404, 'não encontrado'),
+        ('/api/iniciar', {'id': 'zzzz'}, 400, 'não pode ser iniciado'),
+        ('/api/modelo', {'provedor': 'inventado', 'modelo': 'x'}, 400, 'provedor inválido'),
+        ('/api/modelo', {'provedor': 'gemini', 'modelo': 'nome com espaço'}, 400, 'nome de modelo inválido'),
+        ('/api/entrega/acender', {'id': 'abc'}, 400, 'id de entrega inválido'),
+    ]
+    for caminho, corpo, codigo, trecho in casos:
+        c, r = api('POST', caminho, corpo)
+        assert c == codigo and trecho in r.get('erro', ''), (caminho, corpo, c, r)
+    cfg = json.loads((privado / 'observer.json').read_text(encoding='utf-8'))
+    assert cfg['modo'] == 'ativo' and cfg.get('agente', 'claude-code') == 'claude-code'
+    assert not (privado / 'modelo.json').exists()
+
+
+def test_acender_sem_modelo_devolve_400_e_nao_grava_avancos(api, monkeypatch):
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem modelo')))
+    _, antes = api('GET', '/api/estado')
+    c, r = api('POST', '/api/acender', {'prisma': DDD})
+    assert c == 400 and r.get('erro')
+    _, depois = api('GET', '/api/estado')
+    assert len(depois['avancos']) == len(antes['avancos'])
+
+
+def test_subir_sem_nivel_pronto_devolve_o_motivo(api):
+    c, r = api('POST', '/api/subir', {'prisma': DDD})
+    assert c == 400 and 'lm' in r['erro'] and 'feixe' not in r['erro'].lower()

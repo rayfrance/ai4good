@@ -83,7 +83,8 @@ def estado() -> dict:
         leituras_prismas = {p['nome']: leituras.obter(con, 'prisma', p['nome']) for p in todos_prismas_db}
         lista_pedidos = pedidos.listar(con)
         entregas_git = entregas.listar(con)
-        detalhes_git = [entregas.detalhe(con, e['id']) for e in entregas_git[:15]]
+        avancos_todos = jogo.avancos(con)  # uma só lista de avanços para todas as entregas
+        detalhes_git = [entregas.detalhe(con, e['id'], todos_avancos=avancos_todos) for e in entregas_git[:15]]
         diag_entregas = None if entregas_git else entregas.diagnostico(con)
 
     diag = plan.get('diagnostico_fontes', {})

@@ -23,6 +23,28 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+# termos.txt lido uma vez por processo e relido só quando o arquivo muda (caminho, mtime, tamanho): o painel pede o
+# estado a cada 4 s e cada leitura/entrega abria o arquivo de novo.
+_TERMOS: dict[Path, tuple[tuple[int, int], list[str]]] = {}
+
+
+def _termos_do_arquivo(path: Path | None) -> list[str]:
+    if not path:
+        return []
+    try:
+        info = path.stat()
+    except OSError:
+        _TERMOS.pop(path, None)
+        return []
+    marca = (info.st_mtime_ns, info.st_size)
+    guardado = _TERMOS.get(path)
+    if guardado and guardado[0] == marca:
+        return list(guardado[1])
+    termos = [t for t in (ln.strip() for ln in path.read_text(encoding='utf-8').splitlines()) if t and not t.startswith('#')]
+    _TERMOS[path] = (marca, termos)
+    return list(termos)
+
+
 @dataclass
 class Redactor:
     """Mascara padrões de dados pessoais, termos de empresa/clientes e nomes de colegas."""
@@ -39,12 +61,7 @@ class Redactor:
         keep_names: set[str] | None = None,
     ) -> 'Redactor':
         keep = {k.lower() for k in (keep_names or {'rayane', 'france', 'tasy', 'jev', 'brevo', 'mv'})}
-        terms: list[str] = []
-        if path and path.exists():
-            for line in path.read_text(encoding='utf-8').splitlines():
-                line = line.strip()
-                if line and not line.startswith('#'):
-                    terms.append(line)
+        terms = _termos_do_arquivo(path)
         colleagues = [
             c for c in (extra_colleagues or [])
             if len(c) >= 4 and c.lower() not in keep and 'rayane' not in c.lower()

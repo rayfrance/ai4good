@@ -112,12 +112,12 @@ def _base_prisma(con: sqlite3.Connection, nome: str, redator: Redactor) -> dict:
     }
 
 
-def _base_entrega(con: sqlite3.Connection, entrega_id: str, redator: Redactor) -> dict:
+def _base_entrega(con: sqlite3.Connection, entrega_id: str, redator: Redactor, det: dict | None = None) -> dict:
     try:
         eid = int(entrega_id)
     except ValueError:
         return {'entrega_id': str(entrega_id)}
-    det = entregas.detalhe(con, eid, incluir_leitura=False)
+    det = det if det is not None else entregas.detalhe(con, eid, incluir_leitura=False)
     if det is None:
         return {'entrega_id': str(entrega_id)}
     lm_ligados = det.get('lumens_ligados') or []
@@ -164,14 +164,17 @@ def _base_pedido(con: sqlite3.Connection, pedido_id: str, redator: Redactor) -> 
     }
 
 
-def base(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str) -> dict:
-    """Fatos determinísticos e anonimizados que fundamentam a leitura de um prisma, entrega ou pedido."""
+def base(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str, det: dict | None = None) -> dict:
+    """Fatos determinísticos e anonimizados que fundamentam a leitura de um prisma, entrega ou pedido.
+
+    `det` (entrega): o detalhe já calculado por quem chama (sem leitura), para não calculá-lo duas vezes.
+    """
     redator = _redator()
     alvo_id = str(alvo_id)
     if alvo_tipo == 'prisma':
         return _base_prisma(con, alvo_id, redator)
     if alvo_tipo == 'entrega':
-        return _base_entrega(con, alvo_id, redator)
+        return _base_entrega(con, alvo_id, redator, det)
     if alvo_tipo == 'pedido':
         return _base_pedido(con, alvo_id, redator)
     raise ValueError(f'tipo de alvo desconhecido para leitura: {alvo_tipo!r}')
@@ -183,8 +186,11 @@ def hash_base(dados_base: dict) -> str:
     return hashlib.sha256(canonico.encode('utf-8')).hexdigest()
 
 
-def obter(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str) -> dict | None:
-    """Leitura mais recente gravada para (alvo_tipo, alvo_id), indicando se está vencida."""
+def obter(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str, atual: dict | None = None) -> dict | None:
+    """Leitura mais recente gravada para (alvo_tipo, alvo_id), indicando se está vencida.
+
+    `atual`: a base de fatos de agora, se quem chama já a calculou (senão ela é calculada aqui).
+    """
     alvo_id = str(alvo_id)
     r = con.execute(
         'SELECT id, texto, base_json, base_hash, modelo, criado_em FROM leitura '
@@ -197,7 +203,7 @@ def obter(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str) -> dict | None:
         base_salva = json.loads(r['base_json'] or '{}')
     except ValueError:
         base_salva = {}
-    atual_hash = hash_base(base(con, alvo_tipo, alvo_id))
+    atual_hash = hash_base(atual if atual is not None else base(con, alvo_tipo, alvo_id))
     return {
         'id': int(r['id']),
         'alvo_tipo': alvo_tipo,

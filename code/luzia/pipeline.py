@@ -195,14 +195,21 @@ def save_state(payload: dict, plan: dict, record: dict, hits: dict) -> None:
 
 
 def update_state(fields: dict, record: dict) -> None:
-    """Atualiza só os campos do dia a dia no estado salvo (a triagem continua valendo)."""
-    state = load_state()
-    if not state:
-        return
-    state.setdefault('plano', {}).update(fields)
-    state['atualizado_em'] = record['quando']
-    state['custo_ultima_execucao'] = record
+    """Atualiza só os campos do dia a dia no estado salvo (a triagem continua valendo).
+
+    Ler, alterar e gravar acontece numa só transação: duas atualizações juntas (CLI, painel, hook) não se sobrescrevem.
+    """
     with trajetoria.abrir() as con, banco.transacao(con):
+        plano = trajetoria.perfil_ler(con, 'plano')
+        if plano is None:  # banco sem plano: parte da foto antiga, se existir
+            state = arquivos.ler_estado()
+        else:
+            state = {**(trajetoria.perfil_ler(con, 'estado_legado', {}) or {}), 'plano': plano}
+        if not state:
+            return
+        state.setdefault('plano', {}).update(fields)
+        state['atualizado_em'] = record['quando']
+        state['custo_ultima_execucao'] = record
         trajetoria.perfil_gravar(con, 'plano', state['plano'])
         trajetoria.perfil_gravar(con, 'estado_legado', {k: v for k, v in state.items() if k != 'plano'})
 

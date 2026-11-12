@@ -559,8 +559,12 @@ def _lumens_ligados(con: sqlite3.Connection, r: sqlite3.Row, prismas_nomes: set[
     return out
 
 
-def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = True) -> dict | None:
-    """Detalhe completo de uma entrega ligada ao jogo (sem hashes nem ids privados)."""
+def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = True,
+            todos_avancos: list[dict] | None = None) -> dict | None:
+    """Detalhe completo de uma entrega ligada ao jogo (sem hashes nem ids privados).
+
+    `todos_avancos`: a lista de avanços já carregada por quem chama várias entregas de uma vez (evita recarregá-la em cada uma).
+    """
     r = con.execute('SELECT * FROM entrega WHERE id = ?', (int(entrega_id),)).fetchone()
     if r is None:
         return None
@@ -580,7 +584,7 @@ def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = Tr
             'arquivos': int(c['arquivos'] or 0), 'linhas': int(c['linhas'] or 0), 'areas': areas,
         })
 
-    todos_avancos = jogo.avancos(con)
+    todos_avancos = todos_avancos if todos_avancos is not None else jogo.avancos(con)
     avancos_feitos = [
         a for a in todos_avancos
         if a.get('entrega_id') == eid or (a.get('entrega_id') is None and r['titulo'] and a.get('entrega') == r['titulo'])
@@ -596,15 +600,7 @@ def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = Tr
     lumens = _lumens_ligados(con, r, prismas_nomes, ids_feitos)
     prop = _propriedade_entrega(con, r, commits, avancos_feitos)
 
-    leitura_obj = None
-    if incluir_leitura:
-        try:
-            from . import leituras
-            leitura_obj = leituras.obter(con, 'entrega', str(eid))
-        except ImportError:
-            pass
-
-    return {
+    det = {
         'id': eid,
         'titulo': r['titulo'] or 'Entrega',
         'fonte': r['fonte'],
@@ -617,8 +613,12 @@ def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = Tr
         'avancos_uteis': avancos_uteis,
         'lumens_ligados': lumens,
         'propriedade': prop,
-        'leitura': leitura_obj,
+        'leitura': None,
     }
+    if incluir_leitura:  # a base da leitura reaproveita este detalhe, em vez de calculá-lo de novo
+        from . import leituras
+        det['leitura'] = leituras.obter(con, 'entrega', str(eid), atual=leituras.base(con, 'entrega', str(eid), det=det))
+    return det
 
 
 def listar(con: sqlite3.Connection) -> list[dict]:

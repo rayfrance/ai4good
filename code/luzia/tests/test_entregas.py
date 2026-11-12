@@ -258,3 +258,23 @@ def test_janela_refaz_a_busca_quando_nada_casou_ou_identidade_mudou(con, repo, p
     with banco.transacao(con):
         trajetoria.perfil_gravar(con, 'identidades', ['Ninguem Daqui', EU, 'segundo@exemplo.test'])
     assert entregas.atualizar(con)['novas'] == 1
+
+
+def test_titulo_do_pr_do_github_vem_do_ramo_sem_numeros_de_ticket(repo):
+    """O título do `Merge pull request` sai do nome do ramo, que costuma levar a chave do ticket."""
+    repo.git('checkout', '-q', '-b', 'feature/ABC-1234-ajusta-agregado-2')
+    repo.commit('feat: agregado', 'src/Pedido.cs', quando=_dias(6))
+    repo.git('checkout', '-q', 'main')
+    repo.git('merge', '--no-ff', '-m', 'Merge pull request #4821 from org/feature/ABC-1234-ajusta-agregado-2',
+             'feature/ABC-1234-ajusta-agregado-2', quando=_dias(5))
+    pr = [e for e in entregas.detectar(repo.pasta, [EU], _desde()) if e['fonte'] == 'merge-pr']
+    assert len(pr) == 1
+    assert not any(c.isdigit() for c in pr[0]['titulo']), pr[0]['titulo']
+    assert 'ABC' not in pr[0]['titulo'] and 'ajusta agregado' in pr[0]['titulo']
+    assert '4821' in pr[0]['ids_privados']
+
+
+def test_chave_de_ticket_no_titulo_de_commit_e_removida(repo):
+    repo.commit('feat: ABC-1234 ajusta agregado', 'src/A.cs', quando=_dias(3))
+    titulos = [e['titulo'] for e in entregas.detectar(repo.pasta, [EU], _desde())]
+    assert titulos[-1] == 'feat: ajusta agregado'

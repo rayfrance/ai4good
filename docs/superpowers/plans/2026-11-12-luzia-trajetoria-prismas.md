@@ -267,7 +267,7 @@ Mapeamento: `career_state.json` → `perfil` (plano inteiro em `perfil('plano')`
 - Modify: `docs/luzia-ux.md`, `code/luzia/CONTEXT.md`, `code/luzia/harness/REGRAS.md`, `docs/handoffs/luzia-acoes.md`
 
 - [ ] **Step 1:** atualizar o vocabulário e as regras (seções 2, 6–9 do spec) nos docs; `REGRAS.md` com os comandos novos.
-- [ ] **Step 2:** `git grep -n -i -E "neoh|intelectah|rededor"` vazio; `grep` dos termos antigos do jogo (`feixe`, `degrau`, `trecho`) só em histórico/handoff.
+- [ ] **Step 2:** `git grep -n -i -f <(grep -v '^#' code/luzia/private/termos.txt)` vazio (os nomes ficam só em `private/termos.txt`, fora do git); `grep` dos termos antigos do jogo (`feixe`, `degrau`, `trecho`) só em histórico/handoff.
 - [ ] **Step 3:** commit `docs(luzia): new vocabulary, persistence and trajectory requests`.
 
 ### Task 16: Verificação final (sessão principal)

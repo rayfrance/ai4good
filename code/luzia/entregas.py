@@ -32,6 +32,8 @@ RE_MERGED_PR = re.compile(r'^Merged PR (\d+):\s*(.*)', re.IGNORECASE)
 RE_GH_PR = re.compile(r'^Merge pull request #(\d+) from (\S+)', re.IGNORECASE)
 RE_TICKET = re.compile(r'(?<![\w#])(?:AB)?#(\d+)')
 RE_IDS = re.compile(r'(?<![\w#])(?:AB)?#\d+|\b(?:PR|Pull Request)\s*#?\d+', re.IGNORECASE)
+RE_CHAVE_TICKET = re.compile(r'(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,9}-\d+(?![A-Za-z0-9])')  # ABC-1234
+PREFIXOS_DE_RAMO = {'feature', 'feat', 'fix', 'bugfix', 'hotfix', 'chore', 'refactor', 'release'}
 MAX_MENSAGEM = 300
 IGNORADOS = {'node_modules', 'vendor', '.venv', 'venv', 'dist', 'bin', 'obj', 'packages'}
 LOCKS = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'poetry.lock', 'composer.lock', 'gemfile.lock',
@@ -197,7 +199,7 @@ def _commit(reg: dict) -> dict:
 
 def _limpar(texto: str) -> str:
     """Tira números de PR/ticket do texto (eles só podem existir em `ids_privados`)."""
-    texto = RE_IDS.sub('', texto)
+    texto = RE_CHAVE_TICKET.sub('', RE_IDS.sub('', texto))
     texto = re.sub(r'\(\s*\)', '', texto)
     return re.sub(r'[ \t]{2,}', ' ', texto).strip(' \t:-')
 
@@ -214,6 +216,16 @@ def _entrega(chave: str, titulo: str, fonte: str, regs: list[dict], ids: list[st
             'ids_privados': list(dict.fromkeys(ids + (ids_tk if fonte == 'merge-pr' else [])))}
 
 
+def _titulo_do_ramo(ramo: str) -> str:
+    """Título legível a partir do nome do ramo, sem a chave do ticket nem qualquer palavra com número."""
+    nome = RE_CHAVE_TICKET.sub(' ', ramo.split('/', 1)[-1])
+    palavras = nome.replace('-', ' ').replace('_', ' ').replace('/', ' ').split()
+    palavras = [p for p in palavras if not any(c.isdigit() for c in p)]
+    if palavras and palavras[0].lower() in PREFIXOS_DE_RAMO:
+        palavras = palavras[1:]
+    return ' '.join(palavras)
+
+
 def _titulo_pr(assunto: str, corpo: str) -> tuple[str, str] | None:
     """(id, título) se o assunto é de merge de PR."""
     m = RE_MERGED_PR.match(assunto)
@@ -221,7 +233,7 @@ def _titulo_pr(assunto: str, corpo: str) -> tuple[str, str] | None:
         return m.group(1), m.group(2)
     m = RE_GH_PR.match(assunto)
     if m:
-        titulo = corpo.strip().splitlines()[0] if corpo.strip() else m.group(2).split('/', 1)[-1].replace('-', ' ').replace('_', ' ')
+        titulo = corpo.strip().splitlines()[0] if corpo.strip() else _titulo_do_ramo(m.group(2))
         return m.group(1), titulo
     return None
 

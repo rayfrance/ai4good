@@ -13,6 +13,7 @@ O estado atual (estado de um avanço, nível de um prisma) fica em colunas e tem
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -38,9 +39,9 @@ ESQUEMA = (
         nivel INTEGER,
         meta INTEGER,
         estado TEXT NOT NULL DEFAULT 'ativo' CHECK (estado IN ('ativo', 'arquivado')),
-        origem TEXT NOT NULL CHECK (origem IN ('triagem', 'pedido')),
+        origem TEXT NOT NULL DEFAULT 'triagem' CHECK (origem IN ('triagem', 'pedido')),
         ultimo_nivel_em TEXT,
-        criado_em TEXT NOT NULL
+        criado_em TEXT
     )""",
     """CREATE TABLE IF NOT EXISTS leitura (
         id INTEGER PRIMARY KEY,
@@ -101,9 +102,9 @@ ESQUEMA = (
     # O avanço guarda o estado atual; a história fica no livro avanco_evento.
     """CREATE TABLE IF NOT EXISTS avanco (
         id TEXT PRIMARY KEY,
-        prisma TEXT NOT NULL,
+        prisma TEXT,
         tipo TEXT,
-        titulo TEXT NOT NULL,
+        titulo TEXT,
         conteudo_json TEXT NOT NULL DEFAULT '{}',
         duracao_min INTEGER,
         valor_lm INTEGER,
@@ -121,7 +122,7 @@ ESQUEMA = (
     )""",
     """CREATE TABLE IF NOT EXISTS avanco_evento (
         id INTEGER PRIMARY KEY,
-        avanco_id TEXT NOT NULL REFERENCES avanco (id),
+        avanco_id TEXT NOT NULL,  -- sem FK: eventos antigos (evidências P3/P4) citam ids fora do catálogo
         quando TEXT NOT NULL,
         evento TEXT NOT NULL,
         onde TEXT,
@@ -207,14 +208,34 @@ def conectar(arquivo: Path | None = None) -> sqlite3.Connection:
     con = sqlite3.connect(arquivo, timeout=ESPERA_MS / 1000, isolation_level=None)
     try:
         con.row_factory = sqlite3.Row
-        con.execute(f'PRAGMA busy_timeout = {ESPERA_MS}')  # antes do WAL: trocar o modo também espera a vez
-        con.execute('PRAGMA journal_mode = WAL')
+        con.execute(f'PRAGMA busy_timeout = {ESPERA_MS}')
+        _ligar_wal(con)
         con.execute('PRAGMA foreign_keys = ON')
         garantir(con)
     except BaseException:
         con.close()
         raise
     return con
+
+
+def _ligar_wal(con: sqlite3.Connection) -> None:
+    """Liga o WAL tentando de novo até ESPERA_MS: num banco novo, quem chega junto recebe BUSY na hora.
+
+    `PRAGMA journal_mode = WAL` precisa de trava exclusiva e o SQLite não chama o busy handler para ela,
+    então hook, statusline, painel e CLI abrindo o banco pela primeira vez ao mesmo tempo falhariam.
+    """
+    limite = time.monotonic() + ESPERA_MS / 1000
+    while True:
+        try:
+            modo = con.execute('PRAGMA journal_mode = WAL').fetchone()[0]
+            if str(modo).lower() == 'wal':
+                return
+            erro: Exception = RuntimeError(f'luzia.db ficou no modo {modo}, não em WAL')
+        except sqlite3.OperationalError as e:
+            erro = e
+        if time.monotonic() >= limite:
+            raise erro
+        time.sleep(0.02)
 
 
 @contextmanager
@@ -228,7 +249,12 @@ def transacao(con: sqlite3.Connection, modo: str = 'IMMEDIATE') -> Iterator[sqli
     except BaseException:
         con.rollback()
         raise
-    con.commit()
+    try:
+        con.commit()
+    except BaseException:
+        if con.in_transaction:  # o COMMIT falhou (ex.: chave adiada, trava): não deixa a conexão presa
+            con.rollback()
+        raise
 
 
 def _meta(con: sqlite3.Connection) -> dict[str, str]:

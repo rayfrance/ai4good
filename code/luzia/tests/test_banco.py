@@ -51,6 +51,27 @@ def _gravar_lumens(arquivo: str, quem: int, largada) -> None:
     con.close()
 
 
+def _abrir_junto(arquivo: str, largada, saida) -> None:
+    """Roda num processo filho (spawn): abre um banco ainda inexistente ao mesmo tempo que os outros."""
+    largada.wait(timeout=60)
+    try:
+        banco.conectar(Path(arquivo)).close()
+        saida.put('ok')
+    except Exception as e:  # o teste mostra qual processo falhou e por quê
+        saida.put(repr(e))
+
+
+def _esperar(procs, timeout: float = 120) -> list:
+    """Espera os processos; quem passar do tempo é encerrado (não fica preso depois do teste)."""
+    for p in procs:
+        p.join(timeout=timeout)
+    for p in procs:
+        if p.is_alive():
+            p.terminate()
+            p.join(timeout=10)
+    return [p.exitcode for p in procs]
+
+
 def test_esquema_criado(privado):
     con = banco.conectar()
     assert banco.caminho() == privado / 'luzia.db' and banco.caminho().exists()
@@ -81,12 +102,53 @@ def test_escrita_concorrente(privado):
     procs = [ctx.Process(target=_gravar_lumens, args=(str(banco.caminho()), quem, largada)) for quem in range(4)]
     for p in procs:
         p.start()
-    for p in procs:
-        p.join(timeout=120)
-    assert [p.exitcode for p in procs] == [0, 0, 0, 0]
+    assert _esperar(procs) == [0, 0, 0, 0]
     con = banco.conectar()
     assert con.execute('SELECT COUNT(*) FROM lumen').fetchone()[0] == 4 * POR_PROCESSO
     assert con.execute('SELECT COUNT(DISTINCT ref) FROM lumen').fetchone()[0] == 4 * POR_PROCESSO
+    con.close()
+
+
+def test_primeira_abertura_simultanea(privado):
+    """Hook, statusline, painel e CLI podem abrir juntos um banco que ainda não existe: ninguém falha."""
+    arquivo = privado / 'novo' / 'luzia.db'
+    ctx = multiprocessing.get_context('spawn')
+    n = 8
+    largada, saida = ctx.Barrier(n), ctx.Queue()
+    procs = [ctx.Process(target=_abrir_junto, args=(str(arquivo), largada, saida)) for _ in range(n)]
+    for p in procs:
+        p.start()
+    assert _esperar(procs) == [0] * n
+    assert sorted(saida.get(timeout=10) for _ in range(n)) == ['ok'] * n
+    con = banco.conectar(arquivo)
+    assert con.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
+    assert con.execute("SELECT COUNT(*) FROM meta WHERE chave IN ('esquema', 'migrado_em')").fetchone()[0] == 2
+    con.close()
+
+
+def test_commit_que_falha_desfaz(privado):
+    """Se o COMMIT falhar (aqui, chave estrangeira adiada), a conexão não fica presa numa transação."""
+    con = banco.conectar()
+    with pytest.raises(banco.sqlite3.IntegrityError):
+        with banco.transacao(con):
+            con.execute('PRAGMA defer_foreign_keys = ON')
+            con.execute("INSERT INTO commit_ (hash, entrega_id) VALUES ('h1', 999)")
+    assert not con.in_transaction
+    assert con.execute('SELECT COUNT(*) FROM commit_').fetchone()[0] == 0
+    con.close()
+
+
+def test_aceita_dados_antigos_incompletos(privado):
+    """A migração (Tarefa 3) não pode abortar por evento órfão nem inventar título, prisma ou data."""
+    con = banco.conectar()
+    with banco.transacao(con):
+        con.execute("INSERT INTO avanco_evento (avanco_id, quando, evento) VALUES ('sem-feixe', '2026-01-01', 'conquistado')")
+        con.execute("INSERT INTO avanco (id, estado, criado_em) VALUES ('a1', 'sugerido', '2026-01-01')")
+        con.execute("INSERT INTO prisma (nome) VALUES ('Mensageria')")
+    assert con.execute("SELECT origem FROM prisma WHERE nome = 'Mensageria'").fetchone()[0] == 'triagem'
+    with pytest.raises(banco.sqlite3.IntegrityError):  # as enumerações continuam conferidas
+        with banco.transacao(con):
+            con.execute("INSERT INTO prisma (nome, origem) VALUES ('X', 'inventada')")
     con.close()
 
 

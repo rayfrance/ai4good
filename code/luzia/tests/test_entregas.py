@@ -1,0 +1,170 @@
+"""Entregas detectadas no git (Tarefa 8): repositório descartável no tmp_path, nomes inventados."""
+
+import json
+import os
+import subprocess
+from datetime import datetime, timedelta
+
+import pytest
+
+from luzia import banco, entregas, trajetoria
+
+EU = 'Pessoa Teste'
+EU_MAIL = 'pessoa@exemplo.test'
+OUTRA = 'Colega Fulana'
+OUTRA_MAIL = 'fulana@exemplo.test'
+DDD = 'Domain-Driven Design (DDD)'
+TESTES = 'Testes e Qualidade / SQL'
+FRONT = 'Front-end (JS / Razor / React)'
+
+
+@pytest.fixture
+def con(privado):
+    (privado / 'termos.txt').write_text('# sintético\nProdutoZeta\n', encoding='utf-8')
+    c = banco.conectar()
+    yield c
+    c.close()
+
+
+class Repo:
+    def __init__(self, pasta):
+        self.pasta = pasta
+        self.n = 0
+        self.git('init', '-q', '-b', 'main')
+
+    def git(self, *args, nome=EU, mail=EU_MAIL, quando=None):
+        env = {'GIT_AUTHOR_NAME': nome, 'GIT_AUTHOR_EMAIL': mail, 'GIT_COMMITTER_NAME': nome,
+               'GIT_COMMITTER_EMAIL': mail, 'PATH': os.environ['PATH'],
+               'SYSTEMROOT': os.environ.get('SYSTEMROOT', ''), 'HOME': str(self.pasta)}
+        if quando:
+            env['GIT_AUTHOR_DATE'] = env['GIT_COMMITTER_DATE'] = quando.isoformat(timespec='seconds')
+        r = subprocess.run(['git', '-C', str(self.pasta), '-c', 'commit.gpgsign=false', *args], env=env,
+                           capture_output=True, text=True, encoding='utf-8', check=True)
+        return r.stdout.strip()
+
+    def commit(self, msg, arq, nome=EU, mail=EU_MAIL, quando=None, linhas=3):
+        self.n += 1
+        alvo = self.pasta / arq
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        with alvo.open('a', encoding='utf-8') as f:
+            f.write(''.join(f'linha {self.n} {i}\n' for i in range(linhas)))
+        self.git('add', '-A')
+        self.git('commit', '-q', '-m', msg, nome=nome, mail=mail, quando=quando)
+        return self.git('rev-parse', 'HEAD')
+
+
+@pytest.fixture
+def repo(privado):
+    r = Repo(privado.parent / 'repo')
+    r.commit('chore: inicio', 'README.md', quando=_dias(30))
+    return r
+
+
+def _dias(n):
+    return datetime.now() - timedelta(days=n)
+
+
+def _desde(dias=90):
+    return _dias(dias).date().isoformat()
+
+
+def _entrada(privado, repo):
+    (privado / 'entrada.json').write_text(json.dumps({'repo': str(repo.pasta), 'author': EU}), encoding='utf-8')
+
+
+def test_merge_pr_agrupa_so_minha_autoria(repo):
+    repo.git('checkout', '-q', '-b', 'feat')
+    h1 = repo.commit('feat: agregado pedido', 'src/Pedido.cs', quando=_dias(10))
+    h2 = repo.commit('feat: colega mexe', 'src/Outro.cs', nome=OUTRA, mail=OUTRA_MAIL, quando=_dias(9))
+    h3 = repo.commit('test: cobre agregado', 'tests/PedidoTests.cs', quando=_dias(8))
+    repo.git('checkout', '-q', 'main')
+    repo.git('merge', '--no-ff', '-m', 'Merged PR 12: Ajusta agregado', 'feat', nome=OUTRA, mail=OUTRA_MAIL,
+             quando=_dias(7))
+    repo.commit('fix: avulso', 'src/Avulso.cs', quando=_dias(5))
+    res = entregas.detectar(repo.pasta, [EU], _desde())
+    pr = [e for e in res if e['fonte'] == 'merge-pr']
+    assert len(pr) == 1
+    e = pr[0]
+    assert {c['hash'] for c in e['commits']} == {h1, h3}  # o commit da colega não entra
+    assert h2 not in {c['hash'] for x in res for c in x['commits']}
+    assert e['titulo'] == 'Ajusta agregado'
+    assert '12' in e['ids_privados']
+    avulso = [x for x in res if x['fonte'] == 'commit' and x['commits'][0]['mensagem'].startswith('fix: avulso')]
+    assert len(avulso) == 1
+    fora = [x for x in res if x['fonte'] != 'merge-pr' for c in x['commits'] if c['hash'] in (h1, h3)]
+    assert not fora  # sem duplicar fora do PR
+
+
+def test_squash_agrupa_por_ticket(repo):
+    repo.commit('feat: primeira parte AB#345', 'src/A.cs', quando=_dias(12))
+    repo.commit('feat: segunda parte AB#345', 'src/B.cs', quando=_dias(11))
+    repo.commit('feat: outra coisa AB#999', 'src/C.cs', quando=_dias(10))
+    repo.commit('docs: da colega AB#345', 'docs/x.md', nome=OUTRA, mail=OUTRA_MAIL, quando=_dias(9))
+    res = entregas.detectar(repo.pasta, [EU_MAIL], _desde())
+    tk = [e for e in res if e['fonte'] == 'ticket']
+    dois = [e for e in tk if len(e['commits']) == 2]
+    assert len(dois) == 1 and dois[0]['ids_privados'] == ['345']  # só os 2 meus; o da colega fica de fora
+    assert all('colega' not in c['mensagem'] for c in dois[0]['commits'])
+    assert len([e for e in tk if e['ids_privados'] == ['999']]) == 1
+
+
+def test_commit_isolado(repo):
+    h = repo.commit('feat: coisa solta', 'src/Solta.cs', quando=_dias(3), linhas=5)
+    res = entregas.detectar(repo.pasta, [EU], _desde())
+    e = [x for x in res if x['commits'][0]['hash'] == h][0]
+    assert e['fonte'] == 'commit' and len(e['commits']) == 1
+    c = e['commits'][0]
+    assert (c['arquivos'], c['linhas'], c['caminhos']) == (1, 5, ['src/Solta.cs'])
+    assert 'C#/.NET' in c['areas']
+    assert e['inicio'] == e['fim'] == c['data']
+
+
+def test_prismas_atravessados_com_termos(con, repo, privado):
+    repo.commit('feat: monta Aggregate de pedido', 'src/Pedido.cs', quando=_dias(4))
+    repo.commit('test: cobre com xunit', 'tests/PedidoTests.cs', quando=_dias(3))
+    _entrada(privado, repo)
+    assert entregas.atualizar(con)['novas'] == 3
+    por = {r['prisma']: json.loads(r['termos_json'])
+           for r in con.execute('SELECT prisma, termos_json FROM entrega_prisma')}
+    assert [t.lower() for t in por[DDD]] == ['aggregate']
+    assert 'xunit' in [t.lower() for t in por[TESTES]]
+    assert FRONT not in por
+
+
+def test_janela_90_dias_e_incremental(con, repo, privado):
+    repo.commit('feat: velho', 'src/Velho.cs', quando=_dias(100))
+    repo.commit('feat: recente', 'src/Recente.cs', quando=_dias(20))
+    _entrada(privado, repo)
+    assert entregas.identidades(con) == [EU]
+    # 'chore: inicio' (30 dias) e 'recente' entram; 'velho' não
+    assert entregas.atualizar(con, dias=90) == {'novas': 2, 'atualizadas': 0}
+    assert trajetoria.perfil_ler(con, 'entregas_desde')
+    assert entregas.atualizar(con, dias=90) == {'novas': 0, 'atualizadas': 0}
+    repo.commit('feat: novo', 'src/Novo.cs', quando=_dias(1))
+    assert entregas.atualizar(con, dias=90) == {'novas': 1, 'atualizadas': 0}
+    assert entregas.atualizar(con, dias=120)['novas'] == 1  # janela ampliada traz o velho
+    assert con.execute('SELECT COUNT(*) FROM entrega').fetchone()[0] == 4
+    assert con.execute('SELECT COUNT(*) FROM commit_').fetchone()[0] == 4
+    assert entregas.atualizar(con, dias=120) == {'novas': 0, 'atualizadas': 0}
+
+
+def test_titulo_mascarado_sem_ids(con, repo, privado):
+    repo.git('checkout', '-q', '-b', 'feat')
+    repo.commit('feat: ProdutoZeta integra #12 com Colega Fulana', 'src/Z.cs', quando=_dias(6))
+    repo.commit('refactor: ajusta AB#777', 'src/Y.cs', quando=_dias(5))
+    repo.git('checkout', '-q', 'main')
+    repo.git('merge', '--no-ff', '-m', 'Merged PR 12: ProdutoZeta de Colega Fulana (#12)', 'feat', quando=_dias(4))
+    h = repo.commit('fix: ProdutoZeta quebrado #12', 'src/W.cs', quando=_dias(2))
+    repo.commit('docs: outra', 'x.md', nome=OUTRA, mail=OUTRA_MAIL, quando=_dias(2))
+    _entrada(privado, repo)
+    entregas.atualizar(con)
+    titulos = [r['titulo'] for r in con.execute('SELECT titulo FROM entrega')]
+    assert len(titulos) >= 3
+    for t in titulos:
+        assert '12' not in t and '777' not in t and 'ProdutoZeta' not in t and 'Fulana' not in t
+        assert h[:7] not in t
+    for r in con.execute('SELECT mensagem FROM commit_'):
+        m = r['mensagem']
+        assert '#12' not in m and 'ProdutoZeta' not in m and 'AB#' not in m and 'Fulana' not in m
+    ids = [json.loads(r['ids_privados_json']) for r in con.execute('SELECT ids_privados_json FROM entrega')]
+    assert any('12' in i for i in ids)

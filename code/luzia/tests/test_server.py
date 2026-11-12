@@ -375,8 +375,8 @@ def test_corpo_invalido_tipo_errado_e_rota_desconhecida(api):
     c, r = api.bruto('POST', '/api/modo', b'{"modo": "passivo"}', {'Content-Type': 'text/plain'})
     assert c == 415 and 'application/json' in r['erro']
     assert api('POST', '/api/inexistente', {})[0] == 404
-    grande = json.dumps({'modo': 'x' * 2_000_000}).encode('utf-8')
-    assert api.bruto('POST', '/api/modo', grande, {'Content-Type': 'application/json'})[0] == 413
+    # Content-Length enorme com corpo pequeno: o servidor recusa pelo tamanho declarado, sem ler (e sem depender do SO)
+    assert api.bruto('POST', '/api/modo', b'{}', {'Content-Type': 'application/json', 'Content-Length': '99999999'})[0] == 413
 
 
 def test_validacoes_de_cada_acao_devolvem_400_ou_404_sem_gravar(api, privado):

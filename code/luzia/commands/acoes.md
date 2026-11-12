@@ -1,11 +1,11 @@
 ---
-description: "Luzia · seus feixes (em andamento, na fila, sugeridos, conquistados e descartados)"
+description: "Luzia · seus avanços (em andamento, na fila, sugeridos, conquistados e descartados)"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
 
 ```bash
-cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli acoes
+cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli avancos
 ```
 
 Mostre a saída como veio, sem resumir.

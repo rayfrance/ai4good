@@ -1,6 +1,6 @@
 ---
-description: "Luzia · confirma um degrau pronto (ex.: /luzia:subir DDD); o nível só muda com o seu sim"
-argument-hint: <skill>
+description: "Luzia · confirma um nível pronto (ex.: /luzia:subir DDD); o nível só muda com o seu sim"
+argument-hint: "<prisma>"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
@@ -9,6 +9,6 @@ Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Ro
 cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli subir "$ARGUMENTS"
 ```
 
-Mostre a saída como veio. Se o degrau ainda não estiver pronto, diga em uma linha o que falta.
+Mostre a saída como veio. Se o nível ainda não estiver pronto, diga em uma linha o que falta.
 
 **Botões.** Se a saída terminar com `LUZIA_BOTOES`, não mostre as linhas `LUZIA_*`. Use AskUserQuestion com a pergunta de `LUZIA_PERGUNTA`, uma opção por botão (label = `rotulo`, description = `descricao`) e mais "Agora não". Na escolha: se `rodar` começar com `fazer `, siga o comando /luzia:fazer com esse id; senão rode `LUZIA_CLI rodar` (o prefixo `LUZIA_CLI` da saída + o `rodar` do botão) e trate a nova saída do mesmo jeito.

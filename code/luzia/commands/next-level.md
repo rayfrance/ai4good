@@ -1,11 +1,11 @@
 ---
-description: "Luzia · sua rota até a meta, por degraus de skill, com os feixes de cada uma"
+description: "Luzia · sua trajetória até a meta, por níveis de cada prisma (skill), com os avanços de cada um"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
 
 ```bash
-cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli next-level
+cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli trajetoria
 ```
 
 Mostre a saída como veio (markdown visual), sem resumir.

@@ -1,5 +1,5 @@
 ---
-description: "Luzia · triagem de carreira e primeiros feixes (currículo, GitHub, histórico entre IAs e commits, com LGPD local)"
+description: "Luzia · triagem de carreira e primeiros avanços (currículo, GitHub, histórico entre IAs e commits, com LGPD local)"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:

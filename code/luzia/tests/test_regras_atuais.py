@@ -315,7 +315,7 @@ def test_registrar_nota_3_oferece_revisitar_agora(plan, monkeypatch):
     f = next(x for x in acoes.todas(plan) if x['estado'] == 'sugerido')
     rodar(monkeypatch, 'fazer', f['id'])
     s = rodar(monkeypatch, 'registrar', f['id'], '--nota', '3', '--resumo', 'teste')
-    assert 'Feixe conquistado' in s
+    assert 'Avanço conquistado' in s
     assert any(x['rotulo'] == 'Revisitar agora' for x in botoes_de(s))
 
 

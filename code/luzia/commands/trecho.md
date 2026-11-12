@@ -1,12 +1,12 @@
 ---
-description: "Luzia · acende 3 feixes novos para uma skill (ex.: /luzia:trecho DDD)"
-argument-hint: <skill>
+description: "Luzia · acende 3 avanços novos para um prisma (ex.: /luzia:acender DDD)"
+argument-hint: "<prisma>"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
 
 ```bash
-cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli trecho "$ARGUMENTS"
+cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli acender "$ARGUMENTS"
 ```
 
 Mostre a saída como veio.

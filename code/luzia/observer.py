@@ -20,8 +20,11 @@ from __future__ import annotations
 import functools
 import hashlib
 import json
+import os
 import re
+import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -113,6 +116,65 @@ def sessao_id(event: dict) -> str:
     return hashlib.sha256(event.get('session_id', '').encode()).hexdigest()[:8]
 
 
+# ------------------------------------------------------------------ foco sem hooks (comando `foco` da CLI)
+LIMITE_DIFF = 200_000
+
+
+def sessao_do_foco(cwd: str, sessao: str = '') -> str:
+    """Id da sessão do `foco`: o informado, ou um id diário por pasta (um reconhecimento por prisma por dia e pasta)."""
+    bruto = sessao or f"foco|{cwd.replace(chr(92), '/').lower()}|{date.today().isoformat()}"
+    return sessao_id({'session_id': bruto})
+
+
+def _git(cwd: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(['git', '-C', cwd, *args], capture_output=True, timeout=20, encoding='utf-8', errors='replace')
+
+
+def adicionado_nos_arquivos(caminhos: list[str], cwd: str) -> str:
+    """Só as linhas **acrescentadas** pelo `git diff` dos caminhos (contra o HEAD; arquivo novo conta inteiro) + os nomes.
+
+    O código é lido em memória e nunca gravado. Levanta RuntimeError com a mensagem para a pessoa se não for um repositório git.
+    """
+    try:
+        dentro = _git(cwd, 'rev-parse', '--is-inside-work-tree')
+    except (OSError, subprocess.SubprocessError) as e:
+        raise RuntimeError(f'não consegui rodar o git ({type(e).__name__})') from e
+    if dentro.returncode != 0:
+        raise RuntimeError('esta pasta não é um repositório git: o foco lê as mudanças pelo git diff')
+    partes = [_git(cwd, 'diff', 'HEAD', '--unified=0', '--no-color', '--', *caminhos).stdout
+              or _git(cwd, 'diff', '--unified=0', '--no-color', '--', *caminhos).stdout]  # repositório sem commits: só o diff do índice
+    novos = [c for c in _git(cwd, 'ls-files', '--others', '--exclude-standard', '--', *caminhos).stdout.splitlines() if c]
+    for novo in novos:  # arquivo ainda fora do git: o diff contra o vazio é o arquivo todo
+        partes.append(_git(cwd, 'diff', '--no-index', '--unified=0', '--no-color', '--', os.devnull, novo).stdout)
+    linhas = [l[1:] for texto in partes for l in texto.splitlines() if l.startswith('+') and not l.startswith('+++')]
+    nomes = [Path(c).name for c in caminhos]
+    return ' '.join(nomes + linhas)[:LIMITE_DIFF]
+
+
+def situacao_do_foco(cwd: str) -> tuple[str, str]:
+    """('ok' | 'fora_de_foco' | 'nao_autorizado', modo): confira antes de ler qualquer código ou prompt."""
+    cfg = config()
+    modo = cfg.get('modo', 'ativo')
+    if not authorized(cwd, cfg):
+        return 'nao_autorizado', modo
+    return ('fora_de_foco' if modo == 'sob_demanda' else 'ok'), modo
+
+
+def foco(origem: str, texto: str, cwd: str, sessao: str = '', ext: str = '') -> dict:
+    """O mesmo reconhecimento dos hooks para agentes sem hooks (Antigravity, Codex, Cursor).
+
+    `origem`: 'prompt' (texto do pedido da pessoa) ou 'agente' (o que o agente escreveu). Nada do texto é gravado.
+    Devolve `situacao`, `modo`, `achados` (de `reconhecer_em`) e `gaps`.
+    """
+    situacao, modo = situacao_do_foco(cwd)
+    if situacao != 'ok':
+        return {'situacao': situacao, 'modo': modo, 'achados': [], 'gaps': {}}
+    gaps = lacunas(plano())
+    achados = reconhecer_em(texto, origem, sessao_do_foco(cwd, sessao), modo, 'prompt' if origem == 'prompt' else ext or 'arquivo',
+                            'foco', gaps)
+    return {'situacao': 'ok', 'modo': modo, 'achados': achados, 'gaps': gaps}
+
+
 def saida(evento: str, contexto: str) -> None:
     print(json.dumps({'hookSpecificOutput': {'hookEventName': evento, 'additionalContext': contexto}}, ensure_ascii=True))
 
@@ -126,6 +188,10 @@ def sem_quebrar(funcao):
         except Exception as e:
             arquivos.registrar_erro(f'observer {funcao.__name__}', e)
     return protegida
+
+
+RUBRICA_LAMPEJO = ('rubrica 0-4 (0 não explicou, 1 descreveu o código, 2 explicou o porquê, 3 comparou com alternativa, '
+                   '4 ligou ao conceito e aos trade-offs)')
 
 
 def reconhecer_em(texto: str, origem: str, sid: str, modo: str, ext: str, ferramenta: str, gaps: dict) -> list[dict]:
@@ -170,8 +236,7 @@ def cartao_refletida(skill: str, pergunta: str = '<a pergunta>', nivel: str = 'l
         '<1 linha: onde o conceito aparece concretamente nesta mudança>\n'
         f'▸ Em 1 frase: {pergunta} · vira luz própria: até +30 lm\n'
         'Depois, use AskUserQuestion com "Responder agora" e "Guardar para depois". Responder: espere a frase, avalie pela '
-        'rubrica 0-4 (0 não explicou, 1 descreveu o código, 2 explicou o porquê, 3 comparou com alternativa, 4 ligou ao '
-        f'conceito e aos trade-offs), dê retorno em 1 linha e rode: {CLI} lampejo --skill "{skill}" --pergunta "<a pergunta>" '
+        f'{RUBRICA_LAMPEJO}, dê retorno em 1 linha e rode: {CLI} lampejo --skill "{skill}" --pergunta "<a pergunta>" '
         f'--nota <0-4> --resumo "<1 linha, sem nomes da empresa>". Guardar: rode {CLI} lampejo --skill "{skill}" '
         '--pergunta "<a pergunta>". Nunca cite nomes da empresa, clientes ou colegas.'
     )

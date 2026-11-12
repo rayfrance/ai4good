@@ -5,6 +5,7 @@ O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de 
   `acender-entrega <id>`, `identidade`, `leituras`,
   `feedback-skills-opportunities`
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
+- `foco --prompt-arquivo F | --arquivos P... [--cwd D] [--sessao S]` (foco sem hooks, para Antigravity, Codex e Cursor)
 - `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
 """
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -739,11 +741,93 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
     botoes(bts, 'Quer praticar um avanço ligado a esta entrega?')
 
 
+PERGUNTA_FOCO = 'Por que esta decisão e não uma alternativa?'
+
+
+def cmd_foco(args) -> None:
+    """Foco para agentes sem hooks: o mesmo reconhecimento do observador (uma só implementação em `observer.foco`).
+
+    O texto do pedido vem de um arquivo temporário (`--prompt-arquivo`) e o código vem do `git diff` dos caminhos de
+    `--arquivos`; nada disso é gravado, só o evento mascarado (prisma, extensão, lúmens).
+    """
+    # A CLI roda em `cd <plugin> && python -m luzia.cli`: o projeto da pessoa vem de --cwd (padrão: a pasta atual).
+    cwd = os.path.abspath(args.cwd or os.getcwd())
+    caminhos = list(args.arquivos or [])
+    saida_botoes = [BT_TRAJETORIA, BT_PAINEL]
+    if not args.prompt_arquivo and not caminhos:
+        print('Use `foco --prompt-arquivo <arquivo temporário com o pedido>` quando a pessoa pedir algo, ou '
+              '`foco --arquivos <caminhos editados> --cwd <pasta do projeto>` depois de editar. Opcional: `--sessao <id>`.')
+        botoes(saida_botoes)
+        return
+    situacao, _ = observer.situacao_do_foco(cwd)  # antes de ler qualquer prompt ou código
+    if situacao == 'nao_autorizado':
+        print('✦ Luzia · foco: esta pasta não está autorizada para o foco (veja `observer.json`). '
+              'Nada foi lido, observado nem gravado.')
+        botoes(saida_botoes)
+        return
+    if situacao == 'fora_de_foco':
+        print('✦ Luzia · fora de foco: nada foi observado. Para voltar, `modo ativo`.')
+        botoes([{'rotulo': 'Voltar ao foco', 'descricao': 'em foco, com lampejos', 'rodar': 'modo ativo'}, BT_TRAJETORIA])
+        return
+    try:
+        if args.prompt_arquivo:
+            origem, ext = 'prompt', 'prompt'
+            texto = Path(args.prompt_arquivo).read_text(encoding='utf-8', errors='replace')
+        else:
+            origem, ext = 'agente', (Path(caminhos[0]).suffix.lower() or 'arquivo')
+            texto = observer.adicionado_nos_arquivos(caminhos, cwd)
+    except (OSError, RuntimeError) as e:
+        print(f'◐ O foco não leu o que pediu: {e}.')
+        botoes(saida_botoes)
+        return
+    r = observer.foco(origem, texto, cwd, args.sessao, ext)
+    achados = r['achados']
+    if not achados:
+        print('✦ Luzia · foco: nenhum conceito novo da trajetória apareceu aqui (ou já foi reconhecido nesta sessão, '
+              'ou o teto de 40 lm do dia já encheu). Não há nada a mostrar à pessoa.')
+        botoes(saida_botoes)
+        return
+    if r['modo'] == 'passivo':
+        resumo = ', '.join(f"Prisma {a['skill']} +{a['lm']} lm" for a in achados)
+        print(f'✦ Luzia · em foco, em silêncio: {resumo}. Lúmens registrados; não é preciso avisar a pessoa.')
+        botoes(saida_botoes)
+        return
+    if origem == 'prompt':
+        for a in achados:
+            print(f"[Luzia · em foco · luz própria] A pessoa DIRIGIU Prisma \"{a['skill']}\" neste pedido "
+                  f"(+{a['lm']} lm de luz própria). Responda normalmente e, no FIM, em UMA linha: "
+                  f"\"✦ Luzia · Prisma {a['skill']}: você dirigiu isto, +{a['lm']} lm de luz própria.\"")
+        botoes(saida_botoes)
+        return
+    a = next((x for x in achados if x['lampejo']), achados[0])
+    skill, lm = a['skill'], a['lm']
+    nivel = observer.nivel_txt(r['gaps'].get(skill, {}))
+    if a['provisorio']:
+        print(observer.cartao_refletida(skill, nivel=nivel, lm=lm, provisorio=True))
+        botoes(saida_botoes)
+        return
+    print(f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica Prisma {skill} ({nivel}). '
+          f'Isso rendeu +{lm} lm de luz REFLETIDA para a pessoa: quem aplicou foi o agente. Termine a tarefa normalmente e, no '
+          'FIM da resposta, mostre este lampejo em no máximo 3 linhas:')
+    print(f'✦ Lampejo da Luzia · Prisma {skill} reconhecido nesta mudança · +{lm} lm (luz refletida)')
+    print('<1 linha: onde o conceito aparece concretamente nesta mudança>')
+    print(f'▸ Em 1 frase: {PERGUNTA_FOCO} · vira luz própria: até +30 lm')
+    print(f'Depois ofereça os botões. Responder agora: espere a frase da pessoa, avalie pela {observer.RUBRICA_LAMPEJO}, dê '
+          'retorno em 1 linha e rode o botão trocando <0-4> pela nota e o resumo (1 linha, sem nomes da empresa, clientes ou '
+          'colegas). Guardar para depois: rode o botão como está. Se trocar a pergunta por uma mais concreta, use a mesma nos dois.')
+    botoes([
+        {'rotulo': 'Responder agora', 'descricao': 'explique em 1 frase: vira luz própria, até +30 lm',
+         'rodar': f'lampejo --skill "{skill}" --pergunta "{PERGUNTA_FOCO}" --nota <0-4> --resumo "<1 linha, sem nomes da empresa>"'},
+        {'rotulo': 'Guardar para depois', 'descricao': 'vira um avanço no painel e em /luzia:hoje',
+         'rodar': f'guardar --skill "{skill}" --pergunta "{PERGUNTA_FOCO}"'},
+    ], 'Quer responder ao lampejo agora?')
+
+
 # ------------------------------------------------------------------ main
 COMANDOS = [
     'hoje', 'triage', 'trajetoria', 'next-level', 'rota',
     'entregas', 'entrega', 'acender-entrega', 'feedback-progress', 'feedback-skills-opportunities', 'identidade',
-    'leituras',
+    'leituras', 'foco',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido',
     'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo',
@@ -772,6 +856,10 @@ def main() -> None:
     ap.add_argument('--ampliar', type=int, default=0)
     ap.add_argument('--nivel', type=int, default=None)
     ap.add_argument('--meta', type=int, default=None)
+    ap.add_argument('--prompt-arquivo', default='', help='foco: arquivo temporário com o texto do pedido (nunca é gravado)')
+    ap.add_argument('--arquivos', nargs='+', default=[], help='foco: caminhos editados; o código é lido do git diff e nunca gravado')
+    ap.add_argument('--cwd', default='', help='foco: pasta do projeto da pessoa (a CLI roda de dentro do plugin)')
+    ap.add_argument('--sessao', default='', help='foco: id da sessão do agente (padrão: um id diário por pasta)')
     args, restantes = ap.parse_known_args()
 
     entrada_path = Path(args.entrada)
@@ -807,6 +895,10 @@ def main() -> None:
             if r.get('aviso'):
                 print(f"! {r['aviso']}")
         botoes([BT_TRAJETORIA, BT_PAINEL], 'O que você quer ver agora?')
+        return
+
+    if args.comando == 'foco':
+        cmd_foco(args)
         return
 
     if args.comando == 'career-map':

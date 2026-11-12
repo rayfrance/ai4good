@@ -337,7 +337,7 @@ def bt_leituras() -> dict | None:
     if not modelo.pronto():
         return None
     with trajetoria.abrir() as con:
-        n = len(leituras.vencidas(con))
+        n = len(leituras.vencidas(con, leituras.ENTREGAS_RELEVANTES))
     return {'rotulo': f'Gerar {n} leitura(s)', 'descricao': 'renova as leituras vencidas (até 8 por chamada ao modelo)',
             'rodar': 'leituras'} if n else None
 
@@ -641,10 +641,11 @@ def cmd_entregas(args, state: dict) -> None:
     botoes(com_leituras(bts), 'Qual entrega você quer inspecionar?')
 
 
-def cmd_leituras() -> None:
+def cmd_leituras(todas: bool = False) -> None:
     """Renova as leituras vencidas (ou que faltam) de prismas e entregas, em lotes de até 8 por chamada."""
     with trajetoria.abrir() as con:
-        vencidas = leituras.vencidas(con)
+        vencidas = leituras.vencidas(con, None if todas else leituras.ENTREGAS_RELEVANTES)
+        mais_antigas = 0 if todas else len(leituras.vencidas(con)) - len(vencidas)
     print('## ✦ Luzia · leituras com base')
     bts = [BT_TRAJETORIA, {'rotulo': 'Ver entregas', 'descricao': 'entregas do git com a leitura de cada uma',
                            'rodar': 'entregas'}, BT_PAINEL]
@@ -664,6 +665,8 @@ def cmd_leituras() -> None:
         else:
             print(f'Leitura indisponível: o modelo não respondeu e nada foi gravado '
                   f'({len(vencidas)} leitura(s) seguem vencidas; os fatos continuam na tela).')
+    if mais_antigas > 0:
+        print(f'Há mais {mais_antigas} leitura(s) de entregas antigas: `leituras --todas` renova também essas.')
     botoes(bts, 'O que você quer ver agora?')
 
 
@@ -854,6 +857,7 @@ def main() -> None:
     ap.add_argument('--nivel', type=int, default=None)
     ap.add_argument('--meta', type=int, default=None)
     ap.add_argument('--base-url', default='', help='modelo usar: endereço do provedor compatível com OpenAI')
+    ap.add_argument('--todas', action='store_true', help='leituras: inclui as entregas antigas, não só as mais recentes')
     ap.add_argument('--prompt-arquivo', default='', help='foco: arquivo temporário com o texto do pedido (nunca é gravado)')
     ap.add_argument('--arquivos', nargs='+', default=[], help='foco: caminhos editados; o código é lido do git diff e nunca gravado')
     ap.add_argument('--cwd', default='', help='foco: pasta do projeto da pessoa (a CLI roda de dentro do plugin)')
@@ -1007,7 +1011,7 @@ def main() -> None:
         return
 
     if args.comando == 'leituras':
-        cmd_leituras()
+        cmd_leituras(args.todas)
         return
 
     if args.comando == 'acender-entrega':

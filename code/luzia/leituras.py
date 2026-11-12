@@ -217,10 +217,19 @@ def obter(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str, atual: dict | N
     }
 
 
-def vencidas(con: sqlite3.Connection) -> list[tuple[str, str]]:
-    """Alvos ('prisma'|'entrega', id) sem leitura ou cujo hash da base mudou."""
+ENTREGAS_RELEVANTES = 10  # no chat; o painel mostra 15
+LOTES_AUTOMATICOS = 2     # rodada automática do painel: no máximo 2 lotes
+
+
+def vencidas(con: sqlite3.Connection, entregas_max: int | None = None) -> list[tuple[str, str]]:
+    """Alvos ('prisma'|'entrega', id) sem leitura ou cujo hash da base mudou.
+
+    Prismas ativos mais as `entregas_max` entregas mais recentes (todas, se None): é o conjunto "relevante" que a tela mostra.
+    """
     candidatos: list[tuple[str, str]] = [('prisma', p['nome']) for p in trajetoria.prismas(con)]
-    candidatos += [('entrega', str(r['id'])) for r in con.execute('SELECT id FROM entrega ORDER BY fim DESC, id DESC')]
+    limite = '' if entregas_max is None else f' LIMIT {int(entregas_max)}'
+    candidatos += [('entrega', str(r['id'])) for r in
+                   con.execute(f'SELECT id FROM entrega ORDER BY fim DESC, id DESC{limite}')]
     out: list[tuple[str, str]] = []
     for tipo, aid in candidatos:
         r = con.execute(

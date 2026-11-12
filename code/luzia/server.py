@@ -28,6 +28,7 @@ PAINEL = HERE / 'painel'
 PORT = 8501
 MODOS = ('ativo', 'passivo', 'sob_demanda')
 AGENTES = observer.AGENTES
+ENTREGAS_NA_TELA = 15
 HOSTS_OK = {f'localhost:{PORT}', f'127.0.0.1:{PORT}'}
 ORIGENS_OK = {f'http://{h}' for h in HOSTS_OK}
 MAX_CORPO = 64 * 1024
@@ -84,7 +85,7 @@ def estado() -> dict:
         lista_pedidos = pedidos.listar(con)
         entregas_git = entregas.listar(con)
         avancos_todos = jogo.avancos(con)  # uma só lista de avanços para todas as entregas
-        detalhes_git = [entregas.detalhe(con, e['id'], todos_avancos=avancos_todos) for e in entregas_git[:15]]
+        detalhes_git = [entregas.detalhe(con, e['id'], todos_avancos=avancos_todos) for e in entregas_git[:ENTREGAS_NA_TELA]]
         diag_entregas = None if entregas_git else entregas.diagnostico(con)
 
     diag = plan.get('diagnostico_fontes', {})
@@ -415,6 +416,10 @@ class Handler(BaseHTTPRequestHandler):
             alvos_raw = dados.get('alvos')
             alvos = [tuple(x) for x in alvos_raw] if isinstance(alvos_raw, list) else None
             with trajetoria.abrir() as con:
+                if alvos is None:  # o que a tela mostra (prismas + entregas exibidas), nunca o banco inteiro
+                    alvos = leituras.vencidas(con, None if dados.get('todas') else ENTREGAS_NA_TELA)
+                if dados.get('auto'):
+                    alvos = leituras.vencidas(con, ENTREGAS_NA_TELA)[:leituras.LOTES_AUTOMATICOS * leituras.TAMANHO_LOTE]
                 if dados.get('auto'):  # o painel pede sozinho ao abrir: só com modelo e no máximo 1 vez a cada 10 min
                     if not modelo.pronto():
                         return self._json({'ok': True, 'geradas': 0, 'sem_modelo': True})

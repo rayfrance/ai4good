@@ -22,7 +22,7 @@ def linha(dados: dict) -> str:
     cwd = str((dados.get('workspace') or {}).get('current_dir') or dados.get('cwd') or '')
     if cfg['modo'] == 'sob_demanda':
         return '✦ Luzia · fora de foco (/luzia:hoje)'
-    if cwd and not observer.autorizado(cwd, cfg):
+    if cwd and not observer.authorized(cwd, cfg):
         return ''
     try:
         plan = trajetoria.plano(banco.ESPERA_CURTA_MS)

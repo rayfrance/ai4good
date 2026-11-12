@@ -71,16 +71,10 @@ def test_progresso_conta_desde_o_ultimo_registro_de_qualquer_origem(plan):
     assert (p['lm'], p['propria'], p['refletida'], p['feixes']) == (50, 0, 50, 0)
 
 
-def test_apelidos_novos():
-    assert jogo.progresso_prisma is jogo.progresso_skill
-    assert jogo.abrir_lampejo is jogo.abrir_cartao
-    assert jogo.usar_lampejo is jogo.usar_cartao
-
-
 def test_subir_exige_tudo_do_nivel(plan):
     jogo.lancar(DDD, 160, 'refletida', 'passivo-refletida', 'x')
     r = jogo.subir(DDD, plan)
-    assert 'erro' in r and 'luz própria' in r['erro'] and 'conquistar 1 feixe' in r['erro']
+    assert 'erro' in r and 'luz própria' in r['erro'] and '1 avanço conquistado' in r['erro']
     assert _consulta("SELECT 1 FROM nivel_registro WHERE origem = 'conquistado'") == []
 
 

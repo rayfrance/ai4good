@@ -144,13 +144,13 @@ def test_converter_sem_cartao_e_recusado(plan):
 
 def test_cartao_aberto_converte_30_lm(plan):
     skill = plan['skills'][0]['nome']
-    jogo.abrir_cartao(skill, 'abc')
+    jogo.abrir_lampejo(skill, 'abc')
     assert jogo.converter(skill, 4).get('lm') == 30
 
 
 def test_segunda_conversao_do_mesmo_cartao_e_recusada(plan):
     skill = plan['skills'][0]['nome']
-    jogo.abrir_cartao(skill, 'abc')
+    jogo.abrir_lampejo(skill, 'abc')
     jogo.converter(skill, 4)
     assert 'erro' in jogo.converter(skill, 4)
 
@@ -212,7 +212,7 @@ def test_erro_registrado_so_com_o_tipo(privado, sugeridos):
 
 def test_gravacoes_nao_deixam_temporario(privado, plan, sugeridos):
     _conquistado_nota_3(plan, sugeridos[0])
-    jogo.abrir_cartao(DDD, 's')
+    jogo.abrir_lampejo(DDD, 's')
     acoes.enfileirar(sugeridos[1], 't')
     assert not list(privado.glob('.*.tmp'))
 

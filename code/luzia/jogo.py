@@ -554,7 +554,7 @@ def reconhecer(sessao: str, chave: str, skill: str, tipo: str, extensao: str = '
 
 
 # ------------------------------------------------------------------ lampejos (tabela `lampejo`)
-def abrir_cartao(skill: str, sessao: str = '') -> bool:
+def abrir_lampejo(skill: str, sessao: str = '') -> bool:
     """O observador mostrou um lampejo: ele pode virar luz própria uma única vez, nas próximas 24 h. Nunca levanta no banco ocupado."""
     return banco.gravar_ou_pendurar('lampejo', {'prisma': skill, 'sessao': sessao})
 
@@ -570,7 +570,7 @@ def _fechar_lampejo(con: sqlite3.Connection, skill: str, como: str) -> bool:
     return True
 
 
-def usar_cartao(skill: str, como: str) -> bool:
+def usar_lampejo(skill: str, como: str) -> bool:
     """Fecha o lampejo aberto mais recente da skill ('convertido' ou 'guardado'). False se não houver."""
     with trajetoria.abrir() as con, banco.transacao(con):
         return _fechar_lampejo(con, skill, como)
@@ -589,10 +589,6 @@ def converter(skill: str, nota: int, ref: str = '') -> dict:
         if lm:
             _lumen(con, skill, lm, 'propria', 'passivo-conversao', ref)
     return {'lm': lm, 'nota': nota}
-
-
-abrir_lampejo = abrir_cartao
-usar_lampejo = usar_cartao
 
 
 # ------------------------------------------------------------------ níveis e rota
@@ -655,7 +651,6 @@ def progresso_skill(skill: str, d: dict | None = None) -> dict:
             'limiar': LIMIAR_DEGRAU, 'feixes': feixes, 'falta': falta, 'pronto': not falta}
 
 
-progresso_prisma = progresso_skill
 
 
 def rota(plan: dict, con: sqlite3.Connection | None = None, espera_ms: int | None = None) -> dict:

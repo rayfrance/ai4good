@@ -34,11 +34,9 @@ from luzia import acoes, arquivos, banco, jogo, trajetoria  # noqa: E402
 
 PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
-CONFIG = CFG
 CLI = arquivos.CLI
 
 AGENTES = ('claude-code', 'codex', 'cursor', 'antigravity', 'outro')
-MODOS_VALIDOS = ('ativo', 'passivo', 'sob_demanda')
 NOMES_FOCO = {
     'ativo': 'em foco, com lampejos',
     'passivo': 'em foco, em silêncio',
@@ -72,7 +70,6 @@ def definir_modo(modo: str) -> dict:
     return cfg
 
 
-salvar_modo = definir_modo
 
 
 def plano() -> dict:
@@ -110,7 +107,6 @@ def authorized(cwd: str, cfg: dict) -> bool:
     return any(cwd_n.startswith(r.replace('\\', '/').lower()) for r in roots)
 
 
-autorizado = authorized
 
 
 def sessao_id(event: dict) -> str:

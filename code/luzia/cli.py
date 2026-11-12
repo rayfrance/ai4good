@@ -83,7 +83,7 @@ def execute_triage(entrada_path: Path, rotulo: str = 'plugin-triage', save_state
     return result.plan, record, dict(redactor.hits)
 
 
-def daily_call(kind: str, entrada_path: Path, rotulo: str) -> tuple[dict, dict, dict]:
+def daily_call(entrada_path: Path, rotulo: str) -> tuple[dict, dict, dict]:
     """Chamada leve do dia a dia (oportunidades da sessão): plano salvo + eventos mascarados e evidências.
 
     As entregas não passam mais pelo modelo: vêm só do git (`entregas.py`)."""
@@ -143,7 +143,6 @@ def gerar_trecho(skill: str, rotulo: str = 'cmd-trecho') -> dict:
     return {'skill': skill, 'prisma': skill, 'feixes': gerados, 'avancos': gerados, 'record': record}
 
 
-gerar_acender = gerar_trecho
 
 ABERTOS = ('sugerido', 'na_fila', 'em_andamento')
 
@@ -250,7 +249,6 @@ def bt_feixe(f: dict, prefixo: str = '') -> dict:
             'rodar': f"fazer {f['id']}"}
 
 
-bt_avanco = bt_feixe
 BT_PAINEL = {'rotulo': 'Abrir o painel', 'descricao': 'trajetória, avanços e entregas no navegador', 'rodar': 'career-map'}
 BT_TRAJETORIA = {'rotulo': 'Ver minha trajetória', 'descricao': 'prismas, níveis e lúmens até a meta', 'rodar': 'trajetoria'}
 
@@ -417,7 +415,7 @@ def start_panel() -> None:
 
 
 def set_mode(modo: str) -> None:
-    observer.salvar_modo(modo)
+    observer.definir_modo(modo)
 
 
 def roteiro(a: dict) -> None:
@@ -979,7 +977,7 @@ def main() -> None:
         return
 
     if args.comando == 'feedback-skills-opportunities':
-        resp, rec, hits = daily_call('opportunities', entrada_path, rotulo)
+        resp, rec, hits = daily_call(entrada_path, rotulo)
         plan = pipeline.load_state().get('plano', {})
         sessao = [a for a in acoes.todas(plan) if a['origem'] == 'sessão']
         print('## ✦ Luzia · oportunidades nesta sessão')

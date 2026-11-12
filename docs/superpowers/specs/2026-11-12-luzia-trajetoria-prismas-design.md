@@ -156,7 +156,27 @@ Toda leitura de IA guarda os fatos usados, o hash desses fatos, o modelo e a dat
 - **Sem modelo ou sem internet:** a tela mostra os fatos medidos e "leitura indisponível"; nenhum texto montado por modelo de frase finge ser leitura da Luzia.
 
 ## 12. Deixado ao construtor
-Nomes de tabelas e colunas, índices, formato exato da foto de versão da trajetória, cores das faixas do espectro dentro da paleta, se as chaves JSON dos esquemas do modelo mudam, como dividir módulos, e a ordem das fases. Sugestão de fases (para delegar a agentes mais baratos, cada uma com testes sobre cópia dos dados): 1) banco + migração; 2) motor do jogo sobre o banco; 3) entregas a partir do git; 4) leituras com base e pedidos de mudança; 5) CLI, comandos e vocabulário; 6) painel; 7) docs.
+Nomes de tabelas e colunas, índices, formato exato da foto de versão da trajetória, cores das faixas do espectro dentro da paleta, se as chaves JSON dos esquemas do modelo mudam e como dividir módulos.
+
+## 12a. Orquestração da construção (decidido com a Rayane)
+**Qualidade acima de economia de tokens.** O trabalho é dividido em fases e cada uma vai para o modelo que a faz melhor; modelo mais barato só onde ele dá conta com folga.
+
+| fase | o que entrega | quem implementa | por quê |
+|:--|:--|:--|:--|
+| 1 | banco, esquema, camada de acesso, migração dos JSON, fila de pendentes | **Opus 5.5** | é a fundação: integridade dos dados e concorrência não podem errar |
+| 2 | motor do jogo sobre o banco (avanços, lúmens, níveis, lampejos, revisita, tetos) | **Sonnet 5.5** | regras já definidas e testadas hoje; é transporte para o banco |
+| 3 | entregas a partir do git (detecção de PR, fatos, prismas atravessados, ligação com avanços e lúmens) | **Sonnet 5.5** | algoritmo descrito na seção 7 |
+| 4 | leituras com base (prisma, entrega, pedido), regeneração em lote e pedido de mudança da trajetória | **Opus 5.5** | desenho de prompts e da máquina de estados; é onde nasce ou morre o "texto solto" |
+| 5 | CLI, comandos, skills, foco/lampejo e vocabulário novo; filtros no chat | **Sonnet 5.5** | segue o protocolo de botões existente |
+| 6 | painel (Trajetória, Avanços com filtros, Entregas, espectro dos prismas) | **Sonnet 5.5**, com conferência visual no navegador | segue o design system existente |
+| 7 | docs, `CONTEXT.md`, `luzia-ux.md`, regras para outros agentes; varreduras mecânicas (renomeações, buscas LGPD) | **Haiku 5.5** | trabalho mecânico e verificável |
+
+**Portões de qualidade em toda fase:**
+- testes automáticos sobre **cópia** dos dados privados (nunca os reais), incluindo os testes das regras de jogo já existentes;
+- **revisão de código por Opus** antes de seguir (correção, concorrência, LGPD, fidelidade a este documento);
+- uma fase que depende de outra só começa depois que a anterior passou no portão;
+- ao final: teste ponta a ponta pelo chat (avanço → registrar → nível → pedido de mudança) e pelo painel no navegador, `claude plugin validate` e busca LGPD;
+- commits por fase, mostrados antes, sem push sem autorização.
 
 ## 13. Critérios de aceite
 - Migração sem perda (totais iguais) e idempotente; nenhum módulo lê/escreve os JSON antigos depois dela.

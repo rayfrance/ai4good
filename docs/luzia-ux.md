@@ -1,39 +1,65 @@
-# Luzia · desenho da experiência (gamificação)
+# Luzia · desenho da experiência (gamificação e trajetória)
 
-Decidido com a Rayane em 12/11/2026 (regras de evidência reforçadas na revisão do mesmo dia). A metáfora é a tese: o código que o agente produz e você não domina é **luz refletida**; quando você explica, decide e defende, a luz passa a ser **própria**.
+Decidido com a Rayane em 12/11/2026 (persistência, trajetória, prismas e leituras com base adicionadas após a revisão do mesmo dia). A metáfora é a tese: o código que o agente produz e você não domina é **luz refletida**; quando você explica, decide e defende, a luz passa a ser **própria**.
 
-## Vocabulário (só três palavras temáticas)
-- **Feixe**: uma ação curta (5 a 30 min) apontada para uma lacuna.
-- **Lúmen (lm)**: o que você ganha com evidência de domínio.
-- **Rota**: o caminho do seu nível atual até a meta (hoje, Júnior 3 até Plena), feito de **degraus**.
-- **Luz própria**: a parcela dos seus lúmens que veio de você (e não do agente). O contrário é **luz refletida**.
-- **Propriedade** (fora do jogo, nas Entregas): quanto de uma entrega é seu, medido por P1–P4 com a base de cada nota.
+## Vocabulário
+Nome real primeiro; a metáfora de luz só onde explica algo.
+
+- **Trajetória**: o caminho do nível atual até a meta (ex.: Júnior 3 até Plena), versionado e ajustável por pedido formal de mudança.
+- **Prisma (skill)**: uma competência da trajetória (sempre com o nome junto, ex.: *Prisma Domain-Driven Design (DDD)*). Cada prisma exibe os níveis 0–5 em um espectro de 5 faixas que acendem.
+- **Nível**: de 0 a 5 em cada prisma; a soma dos avanços de nível forma a trajetória até a meta.
+- **Avanço**: ação curta (5 a 30 min) apontada para um prisma; tipos com ícone e cor: `praticar`, `explicar`, `estudar`, `explorar`.
+- **Lúmen (lm)**: a pontuação obtida com evidência de domínio.
+- **Luz própria / Luz refletida**: a parcela dos lúmens que veio de você (dirigiu, explicou, conquistou) versus o que o agente aplicou sozinho.
+- **Propriedade** (fora do jogo, nas Entregas): quanto de uma **entrega** é seu, medido de P1 a P4 com base visível.
+- **Foco**: a Luzia observando a sessão com intenção (*Em foco, com lampejos*, *Em foco, em silêncio* ou *Fora de foco*).
+- **Lampejo**: cartão curto no chat quando a Luzia em foco percebe um conceito na mudança do agente (`✦ Lampejo da Luzia · Prisma <nome>`); pode virar luz própria uma vez.
+
+> Nos **dossiês e textos formais** (para líder ou PDI), a Luzia usa linguagem formal ("skill", "nível", "ação", "pontos de evidência", "autoria própria"), sem o vocabulário do jogo.
 
 ## Progresso sem calendário
-- Cada skill tem nível atual (declarado por você) e meta. Cada nível a subir é um **degrau**; a Rota é a soma dos degraus até a meta.
-- Um degrau fica **pronto** quando a skill junta **150 lm** desde o último degrau, com pelo menos **40% de luz própria** e **ao menos 1 feixe conquistado** (evidência avaliada pela rubrica; só lúmens passivos não sobem degrau). A Luzia avisa; **você confirma** a subida (regra de ouro: o nível nunca muda sozinho).
-- O **prazo** que você declara só calibra o ritmo sugerido (quantos feixes por semana, dificuldade). Não trava nada nem cria datas.
-- A cada terço da Rota, a Luzia gera um **dossiê de evidências** (local) para levar ao líder ou ao PDI. A cada degrau, ou quando uma skill fica sem feixe aberto, a Luzia oferece **acender o próximo trecho**: 3 feixes novos daquela skill para o nível seguinte.
+- Cada prisma tem nível atual (declarado por você ou estimado na triagem) e meta. A trajetória mede quantos níveis faltam até a meta em todos os prismas ativos.
+- O próximo nível de um prisma fica **pronto** quando acumula **150 lm** desde o último registro de nível, com pelo menos **40% de luz própria** e **ao menos 1 avanço conquistado** (evidência avaliada pela rubrica; apenas lúmens passivos não sobem de nível). A Luzia avisa; **você confirma** a subida (regra de ouro: o nível nunca muda sozinho).
+- O **prazo** declarado apenas calibra o ritmo sugerido (quantos avanços por semana). Não cria datas obrigatórias nem trava o progresso.
+- A cada terço da trajetória, a Luzia gera um **dossiê de evidências** local (que inclui somente níveis conquistados como evidência e registra pedidos de mudança aceitos).
+- Ao subir de nível ou quando um prisma fica sem avanço aberto, a Luzia oferece **acender 3 avanços novos** daquele prisma (`/luzia:acender`).
 
-## Sempre uma ação
-Toda saída da Luzia termina em botões (no Claude Code, as opções do próprio chat): continuar, subir um degrau pronto, revisitar, acender um trecho, fazer o próximo feixe. `/luzia:hoje` é o ponto de partida. O painel acompanha ao vivo e comemora cada lúmen novo; a linha de status mostra a skill mais perto do próximo degrau.
+## Sempre uma ação (paridade chat × painel)
+Toda saída da Luzia termina em botões (`LUZIA_BOTOES` no CLI e opções equivalentes no painel): continuar um avanço, subir um nível pronto, revisitar, acender 3 avanços, responder ao pedido de mudança ou abrir um filtro. `/luzia:hoje` é o ponto de partida. Toda ação existe no chat e no painel (`Hoje · Trajetória · Avanços · Entregas · Ajustes`); o painel nunca é obrigatório.
 
 ## Lúmens
-**Ativos (feixes)**: valor por regra visível, e o ganho depende da sua explicação.
-- Valor = esforço (minutos do feixe) + lacuna (15 lm por nível que falta na skill) + prioridade (+10 se a skill é uma das duas maiores lacunas, +5 nas demais; 0 se já está na meta). Limite de 10 a 100 lm.
-- Rubrica: 4 = 100% · 3 = 75% · 2 = 50% · 0–1 = tente de novo (0 lm, o feixe continua aberto).
-- Só vale registrar um feixe **iniciado** (por `/luzia:fazer`, pela fila ou ao copiar o prompt no painel).
-- Nota 2 ou 3: o feixe fica conquistado e pode ser **revisitado uma vez** para buscar o restante (só a diferença; o que já ganhou não conta de novo).
-- Todo lúmen de feixe é **luz própria**.
+**Ativos (avanços):** valor calculado por regra visível, e o ganho depende da sua explicação.
+- Valor = esforço (minutos do avanço) + lacuna (15 lm por nível que falta no prisma) + prioridade (+10 se o prisma é uma das duas maiores lacunas, +5 nos demais; 0 se já está na meta). Limite de 10 a 100 lm.
+- Rubrica 0–4: `4 = 100%` · `3 = 75%` · `2 = 50%` · `0–1 = tente de novo` (0 lm; o avanço permanece em andamento).
+- Só vale registrar um avanço **iniciado** (`/luzia:fazer`, pela fila do painel ou ao copiar o prompt no painel).
+- Nota 2 ou 3: o avanço fica conquistado e pode ser **revisitado uma vez** para buscar o restante (recebe apenas a diferença).
+- Todo lúmen de avanço é **luz própria**.
 
-**Passivos (dia a dia, observados pelo hook):**
-- O conceito aparece só no código que o agente escreveu: **+10 lm de luz refletida**.
-- O conceito aparece no **seu prompt** (você dirigiu): **+20 lm de luz própria**.
-- Converter: a Luzia pede 1 frase sua sobre o porquê; avaliada pela rubrica, vale até **+30 lm de luz própria**, **uma vez por cartão** (o cartão vale por 24 h).
-- Limite de 40 lm passivos por skill por dia, e um reconhecimento por skill por sessão. Só a skill e o tipo são guardados; nunca o texto do prompt nem o código.
+**Passivos e lampejos (dia a dia, observados pelo foco no Claude Code):**
+- Conceito aparece apenas no código gerado pelo agente (`PostToolUse`): **+10 lm de luz refletida**.
+- Conceito aparece no **seu prompt** (`UserPromptSubmit`, você dirigiu): **+20 lm de luz própria**.
+- Converter um **lampejo**: a Luzia faz 1 pergunta sobre o porquê da decisão; avaliada pela rubrica 0–4, vale até **+30 lm de luz própria**, **uma vez por lampejo** (ou escolha **guardar** para transformar em avanço sugerido).
+- Teto de **40 lm passivos por prisma por dia**, e um reconhecimento por prisma por sessão. Apenas fatos mascarados (horário, prisma, extensão, modo) são salvos no banco; nunca código bruto nem texto do prompt.
 
-## Feixes (estados)
-Sugerido → Na fila → Em andamento → **Conquistado**. Ou **Descartado**, com motivo ("não faz sentido para mim", "já domino", "agora não"), restaurável; o motivo volta para a Luzia sugerir melhor. Feixes ficam num catálogo persistente: não somem quando a Luzia gera novas sugestões.
+## Avanços: estados e filtros combináveis
+- Estados: `Sugerido` → `Na fila` → `Em andamento` → **Conquistado** (ou **Descartado**, com motivo *"não faz sentido para mim"*, *"já domino"* ou *"agora não"*, restaurável; o motivo alimenta sugestões futuras).
+- Filtros combináveis por **estado**, **prisma** e **tipo** (com contagens no painel e parâmetros `--estado`, `--prisma`, `--tipo` ou linguagem natural no chat).
+
+## Trajetória flexível (pedido de mudança)
+Qualquer ajuste na trajetória — **incluir prisma**, **mudar meta**, **arquivar** ou **reativar** — segue um fluxo formal no chat ou no painel:
+1. A pessoa abre o pedido informando o motivo.
+2. Para inclusões e mudanças de meta, a Luzia analisa contra a meta final e propõe nível de partida, meta, palavras-chave, 3 avanços iniciais e análise fundamentada.
+3. A pessoa escolhe **Aceitar**, **Ajustar** (alterando nível/meta para nova proposta, registrado no histórico do pedido) ou **Recusar**.
+4. Ao aceitar, nasce uma nova **versão imutável da trajetória**; nenhum progresso anterior (lúmens, avanços ou níveis conquistados) é perdido. Prismas arquivados preservam tudo e podem ser reativados.
+
+## Entregas (detecção local no git + P1–P4)
+- Rastreia entregas localmente nos repositórios autorizados (apenas commits da pessoa): merge commits de PR (`Merged PR ...`, `Merge pull request #...`), commits agrupados por id de ticket (`AB#...`, `#...`) ou commits isolados.
+- Janela inicial de **90 dias** (ampliável pelo chat ou painel); atualizações seguintes são incrementais.
+- Cada entrega exibe fatos medidos (período, duração em dias, nº de commits, arquivos, linhas, áreas), **prismas atravessados** com termos detectados, **lúmens ligados** na janela, **avanços feitos e úteis**, **propriedade P1–P4** (com P2 calculado sobre o total da entrega) e a **leitura assinada** da Luzia. Títulos são mascarados e identificadores privados/hashes nunca vão para a tela.
+
+## Leituras com base (sem texto solto)
+- Toda leitura gerada por IA (por **prisma**, por **entrega** ou por **pedido de mudança**) armazena no SQLite os fatos usados, o hash da base, o modelo e a data, exibindo `Leitura da Luzia · com base em: … · modelo · data`.
+- Leituras vencidas são renovadas em lote apenas quando o hash da base muda ou sob pedido explícito. Sem modelo ou sem base suficiente, a interface exibe apenas os fatos medidos e informa leitura indisponível.
 
 ## Fora do desenho (por decisão)
-Ritmo/sequência de dias, constelação, nomes temáticos extras, recompensas sem evidência.
+Sequência de dias (streaks), nomes fantasiosos fora do vocabulário acima e recompensas sem evidência.

@@ -1,34 +1,32 @@
-# Handoff · Luzia 2 (feixes, lúmens e rota) · 12/11/2026
+# Handoff · Luzia (trajetória, prismas, entregas e SQLite) · 12/11/2026
 
-- Worktree `C:\Repositorio\ai4good-sem2`, branch `feature/luzia-acoes` (base: tag `sem2`, intocada).
-- **Desenho da experiência:** [docs/luzia-ux.md](../luzia-ux.md) (decidido com a Rayane): feixes valem lúmens; lúmens enchem degraus por skill; degraus formam a rota até Plena, sem datas; luz própria × luz refletida.
-- **Feito:**
-  - Pacote `code/luzia` (antes `code/leadroid`); skills `luzia-mentor` e `luzia-observador`; hooks `PostToolUse` e `UserPromptSubmit` em `~/.claude/settings.json` apontam para `code/luzia/observer.py`; comandos em `~/.claude/commands/luzia/`.
-  - `jogo.py`: catálogo persistente de feixes (estados, histórico, descarte com motivo, restauração, revisita), livro de lúmens, degraus confirmados pela pessoa (150 lm, mínimo 40% de luz própria), rota, calibragem de ritmo pelo prazo e dossiê de evidências.
-  - Observador: +10 lm de luz refletida quando o agente aplica um conceito; +20 lm de luz própria quando o conceito aparece no prompt da pessoa; até +30 lm ao explicar o porquê. Fila de feixes enviados do painel, oferecida na próxima mensagem.
-  - Integração pelo harness: `/luzia:fazer` abre sessão nova (Claude Code Desktop) ou conduz aqui; subagente só prepara material. Regras para Codex, Cursor e Antigravity em `code/luzia/harness/REGRAS.md`.
-  - Painel próprio (`server.py` + `painel/`): telas Hoje, Rota, Feixes, Luz própria e Ajustes; paleta roxo/lilás/laranja/terrosos; ícones SVG próprios; escala de nível; modelo configurável.
-  - `modelo.py`: provedor (Gemini, Anthropic, compatível com OpenAI), modelo e chave configuráveis pelo painel; chave só no `.env`; aviso quando o modelo escolhido falha e o reserva responde. Em uso: `gemini-3.5-flash-lite` (o `gemini-4-argon` tem cota zero no plano gratuito da chave atual).
-- **Verificações:** ciclo do jogo testado ponta a ponta sobre cópia da pasta privada (restaurada depois); hook testado com evento real; painel conferido no navegador; teste real do modelo (2,1 s).
-- **Limites:** observador automático só no Claude Code; SDKs `anthropic`/`openai` não instalados (instalar só se a pessoa escolher esses provedores).
-- **Pendente:** a Rayane declarar o nível em Ajustes (a rota parte dele); nova triagem e medições na versão commitada para o sem3; teste do ciclo num agente diferente do Claude Code; polimento com plugin de design, se instalado.
+- Worktree de implementação: `C:\Repositorio\ai4good-sem2-banco` (branch `feature/luzia-banco`, originado de `feature/luzia-acoes` após a Tarefa 4).
+- Worktree principal: `C:\Repositorio\ai4good-sem2` (branch `feature/luzia-acoes`, base `sem2`), pronto para receber o fast-forward e a migração real na Tarefa 16 após revisão final da Rayane.
+- **Desenho e plano:**
+  - Especificação: [docs/superpowers/specs/2026-11-12-luzia-trajetoria-prismas-design.md](../superpowers/specs/2026-11-12-luzia-trajetoria-prismas-design.md)
+  - Plano em 16 tarefas: [docs/superpowers/plans/2026-11-12-luzia-trajetoria-prismas.md](../superpowers/plans/2026-11-12-luzia-trajetoria-prismas.md)
+  - Regras de experiência atualizadas: [docs/luzia-ux.md](../luzia-ux.md)
 
-## Lotes 2 e 3 · 12/11/2026 (sem commit)
-- **Botões em toda saída:** a CLI termina com `LUZIA_CLI`/`LUZIA_PERGUNTA`/`LUZIA_BOTOES`; nenhum comando cru na conversa. Novo `/luzia:hoje` (ponto de partida). Avisos de degrau, revisita, descarte e subida viram botões.
-- **Próximo trecho:** `cli trecho <skill>` / botão no painel gera 3 feixes da skill (`planner.TRECHO_SCHEMA`), salvos em `plano.trechos`; oferecido depois de subir e quando a skill fica sem feixe aberto.
-- **Plugin:** `code/luzia/.claude-plugin/plugin.json`, `hooks/hooks.json` (SessionStart, UserPromptSubmit, PostToolUse) e `.claude-plugin/marketplace.json` na raiz; `claude plugin validate` passa. Comandos com `${CLAUDE_PLUGIN_ROOT}`; `instalar.py` para o modo manual (atualizou `~/.claude/commands/luzia` e criou `~/.claude/skills/luzia-*`). Cópias em `.claude/` do repositório removidas (fonte única em `code/luzia`).
-- **Linha de status** (`statusline.py`) e hook **SessionStart** prontos; no modo manual atual ainda **não ligados** (dependem de `python -m luzia.instalar --hooks --statusline`, que mexe no `settings.json`, com backup).
-- **Coesão:** estado vivo em `private/career_state.json` (migrado; `outputs/sem2/career_state.json` voltou à foto do seminário); "Propriedade" (P1–P4, aba Entregas) separada de "luz própria" (parcela dos lúmens); P1 marcado como geral; rótulos da rota vindos do plano; CLI sem emoji; `code/luzia/CONTEXT.md`.
-- **Verificado:** 17 testes novos + 22 do lote 1 em cópias dos dados e HOME falso; plugin e marketplace validados; painel no navegador; linha de status e SessionStart com eventos simulados.
+## O que foi entregue (Tasks 1–15)
+1. **Fundação SQLite e concorrência (`banco.py`, `migrar.py`, `arquivos.py`):**
+   - `LUZIA_PRIVATE` configurável por ambiente e suíte isolada sobre dados sintéticos (`conftest.py`, nunca toca em `code/luzia/private/`).
+   - Persistência única em `private/luzia.db` (SQLite WAL, `busy_timeout=5000`, transações `BEGIN IMMEDIATE`) com livros só de acréscimo (`lumen`, `avanco_evento`, `nivel_registro`, `trajetoria_versao`, `chamada_modelo`).
+   - Migração idempotente e sem perda dos JSON legados (backup automático em `private/migracao-AAAAMMDD/` antes de importar).
+   - Spool não-bloqueante em `pendentes.jsonl` com lock atômico no Windows para hooks nunca travarem ou perderem reconhecimentos passivos sob contenção.
+2. **Motor de trajetória, prismas e avanços (`trajetoria.py`, `jogo.py`, `acoes.py`, `pedidos.py`):**
+   - Versões imutáveis da trajetória (`trajetoria_versao`), prismas ativos/arquivados com palavras-chave, registros de nível separados por origem (`conquistado`, `declarado`, `migrado`, `pedido`) e progresso de nível calculado a partir do último registro.
+   - Pedidos formais de mudança na trajetória (`incluir`, `mudar_meta`, `arquivar`, `reativar`) com histórico de propostas, análise fundamentada e transições `aberto → proposto → aceito / recusado` sem perda de progresso.
+   - Dossiê formal em `private/dossies/` usando termos formais (`skill`, `nível`, `ação`), contabilizando apenas subidas `conquistado` e listando pedidos aceitos.
+3. **Entregas reais no git e propriedade (`entregas.py`, `propriedade.py`):**
+   - Detecção local via `git` nos repositórios autorizados (apenas autoria da pessoa): merges de PR (`Merged PR`, `Merge pull request`), agrupamento por ticket e commits isolados, janela inicial de 90 dias (ampliável) + leituras incrementais, com títulos mascarados pelo `Redactor`.
+   - Vínculo completo entre entrega, prismas atravessados (com termos achados), avanços feitos e úteis, lúmens na janela (`±1 dia`), propriedade `P1–P4` (incluindo `p2_entrega`) e leitura assinada.
+4. **Leituras fundamentadas em lote (`leituras.py`, `planner.py`):**
+   - Leituras por **prisma**, **entrega** e **pedido** armazenam fatos usados (`base_json`), `base_hash` (sha256), `modelo` e `criado_em`.
+   - Regeneração em lote numa chamada ao modelo apenas quando a base muda ou sob pedido explícito; transações tudo-ou-nada e degradação graciosa sem modelo (`leitura indisponível`).
+5. **Paridade Chat × Painel e vocabulário novo (`cli.py`, `observer.py`, `statusline.py`, `commands/`, `skills/`, `server.py`, `painel/`):**
+   - Vocabulário atualizado em todas as superfícies: **Trajetória · Prisma (skill) · Nível · Avanço · Lúmen · Luz própria/refletida · Foco · Lampejo** (aliases de compatibilidade na CLI por 1 versão).
+   - Comandos novos/atualizados (`/luzia:trajetoria`, `/luzia:avancos`, `/luzia:acender`, `/luzia:entregas`, `pedido ...`, `entrega <id>`, `nivel <prisma> <N>`), todos terminando em `LUZIA_BOTOES`.
+   - Painel local (`Hoje · Trajetória · Avanços · Entregas · Ajustes`) com espectro de 5 faixas nos prismas, leituras assinadas com fatos/modelo/data, filtros combináveis com contagem em **Avanços**, fluxo completo de pedidos de mudança na **Trajetória** e detalhe completo em **Entregas** — verificado no navegador em `1440×960` e `375×812`.
 
-## Revisão completa · 12/11/2026
-**Lote 1 feito (itens 1 a 4), sem commit:** `arquivos.py` (gravação atômica; JSON corrompido vira cópia `.corrompido-*` + `private/erros.log`, sem sobrescrever às cegas); catálogo só regravado quando muda; revisita mantém `conquistado` e paga só a diferença, uma vez; `registrar` exige feixe iniciado (o "Copiar prompt" do painel agora inicia); nota 0–1 mantém o feixe aberto; conversão uma vez por cartão (`private/cartoes.json`, 24 h); degrau exige 1 feixe conquistado; servidor barra `Host`/`Origin` de fora, exige JSON e limita o corpo a 64 KB. Verificado: 22 testes numa cópia dos dados, sondas de origem/Host (403/415/413) e painel no navegador. Regras novas em `docs/luzia-ux.md`.
-0. **Corrigido, sem commit:** anel da Luz própria (só a % dentro, legenda sua/do agente embaixo, restante em lilás), barras P3/P4 sem base em lilás, campo de modelo como `<select>` com "outro modelo…".
-1. **Bug confirmado (cópia isolada dos dados):** revisitar pelo painel (`/api/enviar` → `jogo.enfileirar`) tira o feixe de `conquistado`; o `registrar` seguinte paga o valor cheio de novo e sem limite (feixe de 50 lm rendeu 88 e depois +50 a cada vez).
-2. **Segurança confirmada:** `server.py` aceita POST de qualquer origem (`text/plain`) e qualquer `Host` (DNS rebinding). Um site aberto no navegador pode trocar o `base_url`/chave em `/api/modelo` e desviar as chamadas da Luzia. Correção: checar `Origin`/`Host` e exigir `application/json`.
-3. **Perda silenciosa de dados:** `_ler` devolve `{}` com JSON corrompido e o próximo `_gravar` sobrescreve o catálogo; gravações não atômicas com hook, CLI e painel (que grava `feixes.json` a cada 5 s pelo polling) escrevendo ao mesmo tempo.
-4. **Furos no jogo:** conversão do cartão (+30) sem limite; `registrar` aceita feixe nunca iniciado; só com palavras no prompt (+20 própria, 40/dia) um degrau fica pronto em ~4 dias sem nenhum feixe, o que contraria "recompensas sem evidência".
-5. **Falta "o próximo trecho acende":** depois de conquistar os feixes de uma skill ou subir de degrau, nada novo aparece sem nova triagem.
-6. **Chat ainda é texto:** comandos imprimem listas e mostram comandos crus (`cd /c/... subir`); `subir`, `dossie` e os avisos de degrau/revisita não viram botões; 3 comandos esperam o modelo (5–20 s); skills `luzia-mentor`/`luzia-observador` desatualizadas (Streamlit, 90d/6m/12m, `systemMessage`).
-7. **Coesão:** caminhos fixos `C:/Repositorio/ai4good-sem2` em observer, CLI, comandos e regras (não é um plugin instalável); "luz própria" nomeia duas medidas diferentes (parcela de lúmens e índice P1–P4); P1 é um número global repetido em todas as entregas; "Júnior 3 → Plena" fixo; estado vivo em `outputs/sem2/career_state.json` (versionado) muda a cada chamada.
-8. **Oportunidades de destaque:** empacotar como plugin do Claude Code (`plugin.json` + hooks com `${CLAUDE_PLUGIN_ROOT}`); linha de status com lúmens e degrau; `SessionStart` oferecendo feixe em andamento e fila; comando único `/luzia` com botões conforme o estado; painel celebrando lúmens novos.
+## Histórico resumido (versão anterior, JSON)
+Antes da migração para SQLite (`sem2` / `feature/luzia-acoes` até commit `0c4ea81`), o protótipo chamava os avanços de *feixes*, os níveis de *degraus*, a trajetória de *rota* e armazenava cada entidade em arquivos JSON separados (`feixes.json`, `lumens.jsonl`, `degraus.json`, `autoavaliacao.json`, `cartoes.json`, `evidencias.jsonl`, `fila.json`, `sessao.jsonl`). Esses nomes antigos permanecem apenas em testes de migração legada (`tests/dados/`), em apelidos internos de compatibilidade na CLI/servidor e na foto congelada `outputs/sem2/`.

@@ -197,9 +197,20 @@ def _carregar(con: sqlite3.Connection, historico: bool = True) -> dict[str, dict
     return {r['id']: _feixe(r, hist.get(r['id'], [])) for r in con.execute('SELECT * FROM avanco ORDER BY rowid')}
 
 
+ABERTOS = ('sugerido', 'na_fila', 'em_andamento')
+
+
+def _ocultos(con: sqlite3.Connection) -> set[str]:
+    """Prismas arquivados: os avanços ainda abertos deles não são oferecidos até o prisma ser reativado."""
+    return {r['nome'] for r in con.execute("SELECT nome FROM prisma WHERE estado = 'arquivado'")}
+
+
 def avancos(con: sqlite3.Connection, estado: str | None = None, prisma: str | None = None,
-            tipo: str | None = None, historico: bool = True) -> list[dict]:
-    """Avanços do banco, na ordem do catálogo (estado, depois maior valor). Os filtros se combinam (E)."""
+            tipo: str | None = None, historico: bool = True, arquivados: bool = False) -> list[dict]:
+    """Avanços do banco, na ordem do catálogo (estado, depois maior valor). Os filtros se combinam (E).
+
+    Os avanços abertos de prisma arquivado ficam de fora (os conquistados e descartados continuam: são história).
+    """
     onde, args = [], []
     for coluna, valor_ in (('estado', estado), ('prisma', prisma), ('tipo', tipo)):
         if valor_ is not None:
@@ -209,7 +220,9 @@ def avancos(con: sqlite3.Connection, estado: str | None = None, prisma: str | No
     sql = ('SELECT * FROM avanco' + (' WHERE ' + ' AND '.join(onde) if onde else '')
            + f' ORDER BY CASE estado {ordem} ELSE 9 END, -COALESCE(valor_lm, 0), rowid')
     hist = _historicos(con) if historico else {}
-    return [_feixe(r, hist.get(r['id'], [])) for r in con.execute(sql, args)]
+    ocultos = set() if arquivados else _ocultos(con)
+    return [_feixe(r, hist.get(r['id'], [])) for r in con.execute(sql, args)
+            if not (r['prisma'] in ocultos and r['estado'] in ABERTOS)]
 
 
 def _um(fid: str, con: sqlite3.Connection | None = None) -> dict | None:
@@ -326,7 +339,10 @@ def sincronizar(plan: dict) -> dict[str, dict]:
 
 def catalogo(plan: dict, descartados: bool = False) -> list[dict]:
     cat = sincronizar(plan)
-    lista = [f for f in cat.values() if descartados or f.get('estado') != 'descartado']
+    with trajetoria.abrir() as con:
+        ocultos = _ocultos(con)
+    lista = [f for f in cat.values() if (descartados or f.get('estado') != 'descartado')
+             and not (f.get('skill_plano') in ocultos and f.get('estado') in ABERTOS)]
     for f in lista:
         f['status'] = ESTADO_ANTIGO.get(f.get('estado'), 'pendente')
     return sorted(lista, key=lambda f: (ORDEM_ESTADO.get(f.get('estado'), 9), -int(f.get('valor_lm') or 0)))

@@ -40,7 +40,10 @@ def fila(espera_ms: int | None = None) -> list[dict]:
     """Ações que a pessoa mandou do painel para o agente e ainda não começou."""
     with _abrir(espera_ms) as con:
         return [{'id': r['avanco_id'], 'titulo': r['titulo'], 'quando': r['quando'], 'oferecida_em': _lista(r['oferecida_json'])}
-                for r in con.execute('SELECT * FROM fila ORDER BY quando, rowid')]
+                for r in con.execute(
+                    'SELECT f.* FROM fila f LEFT JOIN avanco a ON a.id = f.avanco_id '
+                    'LEFT JOIN prisma p ON p.nome = a.prisma '  # avanço de prisma arquivado não é oferecido
+                    "WHERE COALESCE(p.estado, 'ativo') = 'ativo' ORDER BY f.quando, f.rowid")]
 
 
 def enfileirar(acao_id: str, titulo: str = '') -> None:

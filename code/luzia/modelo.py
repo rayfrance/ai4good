@@ -16,6 +16,8 @@ import re
 import time
 from pathlib import Path
 
+from . import arquivos
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 CFG = HERE / 'private' / 'modelo.json'
@@ -62,7 +64,7 @@ def _gravar_chave(nome: str, valor: str) -> None:
     env = ENVS[0]
     linhas = env.read_text(encoding='utf-8').splitlines() if env.exists() else []
     linhas = [ln for ln in linhas if not ln.startswith(f'{nome}=')] + [f'{nome}={valor}']
-    env.write_text('\n'.join(linhas) + '\n', encoding='utf-8')
+    arquivos.gravar_texto(env, '\n'.join(linhas) + '\n')
     os.environ[nome] = valor
 
 
@@ -79,10 +81,8 @@ def salvar(provedor: str, modelo: str, base_url: str = '', chave: str = '') -> d
         if len(chave) > 300 or any(c.isspace() for c in chave):
             raise ValueError('chave inválida')
         _gravar_chave(PROVEDORES[provedor]['chave'], chave)
-    CFG.parent.mkdir(parents=True, exist_ok=True)
-    CFG.write_text(json.dumps({'provedor': provedor, 'modelo': modelo,
-                               'base_url': base_url if PROVEDORES[provedor]['base_url'] else ''},
-                              ensure_ascii=False, indent=2), encoding='utf-8')
+    arquivos.gravar_json(CFG, {'provedor': provedor, 'modelo': modelo,
+                               'base_url': base_url if PROVEDORES[provedor]['base_url'] else ''})
     return status()
 
 

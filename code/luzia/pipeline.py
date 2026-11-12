@@ -15,7 +15,7 @@ try:
 except ImportError:
     psutil = None  # type: ignore[assignment]
 
-from . import planner, triage
+from . import arquivos, planner, triage
 from .privacy import Redactor
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -28,10 +28,7 @@ SESSION_LOG = PRIVATE / 'sessao.jsonl'
 
 
 def read_json(path: Path, default):
-    try:
-        return json.loads(path.read_text(encoding='utf-8'))
-    except Exception:
-        return default
+    return arquivos.ler_json(path, default)
 
 
 def load_state() -> dict:
@@ -154,7 +151,7 @@ def save_state(payload: dict, plan: dict, record: dict, hits: dict) -> None:
         'plano': plan,
         'payload_anonimizado': payload,
     }
-    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
+    arquivos.gravar_json(STATE_FILE, state)
 
 
 def update_state(fields: dict, record: dict) -> None:
@@ -165,7 +162,7 @@ def update_state(fields: dict, record: dict) -> None:
     state.setdefault('plano', {}).update(fields)
     state['atualizado_em'] = record['quando']
     state['custo_ultima_execucao'] = record
-    STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding='utf-8')
+    arquivos.gravar_json(STATE_FILE, state)
 
 
 def run_plan(

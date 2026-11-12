@@ -16,7 +16,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import acoes, jogo, pipeline, planner, propriedade, triage
+from . import acoes, arquivos, jogo, pipeline, planner, propriedade, triage
 from .privacy import Redactor
 
 PAINEL = 'http://localhost:8501'
@@ -216,8 +216,7 @@ def start_panel() -> None:
 def set_mode(modo: str) -> None:
     cfg = pipeline.read_json(pipeline.OBSERVER_CFG, {})
     cfg['modo'] = modo
-    pipeline.OBSERVER_CFG.parent.mkdir(parents=True, exist_ok=True)
-    pipeline.OBSERVER_CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+    arquivos.gravar_json(pipeline.OBSERVER_CFG, cfg)
 
 
 def roteiro(a: dict) -> None:
@@ -403,8 +402,10 @@ def main() -> None:
         if not a:
             print(f'Feixe {args.valor} não encontrado.')
             return
+        if not jogo.enfileirar(a['id']):
+            print(f"`#{a['id']}` não pode ir para a fila: já foi conquistado (e revisitado) ou está descartado.")
+            return
         acoes.enfileirar(a['id'], a.get('titulo', ''))
-        jogo.enfileirar(a['id'])
         print(f"➤ `#{a['id']}` na fila: a Luzia oferece na próxima mensagem do seu agente.")
         return
 
@@ -412,10 +413,12 @@ def main() -> None:
         if not a:
             print(f'Feixe {args.valor} não encontrado. Rode /luzia:next-level para ver os feixes.')
             return
-        if args.comando == 'revisitar' and not (a.get('estado') == 'conquistado' and a.get('nota') in (2, 3) and not a.get('revisitas')):
-            print('Só dá para revisitar uma vez um feixe conquistado com nota 2 ou 3.')
+        if (args.comando == 'revisitar' or a.get('estado') == 'conquistado') and not jogo.pode_revisitar(a):
+            print(f"`#{a['id']}` já foi conquistado. Só dá para revisitar uma vez um feixe com nota 2 ou 3.")
             return
-        jogo.iniciar(a['id'], args.onde or ('revisita' if args.comando == 'revisitar' else ''))
+        if not jogo.iniciar(a['id'], args.onde or ('revisita' if a.get('estado') == 'conquistado' else '')):
+            print(f"`#{a['id']}` está descartado. Restaure antes: `{CLI} restaurar {a['id']}`")
+            return
         acoes.desenfileirar(a['id'])
         acoes.registrar_evento(a['id'], 'iniciada', skill=a.get('skill'), origem=a.get('origem'))
         if args.comando == 'prompt':
@@ -495,10 +498,11 @@ def main() -> None:
             return
         skill = jogo.skill_de(args.skill, plan)
         if args.nota is not None:
-            nota = max(0, min(4, args.nota))
-            lm = round(jogo.PASSIVO['conversao'] * jogo.MULT.get(nota, 0))
-            if lm:
-                jogo.lancar(skill, lm, 'propria', 'passivo-conversao', args.pergunta[:60])
+            res = jogo.converter(skill, args.nota, args.pergunta[:60])
+            if res.get('erro'):
+                print(f"◐ {res['erro']}.")
+                return
+            nota, lm = res['nota'], res['lm']
             acoes.registrar_evento(acoes.aid('cartao', args.pergunta), 'concluida', nota=nota, resumo=args.resumo[:200],
                                    skill=skill, origem='cartao')
             print(f"✦ Luz própria: nota {nota}/4 · **+{lm} lm** em {skill}" if lm else
@@ -507,6 +511,7 @@ def main() -> None:
                 acoes.guardar(skill, args.pergunta)
             avisar_degraus(plan)
         else:
+            jogo.usar_cartao(skill, 'guardado')
             f = acoes.guardar(skill, args.pergunta)
             print(f"➤ Guardado como feixe `#{f['id']}`: aparece no painel e em /luzia:fazer {f['id']}")
         return

@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
+from . import arquivos
+
 PRIVATE = Path(__file__).resolve().parent / 'private'
 EVID = PRIVATE / 'evidencias.jsonl'
 SALVAS = PRIVATE / 'acoes_guardadas.json'
@@ -27,13 +29,12 @@ def fila() -> list[dict]:
 def enfileirar(acao_id: str, titulo: str = '') -> None:
     itens = [f for f in fila() if f['id'] != acao_id]
     itens.append({'id': acao_id, 'titulo': titulo, 'quando': datetime.now().isoformat(timespec='seconds'), 'oferecida_em': []})
-    PRIVATE.mkdir(parents=True, exist_ok=True)
-    FILA.write_text(json.dumps(itens, ensure_ascii=False, indent=2), encoding='utf-8')
+    arquivos.gravar_json(FILA, itens)
 
 
 def desenfileirar(acao_id: str) -> None:
     if FILA.exists():
-        FILA.write_text(json.dumps([f for f in fila() if f['id'] != acao_id], ensure_ascii=False, indent=2), encoding='utf-8')
+        arquivos.gravar_json(FILA, [f for f in fila() if f['id'] != acao_id])
 
 
 def marcar_oferecida(acao_id: str, sessao: str) -> None:
@@ -41,7 +42,7 @@ def marcar_oferecida(acao_id: str, sessao: str) -> None:
     for f in itens:
         if f['id'] == acao_id and sessao not in f['oferecida_em']:
             f['oferecida_em'].append(sessao)
-    FILA.write_text(json.dumps(itens, ensure_ascii=False, indent=2), encoding='utf-8')
+    arquivos.gravar_json(FILA, itens)
 
 
 def aid(origem: str, titulo: str) -> str:
@@ -49,10 +50,7 @@ def aid(origem: str, titulo: str) -> str:
 
 
 def _read_json(path: Path, default):
-    try:
-        return json.loads(path.read_text(encoding='utf-8'))
-    except Exception:
-        return default
+    return arquivos.ler_json(path, default)
 
 
 def eventos() -> list[dict]:
@@ -110,8 +108,7 @@ def guardar(skill: str, pergunta: str, contexto: str = '') -> dict:
     acao['id'] = aid('guardada', acao['titulo'])
     if not any(a['id'] == acao['id'] for a in salvas):
         salvas.append(acao)
-        PRIVATE.mkdir(parents=True, exist_ok=True)
-        SALVAS.write_text(json.dumps(salvas, ensure_ascii=False, indent=2), encoding='utf-8')
+        arquivos.gravar_json(SALVAS, salvas)
     return acao
 
 

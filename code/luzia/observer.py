@@ -24,7 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from luzia import jogo  # noqa: E402
+from luzia import arquivos, jogo  # noqa: E402
 
 PRIVATE = HERE / 'private'
 STATE_FILE = HERE.parents[1] / 'outputs' / 'sem2' / 'career_state.json'
@@ -46,10 +46,7 @@ PALAVRAS_PADRAO = {
 
 
 def read_json(path: Path, default):
-    try:
-        return json.loads(path.read_text(encoding='utf-8'))
-    except Exception:
-        return default
+    return arquivos.ler_json(path, default)
 
 
 def plano() -> dict:
@@ -93,8 +90,7 @@ def novas_na_sessao(sid: str, chave: str, skills: list[str]) -> list[str]:
     ja = set(vistos.get(f'{sid}:{chave}', []))
     novas = [s for s in skills if s not in ja]
     vistos[f'{sid}:{chave}'] = sorted(ja | set(skills))
-    PRIVATE.mkdir(parents=True, exist_ok=True)
-    SEEN.write_text(json.dumps(vistos, ensure_ascii=False), encoding='utf-8')
+    arquivos.gravar_json(SEEN, vistos, indent=None)
     return novas
 
 
@@ -127,7 +123,7 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
     if pend:
         item = pend[0]
         item.setdefault('oferecida_em', []).append(sid)
-        (PRIVATE / 'fila.json').write_text(json.dumps(fila, ensure_ascii=False, indent=2), encoding='utf-8')
+        arquivos.gravar_json(PRIVATE / 'fila.json', fila)
         partes.append(
             f'[Luzia · fila] A pessoa enviou do painel o feixe #{item["id"]} ("{item.get("titulo", "")}"). Responda primeiro ao '
             'que ela pediu. No FIM, em uma linha começando com "✨ Luzia:", lembre o feixe e use AskUserQuestion com '
@@ -167,6 +163,7 @@ def ao_usar_ferramenta(event: dict, cfg: dict) -> None:
     if modo != 'ativo':
         return
     skill = novas[0]
+    jogo.abrir_cartao(skill, sid)  # este cartão pode virar luz própria uma única vez
     info = gaps.get(skill, {})
     nivel = f"você {info.get('nivel')} → meta {info.get('meta')}" if info.get('nivel') is not None else 'lacuna do plano'
     saida('PostToolUse', (
@@ -197,8 +194,8 @@ def main() -> None:
             ao_enviar_prompt(event, cfg)
         else:
             ao_usar_ferramenta(event, cfg)
-    except Exception:
-        return  # o observador nunca deve atrapalhar a sessão
+    except Exception as e:  # o observador nunca deve atrapalhar a sessão, mas o erro fica registrado
+        arquivos.registrar_erro(f"observer {event.get('hook_event_name', '')}", e)
 
 
 if __name__ == '__main__':

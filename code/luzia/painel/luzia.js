@@ -55,8 +55,13 @@ const nomeAgente = () => AGENTES[E.agente]?.[0] || 'seu agente';
 const curto = (s) => esc(String(s || '').split('(')[0].trim());
 
 async function api(caminho, dados) {
-  const r = await fetch(caminho, dados ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados) } : {});
-  return r.json();
+  try {
+    const r = await fetch(caminho, dados ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados) } : {});
+    const j = await r.json().catch(() => ({}));
+    return r.ok ? j : { erro: j.erro || `erro ${r.status}` };
+  } catch {
+    return { erro: 'a Luzia está desligada. Rode /luzia:career-map no seu agente para ligar o painel.', offline: true };
+  }
 }
 
 function toast(texto) {
@@ -80,12 +85,12 @@ function botoesFeixe(a) {
   if (a.estado === 'descartado') {
     return `<div class="acoes-bt"><button class="btn sec" data-restaurar="${a.id}">${ic('restaurar')}Restaurar</button></div>`;
   }
+  const naFila = (E.fila || []).includes(a.id);
   if (a.estado === 'conquistado') {
     const pode = [2, 3].includes(a.nota) && !a.revisitas;
-    return pode ? `<div class="acoes-bt"><button class="btn prim" data-enviar="${a.id}">${ic('enviar')}Revisitar com ${esc(nomeAgente())}</button></div>
-      <p class="dica">Uma revisita para buscar o restante: você levou ${a.lm_ganho} de ${a.valor_lm} lm.</p>` : '';
+    return pode ? `<div class="acoes-bt"><button class="btn prim" data-enviar="${a.id}" ${naFila ? 'disabled' : ''}>${ic(naFila ? 'check' : 'enviar')}${naFila ? 'Revisita enviada ao ' : 'Revisitar com '}${esc(nomeAgente())}</button></div>
+      <p class="dica">Uma revisita para buscar o restante: você levou ${a.lm_ganho} de ${a.valor_lm} lm. O que já ganhou não conta de novo.</p>` : '';
   }
-  const naFila = a.estado === 'na_fila';
   return `<div class="acoes-bt">
     <button class="btn prim" data-enviar="${a.id}" ${naFila ? 'disabled' : ''}>${ic(naFila ? 'check' : 'enviar')}${naFila ? 'Enviado ao ' + esc(nomeAgente()) : 'Enviar para ' + esc(nomeAgente())}</button>
     <button class="btn sec" data-copiar="${a.id}">${ic('copiar')}Copiar prompt</button>
@@ -164,8 +169,9 @@ function barraDegrau(s) {
   if (s.na_meta) return `<div class="info"><span>${ic('check', 'p')} na meta</span></div>`;
   const lim = s.limiar || E.regras.limiar;
   const p = Math.min(100, (100 * (s.propria || 0)) / lim), r = Math.min(100 - p, (100 * (s.refletida || 0)) / lim);
+  const feixeOk = (s.feixes || 0) >= (E.regras.min_feixes || 1);
   return `<div class="degrau"><span class="p" style="width:${p}%"></span><span class="r" style="width:${r}%"></span></div>
-    <div class="info"><span>${s.lm || 0} / ${lim} lm · ${s.luz_propria || 0}% luz própria (mínimo ${E.regras.min_propria}%)</span><span>${s.nivel} → ${s.proximo}</span></div>`;
+    <div class="info"><span>${s.lm || 0} / ${lim} lm · ${s.luz_propria || 0}% luz própria (mínimo ${E.regras.min_propria}%) · ${feixeOk ? `${s.feixes} feixe${s.feixes > 1 ? 's' : ''} conquistado${s.feixes > 1 ? 's' : ''}` : 'falta conquistar 1 feixe'}</span><span>${s.nivel} → ${s.proximo}</span></div>`;
 }
 
 function rotaHero() {
@@ -229,7 +235,7 @@ function feed() {
 
 function telaRota() {
   $('#rota').innerHTML = `
-    <div class="titulo"><h2>Degraus por skill</h2><span>${E.regras.limiar} lm por degrau · mínimo ${E.regras.min_propria}% de luz própria · você confirma cada subida</span></div>
+    <div class="titulo"><h2>Degraus por skill</h2><span>${E.regras.limiar} lm por degrau · mínimo ${E.regras.min_propria}% de luz própria · ao menos ${E.regras.min_feixes || 1} feixe conquistado · você confirma cada subida</span></div>
     <div class="legenda" style="margin-bottom:var(--e4)"><span><i style="background:var(--luz)"></i>luz própria (você demonstrou)</span><span><i style="background:var(--refletida)"></i>luz refletida (o agente aplicou)</span></div>
     <div class="skills">${E.skills.map((s) => `<button class="skill ${s.pronto && !s.na_meta ? 'pronta' : ''} ${s.na_meta ? 'meta-ok' : ''}" data-skill="${esc(s.nome)}">
       <span class="nome"><b>${esc(s.nome)}</b><small>${escala(s)}</small></span>
@@ -255,18 +261,21 @@ function telaFeixes() {
 function telaPropria() {
   const nome = { P1: 'Direção no prompt', P2: 'Coesão do commit', P3: 'Aplicação conceitual', P4: 'Domínio arquitetural' };
   const cor = (v) => (v >= 80 ? 'var(--salvia)' : v >= 50 ? 'var(--luz)' : 'var(--terracota)');
-  const anel = (v, t = 96) => {
-    const r = t / 2 - 7, c = 2 * Math.PI * r, x = v ?? 0;
-    return `<svg width="${t}" height="${t}"><circle cx="${t / 2}" cy="${t / 2}" r="${r}" fill="none" stroke="var(--refletida)" stroke-opacity=".25" stroke-width="6"/>
-      <circle cx="${t / 2}" cy="${t / 2}" r="${r}" fill="none" stroke="var(--luz)" stroke-width="6" stroke-linecap="round" stroke-dasharray="${(c * x) / 100} ${c}"/></svg>`;
+  const anel = (v, t = 120) => {
+    const r = t / 2 - 8, c = 2 * Math.PI * r, x = v ?? 0;
+    return `<svg width="${t}" height="${t}" aria-hidden="true"><circle cx="${t / 2}" cy="${t / 2}" r="${r}" fill="none" stroke="var(--refletida)" stroke-opacity=".55" stroke-width="8"/>
+      <circle cx="${t / 2}" cy="${t / 2}" r="${r}" fill="none" stroke="var(--luz)" stroke-width="8" stroke-linecap="round" stroke-dasharray="${(c * x) / 100} ${c}"/></svg>`;
   };
   const entregas = E.entregas.map((e) => {
     const dims = Object.entries(e.dimensoes).map(([k, d]) => d
       ? `<div class="dim"><div class="cab"><span>${k} · ${nome[k]}</span><span>${esc(d.tipo)}</span></div><div class="v">${d.nota}</div>
           <div class="b"><i style="width:${d.nota}%;background:${cor(d.nota)}"></i></div><div class="base">${esc(d.base)}</div></div>`
-      : `<div class="dim sem"><div class="cab"><span>${k} · ${nome[k]}</span></div><div class="v">—</div><div class="base">Ainda luz refletida. O feixe abaixo acende.</div></div>`).join('');
+      : `<div class="dim sem"><div class="cab"><span>${k} · ${nome[k]}</span></div><div class="v">—</div>
+          <div class="b"><i style="width:100%;background:var(--refletida);opacity:.55"></i></div><div class="base">Ainda luz refletida (do agente). O feixe abaixo acende.</div></div>`).join('');
     return `<div class="bloco entrega">
-      <div class="anel">${anel(e.indice)}<div><b>${e.indice ?? '—'}${e.indice == null ? '' : '%'}</b><small>${esc(e.base)}</small></div></div>
+      <div class="anel-col"><div class="anel">${anel(e.indice)}<div><b>${e.indice ?? '—'}${e.indice == null ? '' : '%'}</b></div></div>
+        ${e.indice == null ? '' : `<div class="anel-leg"><span><i style="background:var(--luz)"></i>sua ${e.indice}%</span><span><i style="background:var(--refletida)"></i>do agente ${100 - e.indice}%</span></div>`}
+        <small class="anel-base">medido em ${esc(e.base)}</small></div>
       <div><h3>${esc(e.tarefa)}</h3>${e.risco ? `<div class="risco">${ic('alerta', 'p')}${esc(e.risco)}</div>` : ''}
         <div class="dims">${dims}</div><div class="acoes">${e.acoes.map(feixe).filter(Boolean).map(cartaoFeixe).join('')}</div></div></div>`;
   }).join('');
@@ -284,8 +293,13 @@ function secaoModelo() {
     <div class="opcoes">${Object.entries(m.provedores).map(([k, v]) => `<button class="opcao ${prov === k ? 'ativo' : ''}" data-provedor="${k}">${ic('agente')}<span><b>${esc(v.nome)}</b><small>${v.chave_configurada ? 'chave configurada' : 'sem chave'}</small></span></button>`).join('')}</div>
     <div class="bloco" style="margin-top:var(--e3)">
       <div class="campos">
-        <label>Modelo<input id="m-modelo" list="m-sugestoes" value="${esc(atual ? m.modelo : (info.sugestoes[0] || ''))}" placeholder="nome do modelo"></label>
-        <datalist id="m-sugestoes">${info.sugestoes.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>
+        ${(() => {
+          const valor = atual ? m.modelo : (info.sugestoes[0] || '');
+          const conhecido = info.sugestoes.includes(valor);
+          const opcoes = info.sugestoes.map((s) => `<option value="${esc(s)}" ${s === valor ? 'selected' : ''}>${esc(s)}</option>`).join('');
+          return `<label>Modelo<select id="m-select">${opcoes}<option value="__outro" ${conhecido ? '' : 'selected'}>outro modelo…</option></select></label>
+            <label ${conhecido ? 'hidden' : ''} id="m-outro-l">Nome do modelo<input id="m-outro" value="${conhecido ? '' : esc(valor)}" placeholder="nome exato do modelo"></label>`;
+        })()}
         ${info.base_url ? `<label>Endereço da API (base_url)<input id="m-base" value="${esc(atual ? m.base_url : '')}" placeholder="ex.: https://openrouter.ai/api/v1 ou http://localhost:11434/v1"></label>` : ''}
         <label>API key<input id="m-chave" type="password" autocomplete="off" placeholder="${info.chave_configurada ? 'já configurada — deixe em branco para manter' : 'cole aqui a sua chave'}"></label>
       </div>
@@ -313,7 +327,9 @@ function telaAjustes() {
 
 async function carregar() {
   const tela = document.querySelector('.tela.ativa')?.id || 'hoje';
-  E = await api('/api/estado');
+  const novo = await api('/api/estado');
+  if (novo.erro) { toast(novo.erro); if (E) return; $('#hoje').innerHTML = `<div class="bloco destaque"><span class="sobre">Luzia</span><h3>Não consegui carregar.</h3><p>${esc(novo.erro)}</p></div>`; return; }
+  E = novo;
   if (E.vazio) {
     $('main').innerHTML = '<div class="bloco destaque"><span class="sobre">Olá</span><h3>Eu sou a Luzia.</h3><p>Rode a triagem no seu agente (/luzia:triage no Claude Code) para começarmos.</p></div>';
     return;
@@ -335,7 +351,8 @@ document.addEventListener('click', async (ev) => {
   const ds = t.dataset;
   if (ds.provedor) { provEscolhido = ds.provedor; telaAjustes(); return; }
   if (t.id === 'm-salvar') {
-    const r = await api('/api/modelo', { provedor: provEscolhido || E.modelo.provedor, modelo: $('#m-modelo').value,
+    const sel = $('#m-select').value;
+    const r = await api('/api/modelo', { provedor: provEscolhido || E.modelo.provedor, modelo: sel === '__outro' ? $('#m-outro').value : sel,
       base_url: $('#m-base')?.value || '', chave: $('#m-chave').value });
     toast(r.erro ? `Não salvou: ${r.erro}` : 'Modelo salvo. As próximas chamadas da Luzia usam este modelo.');
     if (!r.erro) { provEscolhido = null; carregar(); }
@@ -356,12 +373,14 @@ document.addEventListener('click', async (ev) => {
   else if (ds.feixe) abrirFeixe(ds.feixe);
   else if (ds.skill) abrirSkill(ds.skill);
   else if (ds.enviar) {
-    await api('/api/enviar', { id: ds.enviar });
-    toast(`Enviado. Mande qualquer mensagem no ${nomeAgente()} e a Luzia oferece começar.`);
+    const r = await api('/api/enviar', { id: ds.enviar });
+    toast(r.erro ? `Não enviou: ${r.erro}` : `Enviado. Mande qualquer mensagem no ${nomeAgente()} e a Luzia oferece começar.`);
     await carregar(); if (!$('#gaveta').hidden) abrirFeixe(ds.enviar);
   } else if (ds.copiar) {
     await navigator.clipboard.writeText(feixe(ds.copiar).prompt_completo);
-    api('/api/iniciar', { id: ds.copiar }); toast(`Prompt copiado. Cole no ${nomeAgente()}.`);
+    const r = await api('/api/iniciar', { id: ds.copiar });
+    toast(r.erro ? `Copiado, mas: ${r.erro}` : `Prompt copiado e feixe em andamento. Cole no ${nomeAgente()}.`);
+    await carregar(); if (!$('#gaveta').hidden) abrirFeixe(ds.copiar);
   } else if (ds.descartar) {
     await api('/api/descartar', { id: ds.descartar, motivo: ds.motivo }); $('#gaveta').hidden = true;
     toast('Feixe descartado. A Luzia leva o motivo em conta.'); carregar();
@@ -377,8 +396,15 @@ document.addEventListener('click', async (ev) => {
     await api('/api/autoavaliacao', niveis); toast('Seu nível foi salvo'); carregar();
   }
 });
+document.addEventListener('change', (ev) => {
+  if (ev.target.id === 'm-select') $('#m-outro-l').hidden = ev.target.value !== '__outro';
+});
 document.addEventListener('input', (ev) => { if (ev.target.matches('[data-skill-nivel]')) $('#n' + ev.target.dataset.i).textContent = ev.target.value; });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') $('#gaveta').hidden = true; });
 
 carregar();
-setInterval(async () => { if ($('#gaveta').hidden) { E = await api('/api/estado'); if (!E.vazio) feed(); } }, 5000);
+setInterval(async () => {
+  if (!$('#gaveta').hidden) return;
+  const novo = await api('/api/estado');
+  if (!novo.erro && !novo.vazio) { E = novo; feed(); }
+}, 5000);

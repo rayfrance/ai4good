@@ -146,8 +146,8 @@ main { flex: 1; min-width: 0; padding: var(--e6) var(--e7) var(--e7); max-width:
 .medida summary { cursor: pointer; display: flex; align-items: center; gap: var(--e2); color: var(--texto-2); list-style: none; }
 .medida summary::-webkit-details-marker { display: none; }
 .medida ul { margin: var(--e3) 0 0; padding-left: var(--e5); color: var(--texto-2); line-height: 1.6; }
-.entrega { display: grid; grid-template-columns: 96px 1fr; gap: var(--e5); margin-bottom: var(--e3); }
-.anel { position: relative; width: 96px; height: 96px; }
+.entrega { display: grid; grid-template-columns: 140px 1fr; gap: var(--e5); margin-bottom: var(--e3); }
+.anel { position: relative; width: 120px; height: 120px; }
 .anel svg { transform: rotate(-90deg); }
 .anel div { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
 .anel b { font-size: var(--t4); font-weight: 650; }
@@ -288,3 +288,12 @@ details.calculo .conta { margin-top: var(--e2); }
 .campos input { height: 40px; padding: 0 var(--e3); border-radius: var(--r1); border: 1px solid var(--linha-forte); background: var(--bg);
                 color: var(--texto); font: inherit; }
 .campos input:focus { outline: 2px solid var(--luz); outline-offset: 1px; }
+
+.anel-col { display: flex; flex-direction: column; align-items: center; gap: var(--e2); }
+.anel b { font-size: var(--t5); }
+.anel-leg { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--texto-2); }
+.anel-leg i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.anel-base { color: var(--texto-3); font-size: 11px; text-align: center; }
+.campos select { height: 40px; padding: 0 var(--e3); border-radius: var(--r1); border: 1px solid var(--linha-forte); background: var(--bg);
+                 color: var(--texto); font: inherit; }
+.campos select option { background: var(--superficie); color: var(--texto); }

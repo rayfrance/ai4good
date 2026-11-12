@@ -4,28 +4,34 @@ Regras em `docs/luzia-ux.md`. Tudo fica em `private/` (fora do git):
 - `feixes.json`: catálogo persistente de feixes, com estado e histórico;
 - `lumens.jsonl`: livro de lúmens (skill, lm, luz própria ou refletida, fonte);
 - `degraus.json`: base de níveis, data do último degrau por skill e histórico de subidas;
-- `autoavaliacao.json`: o nível atual de cada skill (declarado e confirmado pela pessoa).
+- `autoavaliacao.json`: o nível atual de cada skill (declarado e confirmado pela pessoa);
+- `cartoes.json`: cartões que o observador mostrou (cada um pode virar luz própria uma vez).
 """
 
 from __future__ import annotations
 
 import json
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+from . import arquivos
 
 PRIVATE = Path(__file__).resolve().parent / 'private'
 FEIXES = PRIVATE / 'feixes.json'
 LUMENS = PRIVATE / 'lumens.jsonl'
 DEGRAUS = PRIVATE / 'degraus.json'
 AUTOAVAL = PRIVATE / 'autoavaliacao.json'
+CARTOES = PRIVATE / 'cartoes.json'
 DOSSIES = PRIVATE / 'dossies'
 
 LIMIAR_DEGRAU = 150
 MIN_PROPRIA = 0.40
+MIN_FEIXES_DEGRAU = 1  # todo degrau precisa de ao menos um feixe avaliado pela rubrica (sem recompensa sem evidência)
 MULT = {4: 1.0, 3: 0.75, 2: 0.5}
 PASSIVO = {'refletida': 10, 'prompt': 20, 'conversao': 30}
 TETO_PASSIVO_DIA = 40
+VALIDADE_CARTAO_H = 24
 MOTIVOS = {'nao_faz_sentido': 'não faz sentido para mim', 'ja_domino': 'já domino', 'agora_nao': 'agora não'}
 ESTADO_ANTIGO = {'conquistado': 'feita', 'em_andamento': 'em andamento', 'na_fila': 'pendente',
                  'sugerido': 'pendente', 'descartado': 'descartada'}
@@ -36,15 +42,15 @@ def agora() -> str:
 
 
 def _ler(path: Path, padrao):
-    try:
-        return json.loads(path.read_text(encoding='utf-8'))
-    except Exception:
-        return padrao
+    return arquivos.ler_json(path, padrao)
 
 
 def _gravar(path: Path, dados) -> None:
-    PRIVATE.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dados, ensure_ascii=False, indent=2), encoding='utf-8')
+    arquivos.gravar_json(path, dados)
+
+
+def _assinatura(dados) -> str:
+    return json.dumps(dados, ensure_ascii=False, sort_keys=True)
 
 
 # ------------------------------------------------------------------ níveis e skills
@@ -96,6 +102,7 @@ def sincronizar(plan: dict) -> dict[str, dict]:
     """Traz para o catálogo os feixes que a Luzia sugeriu, sem perder estados e histórico."""
     from . import acoes
     cat = _ler(FEIXES, {})
+    antes = _assinatura(cat)
     antigos = acoes.status_map()  # eventos registrados antes do catálogo existir
     for f in acoes.derivadas(plan):
         atual = cat.get(f['id'])
@@ -110,7 +117,8 @@ def sincronizar(plan: dict) -> dict[str, dict]:
         if f.get('estado') != 'conquistado':
             f['valor_lm'], f['conta'] = valor(f, plan)
         f['skill_plano'] = skill_de(f.get('skill', ''), plan)
-    _gravar(FEIXES, cat)
+    if _assinatura(cat) != antes:  # o painel lê a cada 5 s: só grava quando algo mudou de fato
+        _gravar(FEIXES, cat)
     return cat
 
 
@@ -123,26 +131,42 @@ def catalogo(plan: dict, descartados: bool = False) -> list[dict]:
     return sorted(lista, key=lambda f: (ordem.get(f.get('estado'), 9), -int(f.get('valor_lm', 0))))
 
 
-def _mudar(fid: str, estado: str | None, evento: str, **extra) -> dict | None:
+def _mudar(fid: str, estado: str | None, evento: str, campos: dict | None = None, **extra) -> dict | None:
     cat = _ler(FEIXES, {})
     f = cat.get(fid)
     if not f:
         return None
     if estado:
         f['estado'] = estado
+    f.update(campos or {})
     f.setdefault('historico', []).append({'quando': agora(), 'evento': evento, **extra})
     _gravar(FEIXES, cat)
     return f
 
 
+def pode_revisitar(f: dict) -> bool:
+    """Uma revisita, só para feixe conquistado com nota 2 ou 3."""
+    return f.get('estado') == 'conquistado' and int(f.get('nota') or 0) in (2, 3) and not f.get('revisitas')
+
+
 def enfileirar(fid: str):
-    return _mudar(fid, 'na_fila', 'enviado ao agente')
+    """Manda o feixe para a fila do agente. Um feixe conquistado continua conquistado (a fila abre a revisita)."""
+    f = _ler(FEIXES, {}).get(fid)
+    if not f or f.get('estado') == 'descartado':
+        return None
+    if f.get('estado') == 'conquistado':
+        return _mudar(fid, None, 'revisita enviada ao agente') if pode_revisitar(f) else None
+    return _mudar(fid, None if f.get('estado') == 'em_andamento' else 'na_fila', 'enviado ao agente')
 
 
 def iniciar(fid: str, onde: str = ''):
-    cat = _ler(FEIXES, {})
-    if cat.get(fid, {}).get('estado') == 'conquistado':
-        return _mudar(fid, None, 'revisita iniciada', onde=onde)
+    f = _ler(FEIXES, {}).get(fid)
+    if not f or f.get('estado') == 'descartado':
+        return None
+    if f.get('estado') == 'conquistado':
+        if not pode_revisitar(f):
+            return None
+        return _mudar(fid, None, 'revisita iniciada', {'revisita_aberta': True}, onde=onde)
     return _mudar(fid, 'em_andamento', 'iniciado', onde=onde)
 
 
@@ -189,30 +213,34 @@ def conquistar(fid: str, nota: int, resumo: str, plan: dict) -> dict:
     nota = max(0, min(4, int(nota)))
     skill = f.get('skill_plano') or f.get('skill', '')
     alvo = int(round(f['valor_lm'] * MULT.get(nota, 0)))
-    revisita = f.get('estado') == 'conquistado'
+    # Quem já ganhou lúmens neste feixe só pode voltar a ganhar pela revisita (mesmo se o estado se perdeu).
+    revisita = f.get('estado') == 'conquistado' or int(f.get('lm_ganho') or 0) > 0
     if revisita:
-        if f.get('revisitas', 0) >= 1 or f.get('nota', 0) >= 4:
+        if not pode_revisitar({**f, 'estado': 'conquistado'}):
             return {'erro': 'este feixe já foi revisitado ou já tem nota máxima'}
-        ganho = max(0, alvo - int(f.get('lm_ganho', 0)))
-        f['revisitas'] = 1
-    else:
-        ganho = alvo
-    if nota < 2 and not revisita:
+        if not f.get('revisita_aberta'):
+            return {'erro': f'abra a revisita antes de registrar (/luzia:fazer {fid})'}
+    elif f.get('estado') != 'em_andamento':
+        return {'erro': f'este feixe ainda não foi iniciado: comece por /luzia:fazer {fid}'}
+    if nota < 2:  # tente de novo: o feixe (ou a revisita) continua aberto e a próxima tentativa vale o mesmo
         f['tentativas'] = int(f.get('tentativas', 0)) + 1
-        f['estado'] = 'sugerido'
         f.setdefault('historico', []).append({'quando': agora(), 'evento': 'tente de novo', 'nota': nota, 'resumo': resumo})
         _gravar(FEIXES, cat)
         return {'ganho': 0, 'tente_de_novo': True, 'feixe': f}
+    ganho = max(0, alvo - int(f.get('lm_ganho') or 0)) if revisita else alvo
+    if revisita:
+        f['revisitas'] = 1
+        f.pop('revisita_aberta', None)
     if ganho:
         lancar(skill, ganho, 'propria', 'feixe', fid)
     f['estado'] = 'conquistado'
-    f['nota'] = max(nota, int(f.get('nota', 0)))
-    f['lm_ganho'] = int(f.get('lm_ganho', 0)) + ganho
+    f['nota'] = max(nota, int(f.get('nota') or 0))
+    f['lm_ganho'] = int(f.get('lm_ganho') or 0) + ganho
     f['resumo'] = resumo
     f.setdefault('historico', []).append({'quando': agora(), 'evento': 'revisitado' if revisita else 'conquistado',
                                           'nota': nota, 'lm': ganho, 'resumo': resumo})
     _gravar(FEIXES, cat)
-    return {'ganho': ganho, 'feixe': f, 'pode_revisitar': f['nota'] in (2, 3) and not f.get('revisitas')}
+    return {'ganho': ganho, 'feixe': f, 'pode_revisitar': pode_revisitar(f)}
 
 
 def passivo(skill: str, tipo: str, sessao: str = '') -> int:
@@ -226,6 +254,37 @@ def passivo(skill: str, tipo: str, sessao: str = '') -> int:
     if lm:
         lancar(skill, lm, 'refletida' if tipo == 'refletida' else 'propria', f'passivo-{tipo}', sessao)
     return lm
+
+
+def abrir_cartao(skill: str, sessao: str = '') -> None:
+    """O observador mostrou um cartão: ele pode virar luz própria uma única vez, nas próximas 24 h."""
+    corte = (datetime.now() - timedelta(days=7)).isoformat(timespec='seconds')
+    cartoes = [c for c in _ler(CARTOES, []) if c.get('quando', '') >= corte]
+    cartoes.append({'skill': skill, 'sessao': sessao, 'quando': agora(), 'estado': 'aberto'})
+    _gravar(CARTOES, cartoes)
+
+
+def usar_cartao(skill: str, como: str) -> bool:
+    """Fecha o cartão aberto mais recente da skill ('convertido' ou 'guardado'). False se não houver."""
+    cartoes = _ler(CARTOES, [])
+    corte = (datetime.now() - timedelta(hours=VALIDADE_CARTAO_H)).isoformat(timespec='seconds')
+    for c in reversed(cartoes):
+        if c.get('skill') == skill and c.get('estado') == 'aberto' and c.get('quando', '') >= corte:
+            c.update(estado=como, usado_em=agora())
+            _gravar(CARTOES, cartoes)
+            return True
+    return False
+
+
+def converter(skill: str, nota: int, ref: str = '') -> dict:
+    """Resposta ao cartão do observador, avaliada pela rubrica: até +30 lm de luz própria, uma vez por cartão."""
+    nota = max(0, min(4, int(nota)))
+    if not usar_cartao(skill, 'convertido' if nota >= 2 else 'guardado'):
+        return {'erro': 'não há cartão aberto da Luzia para esta skill: a conversão vale uma vez por cartão'}
+    lm = round(PASSIVO['conversao'] * MULT.get(nota, 0))
+    if lm:
+        lancar(skill, lm, 'propria', 'passivo-conversao', ref)
+    return {'lm': lm, 'nota': nota}
 
 
 # ------------------------------------------------------------------ degraus e rota
@@ -254,8 +313,16 @@ def progresso_skill(skill: str, d: dict | None = None) -> dict:
     total = sum(r['lm'] for r in regs)
     propria = sum(r['lm'] for r in regs if r['luz'] == 'propria')
     share = (propria / total) if total else 0.0
+    feixes = len({r.get('ref') for r in regs if r.get('fonte') == 'feixe'})
+    falta = []
+    if total < LIMIAR_DEGRAU:
+        falta.append(f'{LIMIAR_DEGRAU - total} lm')
+    if share < MIN_PROPRIA:
+        falta.append(f'luz própria em {int(MIN_PROPRIA * 100)}% (agora {round(100 * share)}%)')
+    if feixes < MIN_FEIXES_DEGRAU:
+        falta.append('conquistar 1 feixe desta skill')
     return {'lm': total, 'propria': propria, 'refletida': total - propria, 'luz_propria': round(100 * share),
-            'limiar': LIMIAR_DEGRAU, 'pronto': total >= LIMIAR_DEGRAU and share >= MIN_PROPRIA}
+            'limiar': LIMIAR_DEGRAU, 'feixes': feixes, 'falta': falta, 'pronto': not falta}
 
 
 def rota(plan: dict) -> dict:
@@ -282,11 +349,15 @@ def rota(plan: dict) -> dict:
 def subir(skill: str, plan: dict) -> dict:
     """Confirma um degrau pronto: sobe o nível declarado, zera o progresso da skill e checa marco."""
     d = garantir_base(plan)
+    nv = niveis(plan)
+    if skill not in nv:
+        return {'erro': 'skill não encontrada no seu plano'}
+    if nv[skill]['nivel'] >= nv[skill]['meta']:
+        return {'erro': 'esta skill já está na meta'}
     p = progresso_skill(skill, d)
     if not p['pronto']:
-        return {'erro': f"ainda não: {p['lm']}/{LIMIAR_DEGRAU} lm e {p['luz_propria']}% de luz própria (mínimo {int(MIN_PROPRIA * 100)}%)"}
+        return {'erro': 'ainda não: falta ' + ', '.join(p['falta'])}
     auto = _ler(AUTOAVAL, {})
-    nv = niveis(plan)
     d['base'].setdefault(skill, nv[skill]['nivel'])  # a base guarda o nível de antes da primeira subida
     novo = min(nv[skill]['meta'], nv[skill]['nivel'] + 1)
     auto[skill] = novo

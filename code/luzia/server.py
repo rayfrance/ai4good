@@ -2,6 +2,10 @@
 
 Serve a página `painel/` e uma API JSON montada a partir do estado salvo, das ações,
 das evidências e dos eventos mascarados da sessão.
+
+Proteção contra outros sites abertos no navegador: só atende `Host` localhost/127.0.0.1 nesta porta
+(barra DNS rebinding) e só aceita POST com `Content-Type: application/json` vindo da própria página
+(um site de fora não consegue mandar esse POST sem permissão de CORS, que este servidor nunca dá).
 """
 
 from __future__ import annotations
@@ -14,13 +18,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from luzia import acoes, jogo, modelo, pipeline, propriedade  # noqa: E402
+from luzia import acoes, arquivos, jogo, modelo, pipeline, propriedade  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PAINEL = HERE / 'painel'
 PORT = 8501
 MODOS = ('ativo', 'passivo', 'sob_demanda')
 AGENTES = ('claude-code', 'codex', 'cursor', 'antigravity', 'outro')
+HOSTS_OK = {f'localhost:{PORT}', f'127.0.0.1:{PORT}'}
+ORIGENS_OK = {f'http://{h}' for h in HOSTS_OK}
+MAX_CORPO = 64 * 1024
 
 
 def repo_cwd() -> str:
@@ -90,7 +97,7 @@ def estado() -> dict:
         'rota': rota_jogo,
         'ritmo': jogo.ritmo(plan, cfg.get('horizonte', '')),
         'modelo': modelo.status(),
-        'regras': {'limiar': jogo.LIMIAR_DEGRAU, 'min_propria': int(jogo.MIN_PROPRIA * 100),
+        'regras': {'limiar': jogo.LIMIAR_DEGRAU, 'min_propria': int(jogo.MIN_PROPRIA * 100), 'min_feixes': jogo.MIN_FEIXES_DEGRAU,
                    'passivo': jogo.PASSIVO, 'motivos': jogo.MOTIVOS},
         'autoavaliada': bool(autoaval),
         'propriedade_media': round(sum(indices) / len(indices)) if indices else None,
@@ -127,14 +134,40 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _barrar(self, post: bool) -> bool:
+        """True (e já responde) quando o pedido não vem da própria página local."""
+        if (self.headers.get('Host') or '').lower() not in HOSTS_OK:
+            self._json({'erro': 'host não permitido'}, 403)
+            return True
+        if not post:
+            return False
+        origem = (self.headers.get('Origin') or '').lower()
+        site = self.headers.get('Sec-Fetch-Site') or 'same-origin'
+        if (origem and origem not in ORIGENS_OK) or site not in ('same-origin', 'none'):
+            self._json({'erro': 'origem não permitida'}, 403)
+            return True
+        if not (self.headers.get('Content-Type') or '').lower().startswith('application/json'):
+            self._json({'erro': 'use Content-Type: application/json'}, 415)
+            return True
+        return False
+
+    def _api(self, funcao) -> None:
+        try:
+            self._json(funcao())
+        except Exception as e:  # responde o erro em vez de derrubar a conexão; o painel mostra
+            arquivos.registrar_erro(f'server {self.path.split("?")[0]}', e)
+            self._json({'erro': f'a Luzia não conseguiu montar esta tela ({type(e).__name__})'}, 500)
+
     def do_GET(self) -> None:
+        if self._barrar(post=False):
+            return
         path = self.path.split('?')[0]
         if path == '/api/ping':
             return self._json({'ok': True})
         if path == '/api/estado':
-            return self._json(estado())
+            return self._api(estado)
         if path == '/api/sessao':
-            return self._json(sessao())
+            return self._api(sessao)
         arquivo = PAINEL / ('index.html' if path in ('/', '') else path.lstrip('/'))
         if not arquivo.resolve().is_relative_to(PAINEL.resolve()) or not arquivo.is_file():
             self.send_error(404)
@@ -148,16 +181,33 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
-        tamanho = int(self.headers.get('Content-Length', 0) or 0)
+        if self._barrar(post=True):
+            return
+        try:
+            tamanho = int(self.headers.get('Content-Length', 0) or 0)
+        except ValueError:
+            return self._json({'erro': 'tamanho inválido'}, 400)
+        if tamanho > MAX_CORPO:
+            return self._json({'erro': 'pedido grande demais'}, 413)
         try:
             dados = json.loads(self.rfile.read(tamanho) or b'{}')
+            if not isinstance(dados, dict):
+                raise ValueError
         except Exception:
             return self._json({'erro': 'json inválido'}, 400)
-        path = self.path.split('?')[0]
+        try:
+            self._post(self.path.split('?')[0], dados)
+        except Exception as e:
+            arquivos.registrar_erro(f'server POST {self.path.split("?")[0]}', e)
+            self._json({'erro': f'não deu certo ({type(e).__name__})'}, 500)
+
+    def _post(self, path: str, dados: dict) -> None:
         if path == '/api/autoavaliacao':
-            niveis = {str(k): max(0, min(5, int(v))) for k, v in dados.items()}
-            pipeline.AUTOAVAL.parent.mkdir(parents=True, exist_ok=True)
-            pipeline.AUTOAVAL.write_text(json.dumps(niveis, ensure_ascii=False, indent=2), encoding='utf-8')
+            try:
+                niveis = {str(k): max(0, min(5, int(v))) for k, v in dados.items()}
+            except (TypeError, ValueError):
+                return self._json({'erro': 'nível inválido'}, 400)
+            arquivos.gravar_json(pipeline.AUTOAVAL, niveis)
             return self._json({'ok': True})
         if path == '/api/modo':
             modo = dados.get('modo')
@@ -165,7 +215,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({'erro': 'modo inválido'}, 400)
             cfg = pipeline.read_json(pipeline.OBSERVER_CFG, {})
             cfg['modo'] = modo
-            pipeline.OBSERVER_CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+            arquivos.gravar_json(pipeline.OBSERVER_CFG, cfg)
             return self._json({'ok': True})
         if path == '/api/agente':
             agente = dados.get('agente')
@@ -173,14 +223,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({'erro': 'agente inválido'}, 400)
             cfg = pipeline.read_json(pipeline.OBSERVER_CFG, {})
             cfg['agente'] = agente
-            pipeline.OBSERVER_CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding='utf-8')
+            arquivos.gravar_json(pipeline.OBSERVER_CFG, cfg)
             return self._json({'ok': True})
         if path == '/api/enviar':
             a = acoes.find(pipeline.load_state().get('plano', {}), str(dados.get('id', '')))
             if not a:
-                return self._json({'erro': 'ação não encontrada'}, 404)
+                return self._json({'erro': 'feixe não encontrado'}, 404)
+            if not jogo.enfileirar(a['id']):
+                return self._json({'erro': 'este feixe já foi conquistado (e revisitado) ou está descartado'}, 400)
             acoes.enfileirar(a['id'], a.get('titulo', ''))
-            jogo.enfileirar(a['id'])
             return self._json({'ok': True})
         if path == '/api/modelo':
             try:
@@ -210,8 +261,11 @@ class Handler(BaseHTTPRequestHandler):
             plan = pipeline.load_state().get('plano', {})
             res = jogo.subir(jogo.skill_de(str(dados.get('skill', '')), plan), plan)
             return self._json({k: v for k, v in res.items() if k != 'rota'}, 400 if res.get('erro') else 200)
-        if path == '/api/iniciar':
-            acoes.registrar_evento(str(dados.get('id', ''))[:8], 'iniciada', origem='painel')
+        if path == '/api/iniciar':  # "Copiar prompt": a pessoa leva o feixe para um agente por conta própria
+            a = acoes.find(pipeline.load_state().get('plano', {}), str(dados.get('id', '')))
+            if not a or not jogo.iniciar(a['id'], 'prompt copiado do painel'):
+                return self._json({'erro': 'este feixe não pode ser iniciado agora'}, 400)
+            acoes.registrar_evento(a['id'], 'iniciada', skill=a.get('skill'), origem='painel')
             return self._json({'ok': True})
         return self._json({'erro': 'rota desconhecida'}, 404)
 

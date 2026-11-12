@@ -1,7 +1,7 @@
 """Servidor local do painel da Luzia (biblioteca padrão; só escuta em 127.0.0.1:8501).
 
-Serve a página `painel/` e uma API JSON montada a partir do estado salvo, das ações,
-das evidências e dos eventos mascarados da sessão.
+Serve a página `painel/` e uma API JSON montada a partir do banco SQLite, da trajetória,
+dos prismas, dos avanços, das entregas, das leituras e dos pedidos de mudança.
 
 Proteção contra outros sites abertos no navegador: só atende `Host` localhost/127.0.0.1 nesta porta
 (barra DNS rebinding) e só aceita POST com `Content-Type: application/json` vindo da própria página
@@ -15,10 +15,11 @@ import mimetypes
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from luzia import acoes, arquivos, jogo, modelo, pipeline, propriedade, trajetoria  # noqa: E402
+from luzia import acoes, arquivos, entregas, jogo, leituras, modelo, observer, pedidos, pipeline, propriedade, trajetoria  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 PAINEL = HERE / 'painel'
@@ -42,11 +43,23 @@ def ultima_execucao() -> dict:
 
 
 def proxima(lista: list[dict]) -> dict | None:
-    """Próximo feixe: em andamento > na fila > maior valor em lúmens."""
+    """Próximo avanço: em andamento > na fila > maior valor em lúmens."""
     ordem = {'em_andamento': 0, 'na_fila': 1, 'sugerido': 2}
     pend = [a for a in lista if a.get('estado') in ordem]
     pend.sort(key=lambda a: (ordem[a['estado']], -int(a.get('valor_lm', 0))))
     return pend[0] if pend else None
+
+
+def _enriquecer_avanco(a: dict, cwd: str) -> dict:
+    a['link'] = acoes.deep_link(a['id'], cwd)
+    a['comando'] = f"/luzia:fazer {a['id']}"
+    a['prompt_completo'] = acoes.prompt_completo(a)
+    return a
+
+
+def _espectro(nivel: int, total: int = 5) -> list[int]:
+    n = max(0, min(total, int(nivel or 0)))
+    return [1 if i <= n else 0 for i in range(1, total + 1)]
 
 
 def estado() -> dict:
@@ -55,63 +68,155 @@ def estado() -> dict:
     if not plan:
         return {'vazio': True}
     autoaval = jogo.autoavaliacao()
-    rota_jogo = jogo.rota(plan)
-    por_skill = {s['nome']: s for s in rota_jogo['skills']}
-    d = jogo._degraus()
-    diag = plan.get('diagnostico_fontes', {})
-    skills = []
-    for s in plan.get('skills', []):
-        voce = autoaval.get(s['nome'])
-        skills.append({
-            'nome': s['nome'], 'voce': voce if voce is not None else s.get('luzia_sugere'),
-            'autoavaliada': voce is not None, 'alvo': s.get('alvo'), 'sugere': s.get('luzia_sugere'),
-            'evidencia': s.get('evidencia', ''), **por_skill.get(s['nome'], {}),
-            'degraus': [h for h in d.get('historico', []) if h['skill'] == s['nome']],
-        })
-    cfg = pipeline.read_json(pipeline.PRIVATE / 'entrada.json', {})
-
     cwd = repo_cwd()
-    lista = acoes.todas(plan, descartados=True)
-    for a in lista:
-        a['link'] = acoes.deep_link(a['id'], cwd)
-        a['comando'] = f"/luzia:fazer {a['id']}"
-        a['prompt_completo'] = acoes.prompt_completo(a)
+    lista = [_enriquecer_avanco(a, cwd) for a in acoes.todas(plan, descartados=True)]
+
+    with trajetoria.abrir() as con:
+        rota_jogo = jogo.rota(plan, con)
+        por_skill = {s['nome']: s for s in rota_jogo['skills']}
+        d = jogo._degraus(con)
+        versoes = trajetoria.versoes(con)
+        todos_prismas_db = trajetoria.prismas(con, incluir_arquivados=True)
+        leituras_prismas = {p['nome']: leituras.obter(con, 'prisma', p['nome']) for p in todos_prismas_db}
+        lista_pedidos = pedidos.listar(con)
+        entregas_git = entregas.listar(con)
+        detalhes_git = [entregas.detalhe(con, e['id']) for e in entregas_git[:15]]
+
+    diag = plan.get('diagnostico_fontes', {})
+    plan_skills_map = {s['nome']: s for s in plan.get('skills', []) if isinstance(s, dict) and s.get('nome')}
+    prismas_out = []
+    for p in todos_prismas_db:
+        nome = p['nome']
+        s_plan = plan_skills_map.get(nome, {})
+        voce = autoaval.get(nome)
+        prog = por_skill.get(nome) or {
+            'nome': nome,
+            'nivel': p['nivel'],
+            'meta': p['meta'],
+            'proximo': min(p['meta'], p['nivel'] + 1),
+            'na_meta': p['nivel'] >= p['meta'],
+            **jogo.progresso_skill(nome, d),
+        }
+        subidas = [h for h in d.get('historico', []) if h['skill'] == nome]
+        prismas_out.append({
+            'nome': nome,
+            'estado': p['estado'],
+            'origem': p['origem'],
+            'palavras': p.get('palavras', []),
+            'voce': voce if voce is not None else p['nivel'],
+            'autoavaliada': voce is not None,
+            'alvo': p['meta'],
+            'meta': p['meta'],
+            'nivel': p['nivel'],
+            'sugere': s_plan.get('luzia_sugere', p['nivel']),
+            'evidencia': s_plan.get('evidencia', ''),
+            'espectro': _espectro(p['nivel']),
+            'leitura': leituras_prismas.get(nome),
+            **prog,
+            'degraus': subidas,
+            'niveis_conquistados': subidas,
+        })
+
+    skills_ativas = [p for p in prismas_out if p['estado'] == 'ativo']
+    cfg = pipeline.read_json(pipeline.PRIVATE / 'entrada.json', {})
 
     commits = (plan.get('_commits_dia') or []) + ((state.get('payload_anonimizado') or {}).get('commits_recentes') or [])
     evs = acoes.evidencias()
-    entregas = []
-    for t in plan.get('tarefas_recentes', []):
-        p = propriedade.entrega(t, commits, plan.get('p1_direcao_prompt'), evs)
-        entregas.append({'tarefa': t.get('tarefa'), 'skills': t.get('skills', []),
-                         'risco': t.get('risco_debito_tecnico', ''), **p,
-                         'acoes': [a['id'] for a in lista if a.get('entrega') == t.get('tarefa')]})
-    indices = [e['indice'] for e in entregas if e['indice'] is not None]
+    entregas_out = []
+    for det in detalhes_git:
+        if not det:
+            continue
+        prop = det.get('propriedade', {})
+        entregas_out.append({
+            'id': det['id'],
+            'chave': det['chave'],
+            'titulo': det['titulo'],
+            'tarefa': det['titulo'],
+            'fonte': det['fonte'],
+            'fatos': det['fatos'],
+            'prismas': det['prismas'],
+            'skills': [x['prisma'] for x in det['prismas']],
+            'risco': '',
+            'indice': prop.get('indice'),
+            'base': prop.get('base', ''),
+            'dimensoes': prop.get('dimensoes', {}),
+            'propriedade': prop,
+            'leitura': det.get('leitura'),
+            'avancos_feitos': [a['id'] for a in det.get('avancos_feitos', [])],
+            'avancos_uteis': [a['id'] for a in det.get('avancos_uteis', [])],
+            'acoes': [a['id'] for a in det.get('avancos_uteis', [])],
+            'lumens_ligados': det.get('lumens_ligados', []),
+        })
+    if not entregas_out:
+        for idx_t, t in enumerate(plan.get('tarefas_recentes', []), 1):
+            p = propriedade.entrega(t, commits, plan.get('p1_direcao_prompt'), evs)
+            entregas_out.append({
+                'id': idx_t,
+                'titulo': t.get('tarefa', ''),
+                'tarefa': t.get('tarefa', ''),
+                'fonte': 'triagem',
+                'fatos': {'inicio': '', 'fim': '', 'duracao_dias': 1, 'commits': 1, 'arquivos': 0, 'linhas': 0, 'areas': []},
+                'prismas': [{'prisma': sk, 'termos': []} for sk in t.get('skills', [])],
+                'skills': t.get('skills', []),
+                'risco': t.get('risco_debito_tecnico', ''),
+                **p,
+                'propriedade': p,
+                'leitura': None,
+                'acoes': [a['id'] for a in lista if a.get('entrega') == t.get('tarefa')],
+            })
+    indices = [e['indice'] for e in entregas_out if e.get('indice') is not None]
 
     lm_recentes = list(reversed(jogo.livro(limite=12)))
+    modo_atual = pipeline.read_json(pipeline.OBSERVER_CFG, {}).get('modo', 'ativo')
+    modo_nome = observer.NOMES_FOCO.get(modo_atual, modo_atual)
 
     return {
-        'perfil': {'onde': plan.get('onde_esta', {}).get('resumo', ''), 'rotulos': list(pipeline.rotulos(state)),
-                   'meta': plan.get('aonde_quer_chegar', {}).get('resumo', ''),
-                   'lacuna': plan.get('aonde_quer_chegar', {}).get('lacuna_principal', ''),
-                   'diagnostico': diag},
+        'perfil': {
+            'onde': plan.get('onde_esta', {}).get('resumo', ''),
+            'rotulos': list(pipeline.rotulos(state)),
+            'meta': plan.get('aonde_quer_chegar', {}).get('resumo', ''),
+            'lacuna': plan.get('aonde_quer_chegar', {}).get('lacuna_principal', ''),
+            'diagnostico': diag,
+        },
+        'trajetoria': {
+            'versao_atual': versoes[-1]['numero'] if versoes else 1,
+            'versoes': versoes,
+            'resumo': rota_jogo,
+        },
         'rota': rota_jogo,
         'ritmo': jogo.ritmo(plan, cfg.get('horizonte', '')),
         'modelo': modelo.status(),
-        'regras': {'limiar': jogo.LIMIAR_DEGRAU, 'min_propria': int(jogo.MIN_PROPRIA * 100), 'min_feixes': jogo.MIN_FEIXES_DEGRAU,
-                   'passivo': jogo.PASSIVO, 'motivos': jogo.MOTIVOS},
+        'regras': {
+            'limiar': jogo.LIMIAR_DEGRAU,
+            'min_propria': int(jogo.MIN_PROPRIA * 100),
+            'min_feixes': jogo.MIN_FEIXES_DEGRAU,
+            'min_avancos': jogo.MIN_FEIXES_DEGRAU,
+            'teto_passivo_dia': jogo.TETO_PASSIVO_DIA,
+            'passivo': jogo.PASSIVO,
+            'motivos': jogo.MOTIVOS,
+            'rubrica': propriedade.RUBRICA,
+        },
         'autoavaliada': bool(autoaval),
         'propriedade_media': round(sum(indices) / len(indices)) if indices else None,
-        'skills': skills,
+        'prismas': prismas_out,
+        'skills': skills_ativas,
+        'avancos': lista,
         'acoes': lista,
         'proxima': proxima(lista),
-        'entregas': entregas,
+        'entregas': entregas_out,
         'lumens': lm_recentes,
+        'pedidos': lista_pedidos,
         'como_e_medido': propriedade.COMO_E_MEDIDO,
         'feitas': sum(1 for a in lista if a.get('estado') == 'conquistado'),
         'fila': [f['id'] for f in acoes.fila()],
-        'modo': pipeline.read_json(pipeline.OBSERVER_CFG, {}).get('modo', 'ativo'),
+        'modo': modo_atual,
+        'modo_nome': modo_nome,
+        'foco_opcoes': observer.NOMES_FOCO,
         'agente': pipeline.read_json(pipeline.OBSERVER_CFG, {}).get('agente', 'claude-code'),
-        'execucao': {k: ultima_execucao().get(k) for k in ('tempo_total_s', 'pico_memoria_mib', 'tokens_entrada', 'tokens_saida', 'versao', 'quando', 'modelo')},
+        'execucao': {
+            k: ultima_execucao().get(k)
+            for k in ('tempo_total_s', 'pico_memoria_mib', 'tokens_entrada', 'tokens_saida', 'versao', 'quando', 'modelo')
+        },
         'atualizado_em': state.get('atualizado_em', ''),
     }
 
@@ -134,9 +239,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _drenar(self) -> None:
+        try:
+            n = min(MAX_CORPO, int(self.headers.get('Content-Length', 0) or 0))
+            if n > 0:
+                self.rfile.read(n)
+        except Exception:
+            pass
+
     def _barrar(self, post: bool) -> bool:
         """True (e já responde) quando o pedido não vem da própria página local."""
         if (self.headers.get('Host') or '').lower() not in HOSTS_OK:
+            if post:
+                self._drenar()
             self._json({'erro': 'host não permitido'}, 403)
             return True
         if not post:
@@ -144,9 +259,11 @@ class Handler(BaseHTTPRequestHandler):
         origem = (self.headers.get('Origin') or '').lower()
         site = self.headers.get('Sec-Fetch-Site') or 'same-origin'
         if (origem and origem not in ORIGENS_OK) or site not in ('same-origin', 'none'):
+            self._drenar()
             self._json({'erro': 'origem não permitida'}, 403)
             return True
         if not (self.headers.get('Content-Type') or '').lower().startswith('application/json'):
+            self._drenar()
             self._json({'erro': 'use Content-Type: application/json'}, 415)
             return True
         return False
@@ -154,20 +271,55 @@ class Handler(BaseHTTPRequestHandler):
     def _api(self, funcao) -> None:
         try:
             self._json(funcao())
-        except Exception as e:  # responde o erro em vez de derrubar a conexão; o painel mostra
+        except Exception as e:
             arquivos.registrar_erro(f'server {self.path.split("?")[0]}', e)
             self._json({'erro': f'a Luzia não conseguiu montar esta tela ({type(e).__name__})'}, 500)
 
     def do_GET(self) -> None:
         if self._barrar(post=False):
             return
-        path = self.path.split('?')[0]
+        parsed = urlparse(self.path)
+        path = parsed.path
+        qs = parse_qs(parsed.query)
         if path == '/api/ping':
             return self._json({'ok': True})
         if path == '/api/estado':
             return self._api(estado)
         if path == '/api/sessao':
             return self._api(sessao)
+        if path == '/api/avancos':
+            try:
+                plan = pipeline.load_state().get('plano', {})
+                jogo.sincronizar(plan)
+                est_f = (qs.get('estado') or [''])[0] or None
+                pri_raw = (qs.get('prisma') or qs.get('skill') or [''])[0] or None
+                pri_f = jogo.skill_de(pri_raw, plan) if pri_raw else None
+                tip_f = (qs.get('tipo') or [''])[0] or None
+                cwd = repo_cwd()
+                with trajetoria.abrir() as con:
+                    itens = [_enriquecer_avanco(a, cwd) for a in jogo.avancos(con, estado=est_f, prisma=pri_f, tipo=tip_f)]
+                return self._json({'avancos': itens})
+            except Exception as e:
+                arquivos.registrar_erro('server GET /api/avancos', e)
+                return self._json({'erro': str(e)}, 500)
+        if path == '/api/entrega':
+            eid_str = (qs.get('id') or [''])[0]
+            if not eid_str.isdigit():
+                return self._json({'erro': 'id de entrega inválido'}, 400)
+            try:
+                plan = pipeline.load_state().get('plano', {})
+                jogo.sincronizar(plan)
+                cwd = repo_cwd()
+                with trajetoria.abrir() as con:
+                    det = entregas.detalhe(con, int(eid_str))
+                if not det:
+                    return self._json({'erro': 'entrega não encontrada'}, 404)
+                det['avancos_feitos'] = [_enriquecer_avanco(a, cwd) for a in det.get('avancos_feitos', [])]
+                det['avancos_uteis'] = [_enriquecer_avanco(a, cwd) for a in det.get('avancos_uteis', [])]
+                return self._json(det)
+            except Exception as e:
+                arquivos.registrar_erro('server GET /api/entrega', e)
+                return self._json({'erro': str(e)}, 500)
         arquivo = PAINEL / ('index.html' if path in ('/', '') else path.lstrip('/'))
         if not arquivo.resolve().is_relative_to(PAINEL.resolve()) or not arquivo.is_file():
             self.send_error(404)
@@ -202,19 +354,87 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'erro': f'não deu certo ({type(e).__name__})'}, 500)
 
     def _post(self, path: str, dados: dict) -> None:
-        if path == '/api/autoavaliacao':
-            if any(isinstance(v, bool) or not isinstance(v, int) for v in dados.values()):
+        if path in ('/api/nivel', '/api/autoavaliacao'):
+            if 'prisma' in dados or 'skill' in dados:
+                nome = str(dados.get('prisma') or dados.get('skill') or '')
+                nv = dados.get('nivel')
+                if isinstance(nv, bool) or not isinstance(nv, int):
+                    return self._json({'erro': 'nível inválido'}, 400)
+                mapa = {nome: nv}
+            elif isinstance(dados.get('niveis'), dict):
+                mapa = dados['niveis']
+            else:
+                mapa = dados
+            if any(isinstance(v, bool) or not isinstance(v, int) for v in mapa.values()):
                 return self._json({'erro': 'nível inválido'}, 400)
-            niveis = {str(k): max(0, min(5, v)) for k, v in dados.items()}
+            niveis = {str(k): max(0, min(5, v)) for k, v in mapa.items()}
             with trajetoria.abrir() as con:
                 atuais = {p['nome']: p['nivel'] for p in trajetoria.prismas(con, incluir_arquivados=True)}
                 if any(nome not in atuais for nome in niveis):
                     return self._json({'erro': 'prisma desconhecido'}, 400)
                 declarados = trajetoria.declarados(con)
-                for nome, nivel in niveis.items():  # confirmar um nível (mudado ou não) é declarar
+                for nome, nivel in niveis.items():
                     if atuais[nome] != nivel or nome not in declarados:
                         trajetoria.declarar_nivel(con, nome, nivel)
             return self._json({'ok': True})
+
+        if path == '/api/pedido':
+            acao = str(dados.get('acao', '')).strip().lower()
+            with trajetoria.abrir() as con:
+                if acao == 'abrir':
+                    tipo = str(dados.get('tipo', '')).strip()
+                    prisma = str(dados.get('prisma') or dados.get('skill') or '').strip()
+                    motivo = str(dados.get('motivo', '')).strip()
+                    p = pedidos.abrir(con, tipo, prisma, motivo)
+                    if 'erro' in p:
+                        return self._json({'erro': p['erro']}, 400)
+                    if tipo in ('incluir', 'mudar_meta') and dados.get('propor', True):
+                        prop = pedidos.propor(
+                            con, p['id'],
+                            nivel=int(dados['nivel']) if dados.get('nivel') is not None else None,
+                            meta=int(dados['meta']) if dados.get('meta') is not None else None,
+                        )
+                        if 'erro' in prop:
+                            return self._json({'erro': prop['erro'], 'pedido': p}, 400)
+                        p = prop
+                    return self._json({'ok': True, 'pedido': p})
+                if acao in ('ajustar', 'propor'):
+                    pid = int(dados.get('id') or 0)
+                    p = pedidos.propor(
+                        con, pid,
+                        nivel=int(dados['nivel']) if dados.get('nivel') is not None else None,
+                        meta=int(dados['meta']) if dados.get('meta') is not None else None,
+                    )
+                    if 'erro' in p:
+                        return self._json({'erro': p['erro']}, 400)
+                    return self._json({'ok': True, 'pedido': p})
+                if acao == 'aceitar':
+                    pid = int(dados.get('id') or 0)
+                    p = pedidos.aceitar(con, pid)
+                    if 'erro' in p:
+                        return self._json({'erro': p['erro']}, 400)
+                    return self._json({'ok': True, 'pedido': p})
+                if acao == 'recusar':
+                    pid = int(dados.get('id') or 0)
+                    p = pedidos.recusar(con, pid)
+                    if 'erro' in p:
+                        return self._json({'erro': p['erro']}, 400)
+                    return self._json({'ok': True, 'pedido': p})
+            return self._json({'erro': 'ação de pedido inválida'}, 400)
+
+        if path == '/api/leituras':
+            alvos_raw = dados.get('alvos')
+            alvos = [tuple(x) for x in alvos_raw] if isinstance(alvos_raw, list) else None
+            with trajetoria.abrir() as con:
+                geradas = leituras.gerar(con, alvos=alvos)
+            return self._json({'ok': True, 'geradas': geradas})
+
+        if path == '/api/entregas/ampliar':
+            dias = max(1, min(3650, int(dados.get('dias', 180) or 180)))
+            with trajetoria.abrir() as con:
+                res = entregas.atualizar(con, dias=dias)
+            return self._json({'ok': True, 'atualizacao': res})
+
         if path == '/api/modo':
             modo = dados.get('modo')
             if modo not in MODOS:
@@ -222,7 +442,8 @@ class Handler(BaseHTTPRequestHandler):
             cfg = pipeline.read_json(pipeline.OBSERVER_CFG, {})
             cfg['modo'] = modo
             arquivos.gravar_json(pipeline.OBSERVER_CFG, cfg)
-            return self._json({'ok': True})
+            return self._json({'ok': True, 'modo': modo, 'modo_nome': observer.NOMES_FOCO.get(modo, modo)})
+
         if path == '/api/agente':
             agente = dados.get('agente')
             if agente not in AGENTES:
@@ -231,14 +452,16 @@ class Handler(BaseHTTPRequestHandler):
             cfg['agente'] = agente
             arquivos.gravar_json(pipeline.OBSERVER_CFG, cfg)
             return self._json({'ok': True})
+
         if path == '/api/enviar':
             a = acoes.find(pipeline.load_state().get('plano', {}), str(dados.get('id', '')))
             if not a:
-                return self._json({'erro': 'feixe não encontrado'}, 404)
+                return self._json({'erro': 'avanço não encontrado'}, 404)
             if not jogo.enfileirar(a['id']):
-                return self._json({'erro': 'este feixe já foi conquistado (e revisitado) ou está descartado'}, 400)
+                return self._json({'erro': 'este avanço já foi conquistado (e revisitado) ou está descartado'}, 400)
             acoes.enfileirar(a['id'], a.get('titulo', ''))
             return self._json({'ok': True})
+
         if path == '/api/modelo':
             try:
                 st = modelo.salvar(str(dados.get('provedor', '')), str(dados.get('modelo', '')).strip(),
@@ -246,6 +469,7 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as e:
                 return self._json({'erro': str(e)}, 400)
             return self._json({'ok': True, 'modelo': st})
+
         if path == '/api/modelo/testar':
             try:
                 r = modelo.chamar('Responda só com o JSON {"ok": true}.', 'Responda só com JSON.')
@@ -253,6 +477,7 @@ class Handler(BaseHTTPRequestHandler):
                                    'aviso': r.get('aviso', '')})
             except Exception as e:
                 return self._json({'erro': str(e)[:200]}, 400)
+
         if path in ('/api/descartar', '/api/restaurar'):
             fid = str(dados.get('id', ''))[:8]
             if path == '/api/descartar':
@@ -263,22 +488,29 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 jogo.restaurar(fid)
             return self._json({'ok': True})
+
         if path == '/api/subir':
             plan = pipeline.load_state().get('plano', {})
-            res = jogo.subir(jogo.skill_de(str(dados.get('skill', '')), plan), plan)
+            alvo = str(dados.get('prisma') or dados.get('skill') or '')
+            res = jogo.subir(jogo.skill_de(alvo, plan), plan)
             return self._json({k: v for k, v in res.items() if k != 'rota'}, 400 if res.get('erro') else 200)
-        if path == '/api/trecho':  # acende 3 feixes novos para a skill (uma chamada ao modelo, ~10 s)
+
+        if path in ('/api/acender', '/api/trecho'):
             from luzia import cli
-            res = cli.gerar_trecho(str(dados.get('skill', ''))[:120], 'painel-trecho')
+            alvo = str(dados.get('prisma') or dados.get('skill') or '')[:120]
+            res = cli.gerar_trecho(alvo, 'painel-acender')
             if res.get('erro'):
                 return self._json({'erro': res['erro']}, 400)
-            return self._json({'ok': True, 'skill': res['skill'], 'feixes': [f['id'] for f in res['feixes']]})
-        if path == '/api/iniciar':  # "Copiar prompt": a pessoa leva o feixe para um agente por conta própria
+            ids = [f['id'] for f in res['feixes']]
+            return self._json({'ok': True, 'skill': res['skill'], 'prisma': res['skill'], 'feixes': ids, 'avancos': ids})
+
+        if path == '/api/iniciar':
             a = acoes.find(pipeline.load_state().get('plano', {}), str(dados.get('id', '')))
             if not a or not jogo.iniciar(a['id'], 'prompt copiado do painel'):
-                return self._json({'erro': 'este feixe não pode ser iniciado agora'}, 400)
+                return self._json({'erro': 'este avanço não pode ser iniciado agora'}, 400)
             acoes.registrar_evento(a['id'], 'iniciada', skill=a.get('skill'), origem='painel')
             return self._json({'ok': True})
+
         return self._json({'erro': 'rota desconhecida'}, 404)
 
 

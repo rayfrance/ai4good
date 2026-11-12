@@ -1,6 +1,10 @@
 """Propriedade intelectual explicável: cada dimensão diz a nota, a base e a evidência.
 
-- P1 · direção no prompt: inferida pelo modelo a partir dos prompts recentes no projeto (com justificativa).
+"Propriedade" mede quanto de uma ENTREGA é seu (P1–P4). "Luz própria", no jogo, é outra coisa: a parcela
+dos seus lúmens que veio de você e não do agente.
+
+- P1 · direção no prompt: inferida pelo modelo a partir dos prompts recentes no projeto (com justificativa);
+  é geral (a mesma em todas as entregas), porque os prompts não são ligados a um commit específico.
 - P2 · coesão do commit: regra fixa sobre os metadados do git (conta visível).
 - P3 · aplicação conceitual: só existe com evidência registrada (ações "explicar/praticar" concluídas).
 - P4 · domínio arquitetural: só existe com evidência registrada (ações de defesa da decisão).
@@ -19,7 +23,7 @@ RUBRICA = {
 }
 
 COMO_E_MEDIDO = [
-    'P1 · direção no prompt: o modelo lê seus prompts recentes no projeto e avalia se você deu direção, restrições e critérios ao agente (inferido).',
+    'P1 · direção no prompt: o modelo lê seus prompts recentes no projeto e avalia se você deu direção, restrições e critérios ao agente (inferido, geral: vale para todas as entregas).',
     'P2 · coesão do commit: regra fixa sobre arquivos, linhas e áreas do commit; quanto mais focado, maior (calculado).',
     'P3 · aplicação conceitual: sobe só quando você explica o conceito naquela entrega numa ação da Luzia (evidência).',
     'P4 · domínio arquitetural: sobe só quando você defende a decisão e as alternativas numa ação (evidência).',
@@ -67,7 +71,7 @@ def entrega(tarefa: dict, commits: list[dict], p1: dict | None, evidencias: list
     """Dimensões, índice e base de uma entrega."""
     dims: dict[str, dict | None] = {}
     if p1 and p1.get('nota') is not None:
-        dims['P1'] = {'nota': int(p1['nota']), 'tipo': 'inferido', 'base': p1.get('base', '')}
+        dims['P1'] = {'nota': int(p1['nota']), 'tipo': 'inferido · geral', 'base': p1.get('base', '')}
     else:
         dims['P1'] = None
     dims['P2'] = p2_coesao(find_commit(tarefa, commits))

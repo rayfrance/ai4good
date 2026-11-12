@@ -208,6 +208,12 @@ main { flex: 1; min-width: 0; padding: var(--e6) var(--e7) var(--e7); max-width:
          background: var(--superficie-2); border: 1px solid var(--linha-forte); color: var(--texto); padding: 10px var(--e4);
          border-radius: var(--r2); box-shadow: var(--sombra); z-index: 20; }
 .toast .ic { color: var(--meta); }
+.toast.celebra { border-color: var(--luz); box-shadow: 0 0 0 1px var(--luz), 0 10px 34px rgba(240, 138, 60, .35); animation: estourar .5s ease; }
+.toast.celebra .ic { color: var(--luz); }
+@keyframes estourar { 0% { transform: translateX(-50%) scale(.92); opacity: 0; } 60% { transform: translateX(-50%) scale(1.04); opacity: 1; } 100% { transform: translateX(-50%) scale(1); } }
+.brilho { animation: brilho 1.4s ease; }
+@keyframes brilho { 0% { filter: brightness(1); } 30% { filter: brightness(1.8) drop-shadow(0 0 6px var(--luz)); } 100% { filter: brightness(1); } }
+@media (prefers-reduced-motion: reduce) { .toast.celebra, .brilho { animation: none; } }
 
 @media (max-width: 960px) {
   body { flex-direction: column; }

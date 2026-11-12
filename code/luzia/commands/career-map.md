@@ -1,13 +1,5 @@
 ---
-description: Luzia · abre o painel visual
-allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
+description: "Luzia · abre o painel visual (rota, feixes, entregas e ajustes)"
+allowed-tools: Bash(cd:*), Bash(python:*)
 ---
-
-Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
-
-```bash
-cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli career-map
-```
-
-Mostre a saída **como veio** (é markdown visual), sem resumir.
-
+Rode `cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli career-map` e diga em uma linha que o painel abriu no navegador.

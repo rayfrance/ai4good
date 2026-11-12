@@ -21,7 +21,7 @@ from .privacy import Redactor
 
 PAINEL = 'http://localhost:8501'
 MODOS = ('ativo', 'passivo', 'sob_demanda')
-CLI = 'cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli'
+CLI = arquivos.CLI
 
 
 # ------------------------------------------------------------------ entradas e redação
@@ -122,6 +122,38 @@ def daily_call(kind: str, entrada_path: Path, rotulo: str) -> tuple[dict, dict, 
     return result.plan, record, dict(redactor.hits)
 
 
+def gerar_trecho(skill: str, rotulo: str = 'cmd-trecho') -> dict:
+    """Acende o próximo trecho: 3 feixes novos para uma skill (depois de um degrau ou quando ela fica sem feixe aberto)."""
+    pipeline.load_env()
+    plan = pipeline.load_state().get('plano', {})
+    skill = jogo.skill_de(skill, plan)
+    nv = jogo.niveis(plan).get(skill)
+    if not nv:
+        return {'erro': 'skill não encontrada no seu plano'}
+    if nv['nivel'] >= nv['meta']:
+        return {'erro': 'esta skill já está na meta'}
+    t0 = time.perf_counter()
+    s = next((x for x in plan.get('skills', []) if x['nome'] == skill), {})
+    existentes = [f for f in acoes.todas(plan, descartados=True) if (f.get('skill_plano') or f.get('skill')) == skill]
+    payload = {
+        'objetivo': plan.get('aonde_quer_chegar', {}),
+        'skill': {'nome': skill, 'nivel': nv['nivel'], 'para': nv['nivel'] + 1, 'meta': nv['meta'], 'evidencia': s.get('evidencia', '')},
+        'feixes_existentes': [{'titulo': f.get('titulo'), 'estado': f.get('estado')} for f in existentes],
+        'feixes_descartados_pela_pessoa': [m for m in jogo.motivos_descartados() if jogo.skill_de(m.get('skill') or '', plan) == skill],
+    }
+    result, record = pipeline.run_plan(payload, prep_seconds=time.perf_counter() - t0, label=rotulo,
+                                       schema=planner.TRECHO_SCHEMA,
+                                       intro='Plano salvo da pessoa e a skill que precisa de um novo trecho de feixes:')
+    novas = [a for a in result.plan.get('acoes', []) if isinstance(a, dict) and a.get('titulo')][:3]
+    if not novas:
+        return {'erro': 'o modelo não devolveu feixes; tente de novo'}
+    trechos = plan.get('trechos', []) + [{'skill': skill, 'para': nv['nivel'] + 1, 'quando': record['quando'], 'acoes': novas}]
+    pipeline.update_state({'trechos': trechos}, record)
+    plan = pipeline.load_state().get('plano', {})
+    ids = {acoes.aid('trecho', skill + a.get('titulo', '')) for a in novas}
+    return {'skill': skill, 'feixes': [f for f in acoes.todas(plan) if f['id'] in ids], 'record': record}
+
+
 # ------------------------------------------------------------------ apresentação
 def bar(value, total: int = 5, width: int = 5) -> str:
     value = max(0, min(total, int(value or 0)))
@@ -132,9 +164,58 @@ def bar(value, total: int = 5, width: int = 5) -> str:
 def footer(rec: dict, hits: dict | None = None) -> None:
     masked = sum((hits or {}).values())
     print(
-        f"\n`⏱ {rec['tempo_total_s']} s · 🧠 {rec['pico_memoria_mib']} MiB · 🔤 {rec['tokens_entrada']}→{rec['tokens_saida']} tokens"
-        f" · 🔒 {masked} itens mascarados · versão {rec['versao']}`"
+        f"\n`{rec['tempo_total_s']} s · {rec['pico_memoria_mib']} MiB · {rec['tokens_entrada']}→{rec['tokens_saida']} tokens"
+        f" · {masked} itens mascarados · {rec.get('modelo', '')} · versão {rec['versao']}`"
     )
+
+
+def curto(nome: str) -> str:
+    return (nome or '').split('(')[0].strip()
+
+
+# ------------------------------------------------------------------ botões (protocolo para qualquer agente)
+# A saída termina com LUZIA_CLI, LUZIA_PERGUNTA e LUZIA_BOTOES. O agente esconde essas linhas, pergunta com os botões
+# do próprio harness (AskUserQuestion no Claude Code) e roda `LUZIA_CLI <rodar>` do botão escolhido.
+def botoes(itens: list[dict], pergunta: str = 'O que você quer fazer agora?') -> None:
+    vistos, lista = set(), []
+    for b in itens:
+        if b and b['rodar'] not in vistos:
+            vistos.add(b['rodar'])
+            lista.append(b)
+    if lista:
+        print(f'\nLUZIA_CLI={CLI}')
+        print(f'LUZIA_PERGUNTA={pergunta}')
+        print('LUZIA_BOTOES=' + json.dumps(lista[:3], ensure_ascii=False))
+
+
+def bt_feixe(f: dict, prefixo: str = '') -> dict:
+    return {'rotulo': (prefixo + f.get('titulo', ''))[:48],
+            'descricao': f"{f.get('tipo', '')} · {curto(f.get('skill_plano') or f.get('skill', ''))} · {f.get('duracao_min', '?')} min · {f.get('valor_lm')} lm",
+            'rodar': f"fazer {f['id']}"}
+
+
+BT_PAINEL = {'rotulo': 'Abrir o painel', 'descricao': 'rota, feixes e entregas no navegador', 'rodar': 'career-map'}
+
+
+def proximos_botoes(plan: dict, excluir: set | tuple = ()) -> list[dict]:
+    """O que faz sentido agora, em ordem: subir degrau pronto, continuar, fila, revisitar, acender trecho, próximo feixe."""
+    r = jogo.rota(plan)
+    lista = [f for f in acoes.todas(plan) if f['id'] not in excluir]
+    fila_ids = [x['id'] for x in acoes.fila()]
+    bts = [{'rotulo': f"Subir {curto(s['nome'])} para {s['proximo']}",
+            'descricao': f"degrau pronto: {s['lm']} lm, {s['luz_propria']}% luz própria · você confirma",
+            'rodar': f'subir "{s["nome"]}"'} for s in r['skills'] if s['pronto'] and not s['na_meta']]
+    bts += [bt_feixe(f, 'Continuar: ') for f in lista if f['estado'] == 'em_andamento'][:1]
+    bts += [bt_feixe(f) for f in lista if f['id'] in fila_ids][:1]
+    bts += [{'rotulo': f"Revisitar: {f.get('titulo', '')}"[:48],
+             'descricao': f"buscar o restante: você levou {f.get('lm_ganho')} de {f.get('valor_lm')} lm",
+             'rodar': f"fazer {f['id']}"} for f in lista if jogo.pode_revisitar(f)][:1]
+    abertos = {f.get('skill_plano') or f.get('skill') for f in lista if f['estado'] in ('sugerido', 'na_fila', 'em_andamento')}
+    bts += [{'rotulo': f"Acender feixes de {curto(s['nome'])}"[:48],
+             'descricao': f"3 feixes novos para o nível {s['proximo']} (o modelo leva ~10 s)",
+             'rodar': f'trecho "{s["nome"]}"'} for s in r['skills'] if not s['na_meta'] and s['nome'] not in abertos][:1]
+    bts += [bt_feixe(f) for f in lista if f['estado'] == 'sugerido']
+    return bts
 
 
 ESTADO_IC = {'conquistado': '✦', 'em_andamento': '◐', 'na_fila': '➤', 'sugerido': '○', 'descartado': '✕'}
@@ -147,18 +228,21 @@ def feixe_linha(f: dict) -> str:
             f"{f.get('duracao_min', '?')} min · **{f.get('valor_lm', '?')} lm**{extra}{tent}")
 
 
-def oferecer(lista: list[dict]) -> None:
-    pend = [a for a in lista if a.get('estado') not in ('conquistado', 'descartado')][:3]
-    if pend:
-        print('\nLUZIA_ACOES=' + json.dumps([{'id': a['id'], 'titulo': a.get('titulo', ''), 'tipo': a.get('tipo', ''),
-                                              'lm': a.get('valor_lm')} for a in pend], ensure_ascii=False))
+def oferecer(lista: list[dict], pergunta: str = 'Qual feixe você quer fazer agora?') -> None:
+    botoes([bt_feixe(a) for a in lista if a.get('estado') not in ('conquistado', 'descartado')], pergunta)
 
 
-def rota_texto(plan: dict) -> None:
+def linha_rota(plan: dict, state: dict | None = None) -> dict:
     r = jogo.rota(plan)
+    ini, fim = pipeline.rotulos(state or pipeline.load_state())
     luz = '━' * round(20 * r['pct'] / 100)
-    print(f"**Rota** Júnior 3 {luz}◉{'─' * (20 - len(luz))} Plena · **{r['degraus_feitos']} de {r['degraus_total']} degraus** · "
+    print(f"**Rota** {ini} {luz}◉{'─' * (20 - len(luz))} {fim} · **{r['degraus_feitos']} de {r['degraus_total']} degraus** · "
           f"{r['lm_total']} lm · {r['luz_propria']}% luz própria")
+    return r
+
+
+def rota_texto(plan: dict, state: dict | None = None) -> None:
+    r = linha_rota(plan, state)
     for s in r['skills']:
         if s['na_meta']:
             print(f"   ✦ {s['nome']} · nível {s['nivel']} · na meta")
@@ -177,8 +261,8 @@ def propriedade_entregas(state: dict) -> list[dict]:
 
 def print_entrega(e: dict, todas: list[dict]) -> None:
     idx = e['indice']
-    print(f"\n📦 **{e['tarefa']}** — luz própria **{idx if idx is not None else '—'}%** · base {e['base']}")
-    print('   ' + ' · '.join(f"{k} {d['nota']} ({d['tipo']})" if d else f'{k} — sem base' for k, d in e['dimensoes'].items()))
+    print(f"\n▸ **{e['tarefa']}** · propriedade **{idx if idx is not None else '—'}%** · medida em {e['base']}")
+    print('   ' + ' · '.join(f"{k} {d['nota']} ({d['tipo']})" if d else f'{k} sem base' for k, d in e['dimensoes'].items()))
     for a in todas:
         if a.get('origem') == 'entrega' and a.get('entrega') == e['tarefa']:
             print(f'   {feixe_linha(a)}' + (f" → acende {a['dimensao']}" if a.get('dimensao') else ''))
@@ -188,7 +272,7 @@ def avisar_degraus(plan: dict) -> None:
     for s in jogo.rota(plan)['skills']:
         if s['pronto'] and not s['na_meta']:
             print(f"\n✦ **{s['nome']}** está pronta para subir para o nível {s['proximo']} "
-                  f"({s['lm']} lm, {s['luz_propria']}% luz própria). Confirme: `{CLI} subir \"{s['nome']}\"`")
+                  f"({s['lm']} lm, {s['luz_propria']}% luz própria). Você decide quando.")
 
 
 # ------------------------------------------------------------------ painel
@@ -220,11 +304,15 @@ def set_mode(modo: str) -> None:
 
 
 def roteiro(a: dict) -> None:
-    print(f"## ✨ Luzia · feixe `#{a['id']}` · **{a.get('valor_lm')} lm**")
-    print(f"**{a.get('titulo', '')}** · {a.get('tipo', '')} · {a.get('skill', '')} · {a.get('duracao_min', '?')} min")
-    print('Vale: ' + ' + '.join(f"{c[0]} {c[2]} ({c[1]})" for c in a.get('conta', [])))
+    revisita = a.get('estado') == 'conquistado'
+    print(f"## ✦ Luzia · {'revisita do ' if revisita else ''}feixe `#{a['id']}` · **{a.get('valor_lm')} lm**")
+    print(f"**{a.get('titulo', '')}** · {a.get('tipo', '')} · {curto(a.get('skill_plano') or a.get('skill', ''))} · {a.get('duracao_min', '?')} min")
+    if revisita:
+        print(f"Você levou {a.get('lm_ganho')} de {a.get('valor_lm')} lm (nota {a.get('nota')}/4). Nesta revisita vale só a diferença.")
+    else:
+        print('Vale: ' + ' + '.join(f"{c[0]} {c[2]} ({c[1]})" for c in a.get('conta', [])))
     if a.get('entrega'):
-        print(f"📦 entrega: {a['entrega']}" + (f" · acende {a['dimensao']}" if a.get('dimensao') else ''))
+        print(f"▸ entrega: {a['entrega']}" + (f" · acende {a['dimensao']}" if a.get('dimensao') else ''))
     print(f"\n**Por quê:** {a.get('por_que', '')}")
     print(f"**Conceitos:** {', '.join(a.get('conceitos', []))}")
     print('**Como:**')
@@ -239,13 +327,39 @@ def roteiro(a: dict) -> None:
           + '. Valor ganho: 4 = 100%, 3 = 75%, 2 = 50%, 0–1 = tente de novo.')
     print('5. Diga a nota e o porquê em uma linha, com um ponto forte e um próximo passo.')
     print(f'6. Registre: {CLI} registrar {a["id"]} --nota <0-4> --resumo "<1 linha do que a pessoa demonstrou, sem nomes da empresa>"')
+    print('7. A saída do registrar termina com LUZIA_BOTOES: ofereça esses botões como próxima ação.')
+
+
+def hoje(plan: dict, state: dict) -> None:
+    """Ponto de partida: onde você está agora e os próximos passos em botões."""
+    print('## ✦ Luzia · hoje')
+    r = linha_rota(plan, state)
+    lista = acoes.todas(plan)
+    hoje_lm = sum(x['lm'] for x in jogo.livro() if x['quando'][:10] == jogo.agora()[:10])
+    andamento = sum(1 for f in lista if f['estado'] == 'em_andamento')
+    prontas = [curto(s['nome']) for s in r['skills'] if s['pronto'] and not s['na_meta']]
+    partes = [f'+{hoje_lm} lm hoje']
+    if andamento:
+        partes.append(f"{andamento} feixe{'s' if andamento > 1 else ''} em andamento")
+    if acoes.fila():
+        partes.append(f'{len(acoes.fila())} na fila')
+    if prontas:
+        partes.append(f"{', '.join(prontas)} pronta{'s' if len(prontas) > 1 else ''} para subir")
+    print('Agora: ' + ' · '.join(partes))
+    perto = sorted((s for s in r['skills'] if not s['na_meta'] and s['lm']), key=lambda s: (-s['lm'], s['nome']))[:3]
+    if perto:
+        print('Mais perto do próximo degrau: ' + ' · '.join(
+            f"{curto(s['nome'])} {s['lm']}/{s['limiar']} lm" + ('' if s['feixes'] else ' (falta 1 feixe)') for s in perto))
+    else:
+        print('Nenhum lúmen ainda: o primeiro feixe conquistado acende a rota.')
+    botoes(proximos_botoes(plan) + [BT_PAINEL], 'Por onde seguimos?')
 
 
 # ------------------------------------------------------------------ main
 COMANDOS = [
-    'triage', 'next-level', 'rota', 'feedback-progress', 'feedback-skills-opportunities', 'acoes', 'fazer', 'prompt',
-    'registrar', 'revisitar', 'descartar', 'restaurar', 'subir', 'dossie', 'cartao', 'fila', 'enviar', 'career-map', 'modo',
-    'modelo',
+    'hoje', 'triage', 'next-level', 'rota', 'feedback-progress', 'feedback-skills-opportunities', 'acoes', 'fazer',
+    'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar', 'subir', 'trecho', 'dossie', 'cartao', 'fila', 'enviar',
+    'career-map', 'modo', 'modelo',
 ]
 
 
@@ -274,29 +388,29 @@ def main() -> None:
             print(f'Use: modo {"|".join(MODOS)}')
             return
         set_mode(args.valor)
-        print(f'✨ Luzia agora está em modo **{args.valor}**.')
+        print(f'✦ Luzia agora está em modo **{args.valor}**.')
         return
 
     if args.comando == 'modelo':
         from . import modelo
         s = modelo.status()
-        print('## ✨ Luzia · modelo')
+        print('## ✦ Luzia · modelo')
         print(f"**{s['nome_provedor']}** · `{s['modelo']}`" + (f" · {s['base_url']}" if s.get('base_url') else ''))
         print(f"chave: {'configurada' if s['chave_configurada'] else 'FALTANDO'} · "
               f"SDK: {'instalado' if s['sdk_instalado'] else 'falta: pip install ' + s['pip']}")
-        print('Troque em Ajustes > Modelo da Luzia, no painel (/luzia:career-map). A chave fica só no .env desta máquina.')
+        print('Troque em Ajustes > Modelo da Luzia, no painel. A chave fica só no .env desta máquina.')
         if args.valor == 'testar':
             r = modelo.chamar('Responda só com o JSON {"ok": true}.', 'Responda só com JSON.')
             print(f"teste: {r['texto'].strip()[:60]} · {r['segundos']:.1f} s · {r['tokens_in']}→{r['tokens_out']} tokens · {r['provedor']}/{r['modelo']}")
             if r.get('aviso'):
-                print(f"⚠️ {r['aviso']}")
+                print(f"! {r['aviso']}")
         return
 
     if args.comando == 'career-map':
         import webbrowser
         if not panel_up():
             start_panel()
-        print(f'## ✨ Luzia · painel aberto em {PAINEL}')
+        print(f'## ✦ Luzia · painel aberto em {PAINEL}')
         try:
             webbrowser.open(PAINEL)
         except Exception:
@@ -310,41 +424,44 @@ def main() -> None:
                 json.dumps({'plano': plan, 'custo': rec, 'hits': hits}, ensure_ascii=False, indent=2), encoding='utf-8',
             )
             return
-        plan = pipeline.load_state().get('plano', {})
-        print('## ✨ Luzia · triagem')
-        print(f"📍 {plan['onde_esta']['resumo']}\n🎯 {plan['aonde_quer_chegar']['resumo']}\n")
-        rota_texto(plan)
+        state = pipeline.load_state()
+        plan = state.get('plano', {})
+        print('## ✦ Luzia · triagem')
+        print(f"Onde você está: {(plan.get('onde_esta') or {}).get('resumo', '')}\n"
+              f"Aonde quer chegar: {(plan.get('aonde_quer_chegar') or {}).get('resumo', '')}\n")
+        rota_texto(plan, state)
         primeiros = [a for a in acoes.todas(plan) if a['origem'] == 'rota']
         print('\n**Primeiros feixes:**')
         for a in primeiros[:3]:
             print(feixe_linha(a))
-        oferecer(primeiros)
         footer(rec, hits)
+        botoes([{'rotulo': 'Ajustar meu nível no painel', 'descricao': 'a rota parte do nível que você declara',
+                 'rodar': 'career-map'}] + [bt_feixe(a) for a in primeiros], 'Quer ajustar seu nível ou já começar?')
         return
 
     if args.comando == 'feedback-progress':
         _, rec, hits = daily_call('progress', entrada_path, rotulo)
         state = pipeline.load_state()
         todas = acoes.todas(state.get('plano', {}))
-        print('## ✨ Luzia · luz própria nas suas entregas')
+        print('## ✦ Luzia · propriedade nas suas entregas')
         for e in propriedade_entregas(state):
             print_entrega(e, todas)
-        print('\n_P1 inferido dos seus prompts · P2 calculado do commit · P3/P4 só com evidência registrada._')
-        oferecer([a for a in todas if a['origem'] == 'entrega'])
+        print('\n_P1 inferido dos seus prompts (geral) · P2 calculado do commit · P3/P4 só com evidência registrada._')
         footer(rec, hits)
+        oferecer([a for a in todas if a['origem'] == 'entrega'], 'Qual lacuna você quer fechar agora?')
         return
 
     if args.comando == 'feedback-skills-opportunities':
         resp, rec, hits = daily_call('opportunities', entrada_path, rotulo)
         plan = pipeline.load_state().get('plano', {})
         sessao = [a for a in acoes.todas(plan) if a['origem'] == 'sessão']
-        print('## ✨ Luzia · oportunidades nesta sessão')
+        print('## ✦ Luzia · oportunidades nesta sessão')
         print(f"_{resp.get('resumo_sessao', '')}_\n")
         for a in sessao:
             print(feixe_linha(a))
             print(f"   ↳ {a.get('gatilho', '')}")
-        oferecer(sessao)
         footer(rec, hits)
+        oferecer(sessao, 'Quer aproveitar alguma agora?')
         return
 
     state = pipeline.load_state()
@@ -353,10 +470,14 @@ def main() -> None:
         print('A Luzia ainda não fez a triagem. Rode /luzia:triage.')
         return
 
+    if args.comando == 'hoje':
+        hoje(plan, state)
+        return
+
     if args.comando in ('next-level', 'rota'):
         todas = acoes.todas(plan)
-        print('## ✨ Luzia · sua rota até Plena')
-        rota_texto(plan)
+        print(f"## ✦ Luzia · sua rota até {pipeline.rotulos(state)[1]}")
+        rota_texto(plan, state)
         cfg = load_cfg(entrada_path) if entrada_path.exists() else {}
         rit = jogo.ritmo(plan, cfg.get('horizonte', ''))
         print(f"\n_Calibragem: para chegar em ~{rit['meses']} meses, uns **{rit['feixes_semana']} feixe{'s' if rit['feixes_semana'] > 1 else ''} por semana**. "
@@ -370,12 +491,12 @@ def main() -> None:
             for a in lista[:3]:
                 print(f'   {feixe_linha(a)}')
         avisar_degraus(plan)
-        oferecer(todas)
+        botoes(proximos_botoes(plan), 'Por onde seguimos?')
         return
 
     if args.comando == 'acoes':
         lista = acoes.todas(plan, descartados=True)
-        print('## ✨ Luzia · seus feixes')
+        print('## ✦ Luzia · seus feixes')
         for estado, nome in (('em_andamento', 'Em andamento'), ('na_fila', 'Na fila'), ('sugerido', 'Sugeridos'),
                              ('conquistado', 'Conquistados'), ('descartado', 'Descartados')):
             grupo = [a for a in lista if a.get('estado') == estado]
@@ -383,17 +504,29 @@ def main() -> None:
                 print(f'\n**{nome}**')
                 for a in grupo:
                     print(feixe_linha(a))
-        oferecer(lista)
+        botoes(proximos_botoes(plan), 'Qual feixe agora?')
         return
 
     if args.comando == 'fila':
         lista = [a for a in (acoes.find(plan, f['id']) for f in acoes.fila()) if a]
-        print('## ✨ Luzia · feixes que você mandou do painel')
+        print('## ✦ Luzia · feixes que você mandou do painel')
         if not lista:
-            print('Nenhum feixe na fila. Abra o painel (/luzia:career-map) e clique em "Enviar".')
+            print('Nenhum feixe na fila. No painel, clique em "Enviar para o agente" num feixe.')
         for a in lista:
             print(feixe_linha(a))
-        oferecer(lista)
+        botoes([bt_feixe(a) for a in lista] + ([BT_PAINEL] if not lista else []), 'Começamos qual?')
+        return
+
+    if args.comando == 'trecho':
+        res = gerar_trecho(args.valor or args.skill, rotulo)
+        if res.get('erro'):
+            print(f"◐ {res['erro']}.")
+            return
+        print(f"## ✦ Luzia · novo trecho de {curto(res['skill'])}")
+        for f in res['feixes']:
+            print(feixe_linha(f))
+        footer(res['record'])
+        oferecer(res['feixes'], 'Qual feixe novo você quer fazer?')
         return
 
     a = acoes.find(plan, args.valor) if args.valor else None
@@ -411,13 +544,16 @@ def main() -> None:
 
     if args.comando in ('prompt', 'fazer', 'revisitar'):
         if not a:
-            print(f'Feixe {args.valor} não encontrado. Rode /luzia:next-level para ver os feixes.')
+            print(f'Feixe {args.valor} não encontrado.')
+            botoes(proximos_botoes(plan))
             return
         if (args.comando == 'revisitar' or a.get('estado') == 'conquistado') and not jogo.pode_revisitar(a):
             print(f"`#{a['id']}` já foi conquistado. Só dá para revisitar uma vez um feixe com nota 2 ou 3.")
+            botoes(proximos_botoes(plan, {a['id']}))
             return
         if not jogo.iniciar(a['id'], args.onde or ('revisita' if a.get('estado') == 'conquistado' else '')):
-            print(f"`#{a['id']}` está descartado. Restaure antes: `{CLI} restaurar {a['id']}`")
+            print(f"`#{a['id']}` está descartado.")
+            botoes([{'rotulo': 'Restaurar este feixe', 'descricao': 'volta para os sugeridos', 'rodar': f"restaurar {a['id']}"}])
             return
         acoes.desenfileirar(a['id'])
         acoes.registrar_evento(a['id'], 'iniciada', skill=a.get('skill'), origem=a.get('origem'))
@@ -433,26 +569,26 @@ def main() -> None:
             return
         res = jogo.conquistar(a['id'], args.nota, args.resumo[:200], plan)
         if res.get('erro'):
-            print(res['erro'])
+            print(f"◐ {res['erro']}.")
             return
         if res.get('tente_de_novo'):
             print(f"◐ Nota {args.nota}/4 ({propriedade.RUBRICA[max(0, min(4, args.nota))]}): ainda não. "
-                  f"O feixe `#{a['id']}` continua aberto para você tentar de novo. Sem perda: a próxima tentativa vale o mesmo.")
+                  f"O feixe `#{a['id']}` continua aberto: tente de novo agora ou depois, vale o mesmo.")
             return
         acoes.registrar_evento(a['id'], 'concluida', nota=args.nota, resumo=args.resumo[:200], skill=a.get('skill'),
                                entrega=a.get('entrega'), dimensao=a.get('dimensao'), origem=a.get('origem'))
         r = jogo.rota(plan)
         s = next((x for x in r['skills'] if x['nome'] == (a.get('skill_plano') or a.get('skill'))), None)
         print(f"✦ Feixe conquistado · `#{a['id']}` · nota {args.nota}/4 · **+{res['ganho']} lm**"
-              + (f" · {s['nome']} {s['lm']}/{s['limiar']} lm" if s else '') + f" · rota {r['degraus_feitos']}/{r['degraus_total']} degraus")
-        if res.get('pode_revisitar'):
-            print(f"↺ Você pode revisitar uma vez para buscar o restante: `{CLI} revisitar {a['id']}`")
+              + (f" · {curto(s['nome'])} {s['lm']}/{s['limiar']} lm" if s else '') + f" · rota {r['degraus_feitos']}/{r['degraus_total']} degraus")
         if a.get('entrega'):
             for e in propriedade_entregas(pipeline.load_state()):
                 if e['tarefa'] == a['entrega']:
-                    print(f"📦 {e['tarefa']} — luz própria agora **{e['indice']}%** · base {e['base']}")
+                    print(f"▸ {e['tarefa']}: propriedade agora **{e['indice']}%** · medida em {e['base']}")
         avisar_degraus(plan)
-        oferecer([x for x in acoes.todas(plan) if x['id'] != a['id']])
+        revisita = [{'rotulo': 'Revisitar agora', 'descricao': f"buscar o restante: {res['feixe']['lm_ganho']} de {res['feixe']['valor_lm']} lm",
+                     'rodar': f"fazer {a['id']}"}] if res.get('pode_revisitar') else []
+        botoes(proximos_botoes(plan, {a['id']})[:2] + revisita, 'E agora?')
         return
 
     if args.comando == 'descartar':
@@ -461,8 +597,9 @@ def main() -> None:
             return
         jogo.descartar(a['id'], args.motivo)
         acoes.desenfileirar(a['id'])
-        print(f"✕ `#{a['id']}` descartado ({jogo.MOTIVOS[args.motivo]}). A Luzia leva isso em conta nas próximas sugestões. "
-              f"Para trazer de volta: `{CLI} restaurar {a['id']}`")
+        print(f"✕ `#{a['id']}` descartado ({jogo.MOTIVOS[args.motivo]}). A Luzia leva isso em conta nas próximas sugestões.")
+        botoes([{'rotulo': 'Desfazer', 'descricao': 'o feixe volta para os sugeridos', 'rodar': f"restaurar {a['id']}"}]
+               + proximos_botoes(plan, {a['id']}))
         return
 
     if args.comando == 'restaurar':
@@ -471,25 +608,32 @@ def main() -> None:
             return
         jogo.restaurar(a['id'])
         print(f"○ `#{a['id']}` voltou para os sugeridos.")
+        botoes([bt_feixe({**a, 'estado': 'sugerido'})])
         return
 
     if args.comando == 'subir':
         skill = jogo.skill_de(args.valor or args.skill, plan)
         res = jogo.subir(skill, plan)
         if res.get('erro'):
-            print(f'{skill}: {res["erro"]}.')
+            print(f'◐ {curto(skill)}: {res["erro"]}.')
+            botoes(proximos_botoes(plan))
             return
         r = res['rota']
         print(f"✦ **{skill}** subiu para o nível {res['para']}. Rota: **{r['degraus_feitos']} de {r['degraus_total']} degraus**.")
-        print('O próximo trecho acende: rode /luzia:next-level para ver os feixes do novo nível.')
         if res.get('marco'):
-            print(f"🏁 Marco {res['marco']['n']} de 3 alcançado. Dossiê de evidências salvo em `{res['marco']['dossie']}`.")
+            print(f"◆ Marco {res['marco']['n']} de 3 alcançado. Dossiê de evidências salvo em `{res['marco']['dossie']}` (local).")
+        s = next((x for x in r['skills'] if x['nome'] == skill), {})
+        prox = [] if s.get('na_meta') else [{'rotulo': f'Acender o próximo trecho de {curto(skill)}'[:48],
+                                             'descricao': f"3 feixes para o nível {s.get('proximo')} (o modelo leva ~10 s)",
+                                             'rodar': f'trecho "{skill}"'}]
+        botoes(prox + proximos_botoes(plan), 'Acendemos o próximo trecho?')
         return
 
     if args.comando == 'dossie':
         caminho = jogo.dossie(plan)
-        print(f'## ✨ Luzia · dossiê de evidências\nSalvo em `{caminho}` (local, fora do git).')
+        print(f'## ✦ Luzia · dossiê de evidências\nSalvo em `{caminho}` (local, fora do git).')
         print(caminho.read_text(encoding='utf-8'))
+        botoes(proximos_botoes(plan)[:2] + [BT_PAINEL])
         return
 
     if args.comando == 'cartao':
@@ -505,15 +649,16 @@ def main() -> None:
             nota, lm = res['nota'], res['lm']
             acoes.registrar_evento(acoes.aid('cartao', args.pergunta), 'concluida', nota=nota, resumo=args.resumo[:200],
                                    skill=skill, origem='cartao')
-            print(f"✦ Luz própria: nota {nota}/4 · **+{lm} lm** em {skill}" if lm else
-                  f"◐ Nota {nota}/4: ainda luz refletida. Fica guardado para você tentar de novo.")
+            print(f"✦ Luz própria: nota {nota}/4 · **+{lm} lm** em {curto(skill)}" if lm else
+                  f"◐ Nota {nota}/4: ainda luz refletida. Virou um feixe guardado para você tentar com calma.")
             if not lm:
                 acoes.guardar(skill, args.pergunta)
             avisar_degraus(plan)
+            botoes([b for b in proximos_botoes(plan) if b['rodar'].startswith('subir')])
         else:
             jogo.usar_cartao(skill, 'guardado')
             f = acoes.guardar(skill, args.pergunta)
-            print(f"➤ Guardado como feixe `#{f['id']}`: aparece no painel e em /luzia:fazer {f['id']}")
+            print(f"➤ Guardado como feixe `#{f['id']}`: aparece no painel e em /luzia:hoje.")
         return
 
 

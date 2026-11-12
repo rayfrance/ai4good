@@ -31,7 +31,7 @@ const I = {
 };
 const ic = (n, c = '') => `<svg class="ic ${c}" viewBox="0 0 24 24" aria-hidden="true">${I[n] || ''}</svg>`;
 
-const TELAS = [['hoje', 'Hoje'], ['rota', 'Rota'], ['feixes', 'Feixes'], ['propria', 'Luz própria'], ['ajustes', 'Ajustes']];
+const TELAS = [['hoje', 'Hoje'], ['rota', 'Rota'], ['feixes', 'Feixes'], ['propria', 'Entregas'], ['ajustes', 'Ajustes']];
 const ESTADO = { sugerido: 'sugerido', na_fila: 'na fila', em_andamento: 'em andamento', conquistado: 'conquistado', descartado: 'descartado' };
 const MODOS = {
   ativo: ['raio', 'Ativa e observando', 'Reconhece o que você aplica e avisa no chat.'],
@@ -64,10 +64,34 @@ async function api(caminho, dados) {
   }
 }
 
-function toast(texto) {
+function toast(texto, classe = '') {
   const el = $('#toast');
-  el.innerHTML = ic('check') + esc(texto); el.hidden = false;
-  clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 2800);
+  el.className = 'toast ' + classe;
+  el.innerHTML = ic(classe === 'celebra' ? 'lumen' : 'check') + esc(texto); el.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), classe === 'celebra' ? 4200 : 2800);
+}
+
+// ------------------------------------------------------------------ ao vivo: o painel acompanha o que acontece no agente
+const FONTES = { feixe: 'feixe conquistado', 'passivo-prompt': 'você dirigiu no prompt', 'passivo-refletida': 'o agente aplicou', 'passivo-conversao': 'você explicou o porquê' };
+const chaveLm = (l) => `${l.quando}|${l.skill}|${l.lm}|${l.fonte}`;
+const assinatura = (e) => JSON.stringify([(e.lumens || []).map(chaveLm), (e.acoes || []).map((a) => a.id + a.estado), e.fila, e.modo, e.agente]);
+
+function celebrar(novos) {
+  if (!novos.length) return;
+  const total = novos.reduce((s, l) => s + l.lm, 0);
+  const l = novos[0];
+  const propria = novos.some((x) => x.luz !== 'refletida');
+  toast(`+${total} lm · ${String(l.skill).split('(')[0].trim()} · ${novos.length > 1 ? `${novos.length} reconhecimentos` : FONTES[l.fonte] || l.fonte}${propria ? '' : ' (luz refletida)'}`, 'celebra');
+  document.querySelectorAll('.rota-linha .luz, .degrau .p, .degrau .r').forEach((b) => { b.classList.remove('brilho'); void b.offsetWidth; b.classList.add('brilho'); });
+}
+
+function maiorLacuna() {
+  const abertos = new Set(E.acoes.filter((a) => ['sugerido', 'na_fila', 'em_andamento'].includes(a.estado)).map((a) => a.skill_plano || a.skill));
+  return E.skills.filter((s) => !s.na_meta).sort((a, b) => (abertos.has(a.nome) - abertos.has(b.nome)) || ((b.alvo - b.nivel) - (a.alvo - a.nivel)))[0];
+}
+
+function botaoTrecho(s) {
+  return s ? `<button class="btn sec" data-trecho="${esc(s.nome)}">${ic('raio')}Acender 3 feixes novos de ${esc(String(s.nome).split('(')[0].trim())}</button>` : '';
 }
 
 // ------------------------------------------------------------------ peças
@@ -92,7 +116,7 @@ function botoesFeixe(a) {
       <p class="dica">Uma revisita para buscar o restante: você levou ${a.lm_ganho} de ${a.valor_lm} lm. O que já ganhou não conta de novo.</p>` : '';
   }
   return `<div class="acoes-bt">
-    <button class="btn prim" data-enviar="${a.id}" ${naFila ? 'disabled' : ''}>${ic(naFila ? 'check' : 'enviar')}${naFila ? 'Enviado ao ' + esc(nomeAgente()) : 'Enviar para ' + esc(nomeAgente())}</button>
+    <button class="btn prim" data-enviar="${a.id}" ${naFila ? 'disabled' : ''}>${ic(naFila ? 'check' : 'enviar')}${naFila ? 'Enviado ao ' + esc(nomeAgente()) : (a.estado === 'em_andamento' ? 'Continuar no ' : 'Enviar para ') + esc(nomeAgente())}</button>
     <button class="btn sec" data-copiar="${a.id}">${ic('copiar')}Copiar prompt</button>
   </div>
   <p class="dica">${naFila ? `Na próxima mensagem no ${esc(nomeAgente())}, a Luzia oferece abrir este feixe numa sessão nova ou ali mesmo.`
@@ -154,7 +178,8 @@ function abrirSkill(nome) {
     ${d.conflito_curriculo_vs_realidade ? `<p class="lacuna"><b>Currículo × prática:</b> ${esc(d.conflito_curriculo_vs_realidade)}</p>` : ''}
     ${d.padrao_uso_ia_observado ? `<p class="lacuna"><b>Como você usa IA:</b> ${esc(d.padrao_uso_ia_observado)}</p>` : ''}
     ${graus ? `<h4>Degraus subidos</h4><ul class="lacuna" style="padding-left:18px">${graus}</ul>` : ''}
-    <h4>Feixes desta skill</h4><div class="acoes">${doSkill.map(cartaoFeixe).join('') || '<span class="vazio">Nenhum feixe ainda.</span>'}</div>`;
+    <h4>Feixes desta skill</h4><div class="acoes">${doSkill.map(cartaoFeixe).join('') || '<span class="vazio">Nenhum feixe ainda.</span>'}</div>
+    ${s.na_meta ? '' : `<p style="margin-top:var(--e4)">${botaoTrecho(s)}</p>`}`;
   $('#gaveta').hidden = false;
 }
 
@@ -180,7 +205,7 @@ function rotaHero() {
   return `<div class="bloco rota-hero">
     <span class="sobre">Sua rota</span>
     <div class="rota-linha"><span class="luz" style="width:${Math.max(2, r.pct)}%"></span>${marcos}</div>
-    <div class="rota-pontas"><span>Júnior 3</span><span>Plena</span></div>
+    <div class="rota-pontas"><span>${esc(E.perfil.rotulos?.[0] || 'Hoje')}</span><span>${esc(E.perfil.rotulos?.[1] || 'Meta')}</span></div>
     <div class="rota-nums">
       <div><b>${r.degraus_feitos}<small style="font-size:14px;color:var(--texto-3)"> / ${r.degraus_total}</small></b><span>degraus</span></div>
       <div><b class="lm">${r.lm_total}</b><span>lúmens</span></div>
@@ -217,7 +242,7 @@ function telaHoje() {
         <div class="etiquetas" style="margin-bottom:var(--e5)"><span class="tag luz">${ic('lumen', 'p')}${p.valor_lm} lm</span><span class="tag">${esc(p.tipo)}</span><span class="tag">${curto(p.skill_plano || p.skill)}</span><span class="tag">${ic('relogio', 'p')}${p.duracao_min} min</span></div>
         ${botoesFeixe(p)}
         <p style="margin:var(--e3) 0 0"><button class="btn link" data-feixe="${p.id}">Ver o feixe ${ic('seta', 'p')}</button></p>
-      </div>` : `<div class="bloco destaque"><span class="sobre">Tudo em dia</span><h3>Nenhum feixe aberto.</h3><p>Peça novos com /luzia:next-level.</p></div>`}
+      </div>` : `<div class="bloco destaque"><span class="sobre">Tudo em dia</span><h3>Nenhum feixe aberto.</h3><p>A Luzia acende um trecho novo para a sua maior lacuna.</p>${botaoTrecho(maiorLacuna())}</div>`}
       <div class="bloco vivo"><h4><span class="pulso"></span>Lúmens recentes</h4><div id="feed"></div></div>
     </div>
     <div class="titulo"><h2>Outros feixes abertos</h2><span>${E.ritmo.feixes_semana} por semana te leva até Plena em ~${E.ritmo.meses} meses</span></div>
@@ -227,7 +252,7 @@ function telaHoje() {
 function feed() {
   const el = $('#feed');
   if (!el) return;
-  const fontes = { feixe: 'feixe conquistado', 'passivo-prompt': 'você dirigiu no prompt', 'passivo-refletida': 'o agente aplicou', 'passivo-conversao': 'você explicou o porquê' };
+  const fontes = FONTES;
   el.innerHTML = (E.lumens || []).slice(0, 7).map((l) => `<div class="feed-lm"><span class="lm ${l.luz === 'refletida' ? 'refl' : ''}">+${l.lm}</span>
       <span>${curto(l.skill)}<br><small>${esc(fontes[l.fonte] || l.fonte)} · luz ${l.luz === 'refletida' ? 'refletida' : 'própria'}</small></span><small>${esc(l.quando.slice(11, 16))}</small></div>`).join('')
     || '<div class="vazio">Conquiste feixes ou trabalhe no seu repositório: a Luzia reconhece o que você aplica e os lúmens aparecem aqui.</div>';
@@ -280,7 +305,7 @@ function telaPropria() {
         <div class="dims">${dims}</div><div class="acoes">${e.acoes.map(feixe).filter(Boolean).map(cartaoFeixe).join('')}</div></div></div>`;
   }).join('');
   $('#propria').innerHTML = `
-    <div class="titulo"><h2>Luz própria nas suas entregas</h2><span>laranja: o que é seu · lilás: o que ainda é do agente</span></div>
+    <div class="titulo"><h2>Propriedade das suas entregas</h2><span>laranja: o que é seu · lilás: o que ainda é do agente · P1 é geral, vale para todas</span></div>
     <details class="medida bloco"><summary>${ic('info')}Como isso é medido</summary><ul>${E.como_e_medido.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></details>
     ${entregas || '<div class="bloco vazio">Rode /luzia:feedback-progress para a Luzia ler suas entregas recentes.</div>'}`;
 }
@@ -335,6 +360,10 @@ async function carregar() {
     return;
   }
   $('#jornada').innerHTML = '';
+  render(tela);
+}
+
+function render(tela = document.querySelector('.tela.ativa')?.id || 'hoje') {
   cabecalho(); telaHoje(); telaRota(); telaFeixes(); telaPropria(); telaAjustes(); feed();
   irPara(TELAS.some(([id]) => id === tela) ? tela : 'hoje');
 }
@@ -346,9 +375,17 @@ function irPara(tela) {
 
 // ------------------------------------------------------------------ eventos
 document.addEventListener('click', async (ev) => {
-  const t = ev.target.closest('[data-provedor],#m-salvar,#m-testar,[data-subir],[data-tela],[data-ir],[data-feixe],[data-skill],[data-enviar],[data-copiar],[data-descartar],[data-restaurar],[data-fechar],[data-modo],[data-agente],[data-filtro],#salvar-niveis');
+  const t = ev.target.closest('[data-trecho],[data-provedor],#m-salvar,#m-testar,[data-subir],[data-tela],[data-ir],[data-feixe],[data-skill],[data-enviar],[data-copiar],[data-descartar],[data-restaurar],[data-fechar],[data-modo],[data-agente],[data-filtro],#salvar-niveis');
   if (!t) return;
   const ds = t.dataset;
+  if (ds.trecho) {
+    ev.stopPropagation(); t.disabled = true;
+    toast(`Acendendo feixes de ${ds.trecho.split('(')[0].trim()}… o modelo leva uns 10 s`);
+    const r = await api('/api/trecho', { skill: ds.trecho });
+    toast(r.erro ? `Não acendeu: ${r.erro}` : `${r.feixes.length} feixes novos de ${ds.trecho.split('(')[0].trim()}`, r.erro ? '' : 'celebra');
+    await carregar(); if (!$('#gaveta').hidden && !r.erro) abrirSkill(r.skill);
+    return;
+  }
   if (ds.provedor) { provEscolhido = ds.provedor; telaAjustes(); return; }
   if (t.id === 'm-salvar') {
     const sel = $('#m-select').value;
@@ -406,5 +443,12 @@ carregar();
 setInterval(async () => {
   if (!$('#gaveta').hidden) return;
   const novo = await api('/api/estado');
-  if (!novo.erro && !novo.vazio) { E = novo; feed(); }
-}, 5000);
+  if (novo.erro || novo.vazio || !E) return;
+  const vistos = new Set((E.lumens || []).map(chaveLm));
+  const novos = (novo.lumens || []).filter((l) => !vistos.has(chaveLm(l)));
+  const mudou = assinatura(novo) !== assinatura(E);
+  E = novo;
+  const editando = document.activeElement && ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName);
+  if (mudou && !editando) render(); else feed();
+  celebrar(novos);
+}, 4000);

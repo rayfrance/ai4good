@@ -11,6 +11,7 @@ Todo o código produzido durante a disciplina:
 - **`src/`** — Módulos Python reutilizáveis (funções, classes, utilitários)
 - **`scripts/`** — Scripts standalone para execução direta (pré-processamento, avaliação)
 - **`data/`** — Dados de entrada (apenas exemplos pequenos; datasets grandes ficam fora do git)
+- **`luzia/`** — plugin Luzia (líder técnica de carreira dentro do agente); veja `luzia/CONTEXT.md`
 
 ## Convenções
 

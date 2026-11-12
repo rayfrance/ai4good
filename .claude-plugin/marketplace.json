@@ -1,0 +1,14 @@
+{
+  "name": "ai4good",
+  "owner": {
+    "name": "AI4Good · UFRPE"
+  },
+  "description": "Plugins do projeto AI4Good (UFRPE).",
+  "plugins": [
+    {
+      "name": "luzia",
+      "source": "./code/luzia",
+      "description": "Líder técnica de carreira dentro do agente (feixes, lúmens, degraus e propriedade das entregas)."
+    }
+  ]
+}

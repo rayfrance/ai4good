@@ -90,7 +90,7 @@ def estado() -> dict:
     lm_recentes = list(reversed(jogo.livro()))[:12]
 
     return {
-        'perfil': {'onde': plan.get('onde_esta', {}).get('resumo', ''),
+        'perfil': {'onde': plan.get('onde_esta', {}).get('resumo', ''), 'rotulos': list(pipeline.rotulos(state)),
                    'meta': plan.get('aonde_quer_chegar', {}).get('resumo', ''),
                    'lacuna': plan.get('aonde_quer_chegar', {}).get('lacuna_principal', ''),
                    'diagnostico': diag},
@@ -261,6 +261,12 @@ class Handler(BaseHTTPRequestHandler):
             plan = pipeline.load_state().get('plano', {})
             res = jogo.subir(jogo.skill_de(str(dados.get('skill', '')), plan), plan)
             return self._json({k: v for k, v in res.items() if k != 'rota'}, 400 if res.get('erro') else 200)
+        if path == '/api/trecho':  # acende 3 feixes novos para a skill (uma chamada ao modelo, ~10 s)
+            from luzia import cli
+            res = cli.gerar_trecho(str(dados.get('skill', ''))[:120], 'painel-trecho')
+            if res.get('erro'):
+                return self._json({'erro': res['erro']}, 400)
+            return self._json({'ok': True, 'skill': res['skill'], 'feixes': [f['id'] for f in res['feixes']]})
         if path == '/api/iniciar':  # "Copiar prompt": a pessoa leva o feixe para um agente por conta própria
             a = acoes.find(pipeline.load_state().get('plano', {}), str(dados.get('id', '')))
             if not a or not jogo.iniciar(a['id'], 'prompt copiado do painel'):

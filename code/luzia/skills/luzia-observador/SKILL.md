@@ -1,21 +1,15 @@
 ---
 name: luzia-observador
-description: Observador passivo da Luzia no Claude Code. Um hook PostToolUse (code/luzia/observer.py, registrado em ~/.claude/settings.json) roda a cada edição de arquivo ou git commit, compara a atividade com as lacunas do plano de carreira e intervém em uma linha ou só registra, conforme o modo.
+description: Como responder aos avisos automáticos da Luzia ([Luzia · luz refletida], [Luzia · luz própria], [Luzia · fila], [Luzia · início]) que os hooks do plugin colocam no contexto do Claude Code.
 ---
 
 # Luzia · observador de sessão
 
-**Como funciona (real, no Claude Code):**
-- O hook `PostToolUse` (matcher `Edit|Write|MultiEdit|Bash`) roda `code/luzia/observer.py` localmente, sem chamar o modelo.
-- Ele só age nos repositórios listados em `code/luzia/private/observer.json` (`autorizados`).
-- Compara o nome do arquivo e o trecho editado com as `palavras_chave` das skills que ainda têm lacuna (autoavaliação < alvo) no plano salvo.
-- Grava em `private/sessao.jsonl` só o evento mascarado (horário, skill, extensão, ferramenta). Nunca grava caminho nem código.
+Os hooks do plugin rodam `observer.py` localmente, sem chamar modelo, só nos repositórios autorizados (`private/observer.json`). Guardam só o evento mascarado (horário, skill, extensão), nunca caminho, código ou texto de prompt.
 
-**Modos** (`python -m luzia.cli modo <modo>` ou o seletor do painel):
-- `ativo`: na 1ª vez que uma skill aparece na sessão, a Luzia avisa em uma linha no chat (`systemMessage` + `additionalContext`).
-- `passivo`: só registra; os eventos aparecem no feed "Ao vivo" do painel.
-- `sob_demanda`: não observa; a Luzia só responde aos comandos `/luzia:*`.
+- **[Luzia · luz refletida]** (depois de uma edição ou commit): o agente aplicou um conceito de uma skill com lacuna (+10 lm de luz refletida). Termine a tarefa e mostre o cartão de 3 linhas pedido no aviso; ofereça "Responder agora" e "Guardar para depois". A resposta da pessoa, avaliada pela rubrica, converte em luz própria (até +30 lm, uma vez por cartão).
+- **[Luzia · luz própria]**: a pessoa dirigiu o conceito no prompt (+20 lm). Uma linha no fim, só isso.
+- **[Luzia · fila]**: a pessoa mandou um feixe do painel. Responda ao que ela pediu e, no fim, ofereça "Abrir em sessão nova", "Fazer aqui" e "Depois".
+- **[Luzia · início]**: há algo a retomar (feixe em andamento, degrau pronto, fila). Uma linha no fim da primeira resposta, sugerindo `/luzia:hoje`.
 
-**Quando você (Claude) receber o contexto `[Luzia · observador]`:** termine a resposta com uma única linha começando com "✨ Luzia:", ligando o conceito à mudança atual, e ofereça `/luzia:feedback-skills-opportunities`. Não interrompa a tarefa nem mostre código da empresa.
-
-**Limite:** isto vale para o Claude Code. Codex, Cursor e Antigravity ainda não têm o observador.
+Modos (painel > Ajustes, ou `cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli modo <modo>`): `ativo` (cartões no chat), `passivo` (só soma lúmens), `sob_demanda` (não observa). Limites: um reconhecimento por skill por sessão e 40 lm passivos por skill por dia. Nunca interrompa a tarefa nem cite nomes da empresa, de clientes ou de colegas.

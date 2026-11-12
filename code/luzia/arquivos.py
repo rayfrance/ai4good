@@ -16,8 +16,15 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-PRIVATE = Path(__file__).resolve().parent / 'private'
+HERE = Path(__file__).resolve().parent
+PRIVATE = HERE / 'private'
 ERROS = PRIVATE / 'erros.log'
+# Estado vivo da carreira (plano, entregas, trechos): privado, muda a cada chamada.
+ESTADO = PRIVATE / 'career_state.json'
+# Foto congelada do seminário sem2 (versionada); só serve para migrar quem ainda não tem o estado privado.
+ESTADO_LEGADO = HERE.parents[1] / 'outputs' / 'sem2' / 'career_state.json'
+# Como qualquer agente chama a CLI da Luzia, a partir de onde ela está instalada (sem caminho fixo).
+CLI = f'cd "{HERE.parent.as_posix()}" && python -m luzia.cli'
 
 
 def registrar_erro(onde: str, erro: BaseException | str) -> None:
@@ -83,3 +90,11 @@ def gravar_texto(path: Path, texto: str) -> None:
 
 def gravar_json(path: Path, dados, indent: int | None = 2) -> None:
     gravar_texto(path, json.dumps(dados, ensure_ascii=False, indent=indent))
+
+
+def ler_estado() -> dict:
+    """Estado vivo da carreira. Na primeira vez, copia a foto do sem2 para a pasta privada."""
+    if not ESTADO.exists() and ESTADO_LEGADO.exists():
+        PRIVATE.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ESTADO_LEGADO, ESTADO)
+    return ler_json(ESTADO, {})

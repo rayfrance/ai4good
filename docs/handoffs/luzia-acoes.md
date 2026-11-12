@@ -13,6 +13,14 @@
 - **Limites:** observador automático só no Claude Code; SDKs `anthropic`/`openai` não instalados (instalar só se a pessoa escolher esses provedores).
 - **Pendente:** a Rayane declarar o nível em Ajustes (a rota parte dele); nova triagem e medições na versão commitada para o sem3; teste do ciclo num agente diferente do Claude Code; polimento com plugin de design, se instalado.
 
+## Lotes 2 e 3 · 12/11/2026 (sem commit)
+- **Botões em toda saída:** a CLI termina com `LUZIA_CLI`/`LUZIA_PERGUNTA`/`LUZIA_BOTOES`; nenhum comando cru na conversa. Novo `/luzia:hoje` (ponto de partida). Avisos de degrau, revisita, descarte e subida viram botões.
+- **Próximo trecho:** `cli trecho <skill>` / botão no painel gera 3 feixes da skill (`planner.TRECHO_SCHEMA`), salvos em `plano.trechos`; oferecido depois de subir e quando a skill fica sem feixe aberto.
+- **Plugin:** `code/luzia/.claude-plugin/plugin.json`, `hooks/hooks.json` (SessionStart, UserPromptSubmit, PostToolUse) e `.claude-plugin/marketplace.json` na raiz; `claude plugin validate` passa. Comandos com `${CLAUDE_PLUGIN_ROOT}`; `instalar.py` para o modo manual (atualizou `~/.claude/commands/luzia` e criou `~/.claude/skills/luzia-*`). Cópias em `.claude/` do repositório removidas (fonte única em `code/luzia`).
+- **Linha de status** (`statusline.py`) e hook **SessionStart** prontos; no modo manual atual ainda **não ligados** (dependem de `python -m luzia.instalar --hooks --statusline`, que mexe no `settings.json`, com backup).
+- **Coesão:** estado vivo em `private/career_state.json` (migrado; `outputs/sem2/career_state.json` voltou à foto do seminário); "Propriedade" (P1–P4, aba Entregas) separada de "luz própria" (parcela dos lúmens); P1 marcado como geral; rótulos da rota vindos do plano; CLI sem emoji; `code/luzia/CONTEXT.md`.
+- **Verificado:** 17 testes novos + 22 do lote 1 em cópias dos dados e HOME falso; plugin e marketplace validados; painel no navegador; linha de status e SessionStart com eventos simulados.
+
 ## Revisão completa · 12/11/2026
 **Lote 1 feito (itens 1 a 4), sem commit:** `arquivos.py` (gravação atômica; JSON corrompido vira cópia `.corrompido-*` + `private/erros.log`, sem sobrescrever às cegas); catálogo só regravado quando muda; revisita mantém `conquistado` e paga só a diferença, uma vez; `registrar` exige feixe iniciado (o "Copiar prompt" do painel agora inicia); nota 0–1 mantém o feixe aberto; conversão uma vez por cartão (`private/cartoes.json`, 24 h); degrau exige 1 feixe conquistado; servidor barra `Host`/`Origin` de fora, exige JSON e limita o corpo a 64 KB. Verificado: 22 testes numa cópia dos dados, sondas de origem/Host (403/415/413) e painel no navegador. Regras novas em `docs/luzia-ux.md`.
 0. **Corrigido, sem commit:** anel da Luz própria (só a % dentro, legenda sua/do agente embaixo, restante em lilás), barras P3/P4 sem base em lilás, campo de modelo como `<select>` com "outro modelo…".

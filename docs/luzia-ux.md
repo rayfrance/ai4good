@@ -5,14 +5,18 @@ Decidido com a Rayane em 12/11/2026 (regras de evidência reforçadas na revisã
 ## Vocabulário (só três palavras temáticas)
 - **Feixe**: uma ação curta (5 a 30 min) apontada para uma lacuna.
 - **Lúmen (lm)**: o que você ganha com evidência de domínio.
-- **Rota**: o caminho de Júnior 3 até Plena, feito de **degraus**.
-- **Luz própria**: o quanto de uma entrega (ou de uma skill) é seu, e não do agente.
+- **Rota**: o caminho do seu nível atual até a meta (hoje, Júnior 3 até Plena), feito de **degraus**.
+- **Luz própria**: a parcela dos seus lúmens que veio de você (e não do agente). O contrário é **luz refletida**.
+- **Propriedade** (fora do jogo, nas Entregas): quanto de uma entrega é seu, medido por P1–P4 com a base de cada nota.
 
 ## Progresso sem calendário
 - Cada skill tem nível atual (declarado por você) e meta. Cada nível a subir é um **degrau**; a Rota é a soma dos degraus até a meta.
 - Um degrau fica **pronto** quando a skill junta **150 lm** desde o último degrau, com pelo menos **40% de luz própria** e **ao menos 1 feixe conquistado** (evidência avaliada pela rubrica; só lúmens passivos não sobem degrau). A Luzia avisa; **você confirma** a subida (regra de ouro: o nível nunca muda sozinho).
 - O **prazo** que você declara só calibra o ritmo sugerido (quantos feixes por semana, dificuldade). Não trava nada nem cria datas.
-- A cada terço da Rota, a Luzia gera um **dossiê de evidências** (local) para levar ao líder ou ao PDI. A cada degrau, o próximo trecho de feixes se acende.
+- A cada terço da Rota, a Luzia gera um **dossiê de evidências** (local) para levar ao líder ou ao PDI. A cada degrau, ou quando uma skill fica sem feixe aberto, a Luzia oferece **acender o próximo trecho**: 3 feixes novos daquela skill para o nível seguinte.
+
+## Sempre uma ação
+Toda saída da Luzia termina em botões (no Claude Code, as opções do próprio chat): continuar, subir um degrau pronto, revisitar, acender um trecho, fazer o próximo feixe. `/luzia:hoje` é o ponto de partida. O painel acompanha ao vivo e comemora cada lúmen novo; a linha de status mostra a skill mais perto do próximo degrau.
 
 ## Lúmens
 **Ativos (feixes)**: valor por regra visível, e o ganho depende da sua explicação.

@@ -82,8 +82,8 @@ REGRAS_ACOES = """Regras das ações:
 
 TRIAGE_SCHEMA = f"""Devolva exatamente este JSON:
 {{
-  "onde_esta": {{"resumo": str}},
-  "aonde_quer_chegar": {{"resumo": str, "lacuna_principal": str}},
+  "onde_esta": {{"resumo": str, "nivel_curto": str}},
+  "aonde_quer_chegar": {{"resumo": str, "nivel_curto": str, "lacuna_principal": str}},
   "diagnostico_fontes": {{"conflito_curriculo_vs_realidade": str, "padrao_uso_ia_observado": str}},
   "p1_direcao_prompt": {{"nota": int|null, "base": str}},
   "skills": [
@@ -112,7 +112,7 @@ TRIAGE_SCHEMA = f"""Devolva exatamente este JSON:
 Quantidades: 6 skills ({SKILLS_OBRIGATORIAS}); em cada skill, 8 a 12 palavras_chave em inglês E em português que
 aparecem em nomes de arquivos, código ou prompts quando a skill está em jogo (ex.: DDD -> "Domain", "Aggregate",
 "ValueObject", "agregado", "objeto de valor", "subdomínio");
-"autoavaliacao" copia a autoavaliação recebida (ou null).
+"autoavaliacao" copia a autoavaliação recebida (ou null). "nivel_curto": 1 a 3 palavras (ex.: "Júnior 3", "Plena").
 "p1_direcao_prompt": nota 0-100 de quanto os prompts recentes da pessoa no projeto de trabalho dão direção,
 restrições e critérios ao agente (vs. só delegar); "base" cita o padrão observado; null se não houver prompts.
 Plano com exatamente 3 trechos, por PROGRESSO e não por datas: "trecho 1" (próximos degraus das maiores
@@ -129,6 +129,17 @@ PROGRESS_SCHEMA = f"""Devolva exatamente este JSON:
 }}
 4 tarefas_recentes escolhidas entre os commits recebidos; "commit" copia EXATAMENTE a mensagem do commit;
 2 ações por tarefa. Considere as evidências já registradas para não repetir o que a pessoa já demonstrou.
+{REGRAS_ACOES}"""
+
+TRECHO_SCHEMA = f"""Devolva exatamente este JSON:
+{{
+  "acoes": [
+    {ACAO_SCHEMA}
+  ]
+}}
+3 ações NOVAS só para a skill recebida em "skill", do nível atual para o próximo ("para"): "skill" de cada ação copia
+esse nome. Nada parecido com os feixes já existentes ou descartados recebidos. Pelo menos uma "explicar" ou "praticar"
+no repositório de trabalho; dificuldade compatível com o próximo nível.
 {REGRAS_ACOES}"""
 
 OPPORTUNITIES_SCHEMA = f"""Devolva exatamente este JSON:

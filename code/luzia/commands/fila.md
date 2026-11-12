@@ -1,12 +1,13 @@
 ---
-description: Luzia · ações que você mandou do painel para o seu agente
+description: "Luzia · feixes que você mandou do painel para o seu agente"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
-
-Você está agindo como a **Luzia**. Rode:
+Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
 
 ```bash
-cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli fila
+cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli fila
 ```
 
-Mostre a saída como veio. Se houver `LUZIA_ACOES=[...]`, não mostre a linha: pergunte com AskUserQuestion qual ação fazer (mais "Agora não") e, para a escolhida, siga as instruções de `/luzia:fazer <id>` (sessão nova ou aqui).
+Mostre a saída como veio.
+
+**Botões.** Se a saída terminar com `LUZIA_BOTOES`, não mostre as linhas `LUZIA_*`. Use AskUserQuestion com a pergunta de `LUZIA_PERGUNTA`, uma opção por botão (label = `rotulo`, description = `descricao`) e mais "Agora não". Na escolha: se `rodar` começar com `fazer `, siga o comando /luzia:fazer com esse id; senão rode `LUZIA_CLI rodar` (o prefixo `LUZIA_CLI` da saída + o `rodar` do botão) e trate a nova saída do mesmo jeito.

@@ -134,6 +134,10 @@ def derivadas(plan: dict) -> list[dict]:
         if a:
             out.append({**a, 'origem': 'sessão', 'gatilho': op.get('gatilho', ''),
                         'id': aid('sessao', a.get('titulo', ''))})
+    for t in plan.get('trechos', []):  # feixes que acendem quando a skill sobe de degrau ou fica sem feixe aberto
+        for a in t.get('acoes', []):
+            out.append({**a, 'skill': t.get('skill') or a.get('skill', ''), 'dimensao': None, 'origem': 'trecho',
+                        'horizonte': f"nível {t.get('para', '')}", 'id': aid('trecho', t.get('skill', '') + a.get('titulo', ''))})
     out.extend(_read_json(SALVAS, []))
     return out
 
@@ -148,13 +152,12 @@ def deep_link(acao_id: str, cwd: str) -> str:
     return f'claude-cli://open?cwd={quote(cwd, safe="")}&q={quote(f"/luzia:fazer {acao_id}", safe="")}'
 
 
-CODE_DIR = Path(__file__).resolve().parents[1]
 RUBRICA_TXT = ('0 = não explicou · 1 = descreveu o que o código faz · 2 = explicou o porquê da decisão · '
                '3 = comparou com uma alternativa · 4 = ligou ao conceito e aos trade-offs')
 
 
 def comando_registrar(acao_id: str) -> str:
-    return (f'cd "{CODE_DIR.as_posix()}" && python -m luzia.cli registrar {acao_id} '
+    return (f'{arquivos.CLI} registrar {acao_id} '
             '--nota <0-4> --resumo "<1 linha do que a pessoa demonstrou, sem nomes da empresa>"')
 
 

@@ -21,7 +21,7 @@ from .privacy import Redactor
 ROOT = Path(__file__).resolve().parents[2]
 PRIVATE = Path(__file__).resolve().parent / 'private'
 RUNS = ROOT / 'outputs' / 'sem2' / 'runs.jsonl'
-STATE_FILE = ROOT / 'outputs' / 'sem2' / 'career_state.json'
+STATE_FILE = arquivos.ESTADO  # privado (fora do git); outputs/sem2 guarda só a foto do seminário
 AUTOAVAL = PRIVATE / 'autoavaliacao.json'
 OBSERVER_CFG = PRIVATE / 'observer.json'
 SESSION_LOG = PRIVATE / 'sessao.jsonl'
@@ -32,7 +32,22 @@ def read_json(path: Path, default):
 
 
 def load_state() -> dict:
-    return read_json(STATE_FILE, {})
+    return arquivos.ler_estado()
+
+
+def rotulos(state: dict) -> tuple[str, str]:
+    """Nomes curtos de onde a pessoa está e aonde quer chegar (ex.: 'Júnior 3' → 'Plena')."""
+    import re
+    plan = state.get('plano', {})
+    tri = (state.get('payload_anonimizado') or {}).get('triagem', {})
+    out = []
+    for campo, declarado, padrao in (('onde_esta', 'nivel_atual_declarado', 'hoje'), ('aonde_quer_chegar', 'objetivo_declarado', 'meta')):
+        curto = (plan.get(campo) or {}).get('nivel_curto')
+        if not curto:
+            m = re.search(r'(J[úu]nior|Plen[oa]|S[êe]nior|Especialista|Tech Lead)(?:\s+n[íi]vel)?\s*(\d)?', tri.get(declarado, ''), re.I)
+            curto = ' '.join(x for x in m.groups() if x).strip() if m else padrao
+        out.append(curto[:1].upper() + curto[1:])
+    return out[0], out[1]
 
 
 def session_events(limit: int = 30) -> list[dict]:

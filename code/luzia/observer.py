@@ -9,6 +9,7 @@ Roda localmente, sem chamar o modelo, só nos repositórios autorizados (`privat
   Também oferece os feixes que você mandou do painel (fila).
 - Um reconhecimento por skill por sessão; no máximo 40 lm passivos por skill por dia (regras em docs/luzia-ux.md).
 - Grava só o evento mascarado (horário, skill, extensão, origem). Nunca o caminho, o código ou o texto do prompt.
+- SessionStart: se há algo a retomar (feixe em andamento, degrau pronto, fila), uma linha no fim da 1ª resposta.
 - Modos: `ativo` (cartão no chat), `passivo` (só registra e credita), `sob_demanda` (não observa).
 """
 
@@ -27,11 +28,10 @@ sys.path.insert(0, str(HERE.parent))
 from luzia import arquivos, jogo  # noqa: E402
 
 PRIVATE = HERE / 'private'
-STATE_FILE = HERE.parents[1] / 'outputs' / 'sem2' / 'career_state.json'
 CFG = PRIVATE / 'observer.json'
 LOG = PRIVATE / 'sessao.jsonl'
 SEEN = PRIVATE / 'sessao_vistos.json'
-CLI = 'cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli'
+CLI = arquivos.CLI
 
 PALAVRAS_PADRAO = {
     'Domain-Driven Design (DDD)': ['Domain', 'Aggregate', 'ValueObject', 'Value Object', 'Entity', 'Repository', 'BoundedContext',
@@ -50,7 +50,7 @@ def read_json(path: Path, default):
 
 
 def plano() -> dict:
-    return read_json(STATE_FILE, {}).get('plano', {})
+    return arquivos.ler_estado().get('plano', {})
 
 
 def lacunas(plan: dict) -> dict[str, dict]:
@@ -117,7 +117,7 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
             registrar(sid, skill, 'prompt', 'prompt', modo, lm, 'propria', modo == 'ativo' and lm > 0)
             if lm and modo == 'ativo':
                 partes.append(f'[Luzia · luz própria] A pessoa DIRIGIU "{skill}" neste pedido (+{lm} lm de luz própria). '
-                              f'Responda normalmente e, no FIM, em UMA linha: "✨ Luzia · {skill}: você dirigiu isto, +{lm} lm de luz própria."')
+                              f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · {skill}: você dirigiu isto, +{lm} lm de luz própria."')
     fila = read_json(PRIVATE / 'fila.json', [])
     pend = [f for f in fila if sid not in f.get('oferecida_em', [])]
     if pend:
@@ -126,7 +126,7 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
         arquivos.gravar_json(PRIVATE / 'fila.json', fila)
         partes.append(
             f'[Luzia · fila] A pessoa enviou do painel o feixe #{item["id"]} ("{item.get("titulo", "")}"). Responda primeiro ao '
-            'que ela pediu. No FIM, em uma linha começando com "✨ Luzia:", lembre o feixe e use AskUserQuestion com '
+            'que ela pediu. No FIM, em uma linha começando com "✦ Luzia:", lembre o feixe e use AskUserQuestion com '
             '"Abrir em sessão nova", "Fazer aqui" e "Depois". Sessão nova: rode '
             f'`{CLI} prompt {item["id"]} --onde "sessão nova"` e abra uma sessão/agente novo com esse texto pela ferramenta do seu '
             f'harness (se não houver, faça aqui). Fazer aqui: rode `{CLI} fazer {item["id"]} --onde aqui` e siga o roteiro.'
@@ -170,7 +170,7 @@ def ao_usar_ferramenta(event: dict, cfg: dict) -> None:
         f'[Luzia · luz refletida] O código que você (agente) acabou de escrever aplica "{skill}" ({nivel}). Isso rendeu '
         '+10 lm de luz REFLETIDA para a pessoa: quem aplicou foi o agente. Termine a tarefa normalmente. No FIM da resposta, '
         'mostre este cartão em no máximo 3 linhas:\n'
-        f'✨ Luzia · {skill} reconhecido nesta mudança · +10 lm (luz refletida)\n'
+        f'✦ Luzia · {skill} reconhecido nesta mudança · +10 lm (luz refletida)\n'
         '<1 linha: onde o conceito aparece concretamente nesta mudança>\n'
         '▸ Em 1 frase: <pergunta concreta de líder técnico sobre o porquê desta decisão> · vira luz própria: até +30 lm\n'
         'Depois, use AskUserQuestion com "Responder agora" e "Guardar para depois". Responder: espere a frase, avalie pela '
@@ -179,6 +179,29 @@ def ao_usar_ferramenta(event: dict, cfg: dict) -> None:
         f'--nota <0-4> --resumo "<1 linha, sem nomes da empresa>". Guardar: rode {CLI} cartao --skill "{skill}" '
         '--pergunta "<a pergunta>". Nunca cite nomes da empresa, clientes ou colegas.'
     ))
+
+
+def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
+    """SessionStart: lembra o que dá para retomar, sem interromper."""
+    if cfg.get('modo', 'ativo') == 'sob_demanda':
+        return
+    plan = plano()
+    if not plan:
+        return
+    cat = read_json(jogo.FEIXES, {})
+    andamento = [f for f in cat.values() if f.get('estado') == 'em_andamento']
+    prontas = [s['nome'].split('(')[0].strip() for s in jogo.rota(plan)['skills'] if s['pronto'] and not s['na_meta']]
+    fila = read_json(PRIVATE / 'fila.json', [])
+    partes = []
+    if prontas:
+        partes.append(f"{', '.join(prontas)} pronta para subir de degrau")
+    if andamento:
+        partes.append(f'feixe em andamento: "{andamento[0].get("titulo", "")}"')
+    if fila:
+        partes.append(f'{len(fila)} feixe(s) na fila do painel')
+    if partes:
+        saida('SessionStart', f"[Luzia · início] {'; '.join(partes)}. Não interrompa o que a pessoa pedir. No FIM da sua "
+                              'primeira resposta, em UMA linha: "✦ Luzia: <resumo curto disso> · /luzia:hoje para continuar."')
 
 
 def main() -> None:
@@ -192,6 +215,8 @@ def main() -> None:
     try:
         if event.get('hook_event_name') == 'UserPromptSubmit':
             ao_enviar_prompt(event, cfg)
+        elif event.get('hook_event_name') == 'SessionStart':
+            ao_iniciar_sessao(event, cfg)
         else:
             ao_usar_ferramenta(event, cfg)
     except Exception as e:  # o observador nunca deve atrapalhar a sessão, mas o erro fica registrado

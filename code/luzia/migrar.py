@@ -5,8 +5,8 @@ executa comandos na conexão recebida (não abre, não confirma, não desfaz). C
 abre a própria transação exclusiva. Qualquer erro desfaz tudo: nenhuma linha migrada e nenhuma marca.
 
 Antes de ler, os originais são copiados para `private/migracao-AAAAMMDD/`; nada é apagado nem alterado.
-Rodar de novo não duplica: a marca `meta('migracao')` (gravada aqui) ou `meta('migrado_em')` (de `banco.garantir`)
-encerra a função sem tocar no banco.
+Rodar de novo não duplica: a marca `meta('migracao')`, gravada aqui no fim, encerra a função sem tocar no banco
+(`banco.garantir` confere `meta('migrado_em')` por conta própria).
 
 De → para (formatos antigos de jogo.py, acoes.py, observer.py e pipeline.py):
 - `career_state.json` → `perfil` ('plano' inteiro, 'rotulos', 'estado_legado' com o resto do arquivo),
@@ -29,7 +29,6 @@ import json
 import re
 import shutil
 import sqlite3
-import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -71,16 +70,25 @@ def _ler_json(path: Path, padrao, avisos: list[str]):
 
 
 def _ler_jsonl(path: Path, avisos: list[str]) -> list[dict]:
-    """Como `jogo.livro` e `acoes.eventos`: linha que não é um objeto JSON fica de fora (e é contada)."""
+    """Como `jogo.livro` e `acoes.eventos`: linha que não é um objeto JSON fica de fora (e é contada).
+
+    Lê bytes e decodifica linha a linha: uma gravação interrompida no meio de um caractere acentuado
+    (`ensure_ascii=False`) estraga só aquela linha, nunca o arquivo inteiro.
+    """
     if not path.exists():
         return []
+    try:
+        bruto = path.read_bytes()
+    except OSError as e:
+        avisos.append(f'{path.name}: ilegível ({type(e).__name__}); ficou só no backup')
+        return []
     out, ruins = [], 0
-    for linha in path.read_text(encoding='utf-8').splitlines():
+    for linha in bruto.splitlines():
         if not linha.strip():
             continue
         try:
-            rec = json.loads(linha)
-        except ValueError:
+            rec = json.loads(linha.decode('utf-8'))
+        except ValueError:  # inclui UnicodeDecodeError
             ruins += 1
             continue
         if isinstance(rec, dict):
@@ -100,11 +108,10 @@ def _int(valor) -> int | None:
 
 
 def _luz(valor, avisos: list[str]) -> str:
-    """'propria'/'própria' → 'propria'; 'refletida' → 'refletida'; o resto vira 'refletida' (não infla luz própria)."""
-    s = unicodedata.normalize('NFKD', str(valor or '')).encode('ascii', 'ignore').decode().strip().lower()
-    if s == 'propria':
+    """Regra de `jogo.rota`: só 'propria' conta como luz própria; o resto é refletida (avisando se não era 'refletida')."""
+    if valor == 'propria':
         return 'propria'
-    if s != 'refletida':
+    if valor != 'refletida':
         avisos.append(f'lúmen com luz desconhecida {valor!r} contado como refletida')
     return 'refletida'
 
@@ -306,11 +313,13 @@ def _prismas(con, d: dict, cont: dict) -> None:
                                             'foto_json': _json({'prismas': foto})}, cont, chave=True)
 
 
-def _evento(avanco_id: str, h: dict, omitir: tuple = ()) -> dict:
-    extra = {k: v for k, v in h.items() if k not in COLUNAS_EVENTO and k not in omitir}
+def _evento(avanco_id: str, h: dict, fonte: str, omitir: tuple = ()) -> dict:
+    """`fonte` separa o histórico do feixe ('historico') das evidências P3/P4 ('evidencias'): a mesma conquista
+    aparece nos dois, e quem lê o livro não pode contá-la duas vezes."""
+    extra = {'fonte': fonte, **{k: v for k, v in h.items() if k not in COLUNAS_EVENTO and k not in omitir}}
     return {'avanco_id': avanco_id, 'quando': h.get('quando') or '', 'evento': h.get('evento') or '',
             'onde': h.get('onde'), 'nota': _int(h.get('nota')), 'resumo': h.get('resumo'), 'motivo': h.get('motivo'),
-            'extra_json': _json(extra) if extra else None}
+            'extra_json': _json(extra)}
 
 
 def _avancos(con, d: dict, cont: dict) -> None:
@@ -332,10 +341,10 @@ def _avancos(con, d: dict, cont: dict) -> None:
         }, cont, chave=True)
         for h in f.get('historico') or []:
             if isinstance(h, dict):
-                _inserir(con, 'avanco_evento', _evento(f['id'], h), cont)
+                _inserir(con, 'avanco_evento', _evento(f['id'], h, 'historico'), cont)
     for e in d['evidencias']:  # eventos P3/P4 de acoes.py; o id pode não estar no catálogo (cartão)
         if e.get('id'):
-            _inserir(con, 'avanco_evento', _evento(str(e['id']), e, omitir=('id',)), cont)
+            _inserir(con, 'avanco_evento', _evento(str(e['id']), e, 'evidencias', omitir=('id',)), cont)
 
 
 def _lumens_grava(con, d: dict, cont: dict) -> None:
@@ -365,9 +374,14 @@ def _niveis(con, d: dict, cont: dict) -> None:
             if para is None:
                 d['avisos'].append(f'subida de nível sem destino em {h.get("quando")!r} ficou só no backup')
                 continue
+            # jogo.subir sempre sobe um nível (nivel + 1): se o anterior não é para − 1, a pessoa declarou um nível
+            # no painel entre as subidas. Essa declaração (sem data) entra antes, na data do registro anterior.
+            if anterior is not None and anterior != para - 1:
+                _inserir(con, 'nivel_registro', {'prisma': nome, 'de': anterior, 'para': para - 1, 'quando': quando,
+                                                 'origem': 'declarado', 'lm': None, 'luz_propria': None}, cont)
             quando = h.get('quando') or quando
             # luz_propria: percentual 0–100, como jogo.progresso_skill sempre gravou.
-            _inserir(con, 'nivel_registro', {'prisma': nome, 'de': anterior, 'para': para, 'quando': quando,
+            _inserir(con, 'nivel_registro', {'prisma': nome, 'de': para - 1, 'para': para, 'quando': quando,
                                              'origem': 'conquistado', 'lm': _int(h.get('lm')),
                                              'luz_propria': h.get('luz_propria')}, cont)
             anterior = para
@@ -408,7 +422,8 @@ def _sessao(con, d: dict, cont: dict) -> None:
 
 # ------------------------------------------------------------------ entrada
 def _ja_migrado(con: sqlite3.Connection) -> bool:
-    return con.execute("SELECT 1 FROM meta WHERE chave IN ('migracao', 'migrado_em')").fetchone() is not None
+    """Só a marca desta migração conta (`banco.garantir` confere `migrado_em` por conta própria)."""
+    return con.execute("SELECT 1 FROM meta WHERE chave = 'migracao'").fetchone() is not None
 
 
 def migrar(con: sqlite3.Connection, pasta: Path | None = None) -> dict:
@@ -441,24 +456,80 @@ def _migrar(con: sqlite3.Connection, pasta: Path | None) -> dict:
 
 
 # ------------------------------------------------------------------ conferência (antes × depois)
+def _bruto_json(path: Path, padrao):
+    try:
+        dados = json.loads(path.read_bytes().decode('utf-8'))
+    except (OSError, ValueError):
+        return padrao
+    return dados if isinstance(dados, type(padrao)) else padrao
+
+
+def _bruto_jsonl(path: Path) -> list[dict]:
+    try:
+        linhas = path.read_bytes().splitlines()
+    except OSError:
+        return []
+    out = []
+    for linha in linhas:
+        try:
+            rec = json.loads(linha.decode('utf-8'))
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
 def totais_json(pasta: Path) -> dict:
-    """Totais lidos dos arquivos antigos, pelas regras do jogo antigo."""
-    d = _carregar(Path(pasta))
+    """Totais lidos direto dos arquivos antigos, pelas regras do jogo antigo.
+
+    Não usa os leitores nem as normalizações da migração: é a conferência independente do que ela gravou.
+    """
+    pasta = Path(pasta)
+    lumens = []
+    for r in _bruto_jsonl(pasta / 'lumens.jsonl'):  # jogo.livro + soma de jogo.rota
+        try:
+            lumens.append((int(r['lm']), r.get('luz')))
+        except (KeyError, TypeError, ValueError):
+            continue
+    cat = _bruto_json(pasta / 'feixes.json', {})
+    estados = Counter(f.get('estado') or 'sugerido' for f in cat.values() if isinstance(f, dict))
+    iniciadas, concluidas = set(), set()  # acoes.status_map → jogo.sincronizar, para as guardadas fora do catálogo
+    for e in _bruto_jsonl(pasta / 'evidencias.jsonl'):
+        if e.get('evento') == 'iniciada':
+            iniciadas.add(e.get('id'))
+        elif e.get('evento') == 'concluida':
+            concluidas.add(e.get('id'))
+    vistas = set(cat)
+    for a in _bruto_json(pasta / 'acoes_guardadas.json', []):
+        if isinstance(a, dict) and a.get('id') and a['id'] not in vistas:
+            vistas.add(a['id'])
+            estados['em_andamento' if a['id'] in iniciadas - concluidas else 'sugerido'] += 1
+    plano = _bruto_json(pasta / 'career_state.json', {}).get('plano') or {}
+    auto = _bruto_json(pasta / 'autoavaliacao.json', {})
+    niveis = {}
+    for s in plano.get('skills', []):  # jogo.niveis
+        nivel = auto.get(s['nome'])
+        if nivel is None:
+            nivel = s['autoavaliacao'] if s.get('autoavaliacao') is not None else s.get('luzia_sugere', 0)
+        niveis[s['nome']] = int(nivel or 0)
     return {
-        'lumens_total': sum(r['lm'] for r in d['lumens']),
-        'lumens_propria': sum(r['lm'] for r in d['lumens'] if r['luz'] == 'propria'),
-        'avancos_por_estado': dict(Counter(f.get('estado') or 'sugerido' for f in d['avancos'])),
-        'niveis': _niveis_legado(d['plan'], d['auto']),
+        'lumens_total': sum(lm for lm, _ in lumens),
+        'lumens_propria': sum(lm for lm, luz in lumens if luz == 'propria'),
+        'avancos_por_estado': dict(estados),
+        'niveis': niveis,
     }
 
 
 def totais_banco(con: sqlite3.Connection) -> dict:
-    """Os mesmos totais, lidos do banco."""
+    """Os mesmos totais, lidos do banco; o nível de cada prisma vem do livro (último registro por quando, id)."""
     total, propria = con.execute(
         "SELECT COALESCE(SUM(lm), 0), COALESCE(SUM(CASE WHEN luz = 'propria' THEN lm END), 0) FROM lumen").fetchone()
+    niveis = con.execute('SELECT p.nome, (SELECT r.para FROM nivel_registro r WHERE r.prisma = p.nome '
+                         'ORDER BY r.quando DESC, r.id DESC LIMIT 1) FROM prisma p')
     return {
         'lumens_total': total,
         'lumens_propria': propria,
         'avancos_por_estado': {e: n for e, n in con.execute('SELECT estado, COUNT(*) FROM avanco GROUP BY estado')},
-        'niveis': {n: v for n, v in con.execute('SELECT nome, nivel FROM prisma')},
+        'niveis': {n: v for n, v in niveis},
     }

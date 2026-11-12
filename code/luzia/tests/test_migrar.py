@@ -4,8 +4,10 @@ Os dados vêm de `tests/dados/` (sintéticos, no formato que jogo.py, acoes.py, 
 e são copiados para a pasta temporária da fixture `privado`: `code/luzia/private/` nunca é aberta.
 """
 
+import json
 import shutil
 import sqlite3
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -46,11 +48,8 @@ def test_totais_iguais(antigos):
     con = banco.conectar()
     assert migrar.totais_banco(con) == esperado
 
-    # O nível atual de cada prisma bate com o último registro do livro de níveis.
-    for nome, nivel in esperado['niveis'].items():
-        ultimo = con.execute('SELECT para FROM nivel_registro WHERE prisma = ? ORDER BY quando DESC, id DESC LIMIT 1',
-                             (nome,)).fetchone()
-        assert ultimo['para'] == nivel, nome
+    # totais_banco lê o nível do livro; a coluna prisma.nivel tem de bater com ele.
+    assert {r['nome']: r['nivel'] for r in con.execute('SELECT nome, nivel FROM prisma')} == esperado['niveis']
     # Só a subida que veio do histórico de degraus é "conquistado"; base e declaração têm a sua origem.
     regs = [tuple(r) for r in con.execute('SELECT prisma, de, para, origem FROM nivel_registro ORDER BY prisma, quando, id')]
     assert regs == [(DDD, None, 1, 'migrado'), (DDD, 1, 2, 'conquistado'), (FRONT, None, 3, 'migrado'),
@@ -60,8 +59,11 @@ def test_totais_iguais(antigos):
 
     # Eventos de evidência com id fora do catálogo (cartão) continuam no livro de eventos, com seus atributos.
     ev = con.execute("SELECT nota, extra_json FROM avanco_evento WHERE avanco_id = 'a3a8' AND evento = 'concluida'").fetchone()
-    assert ev['nota'] == 3 and '"origem": "cartao"' in ev['extra_json']
-    assert con.execute("SELECT COUNT(*) FROM avanco_evento WHERE avanco_id = '3fb7'").fetchone()[0] == 4 + 2
+    assert ev['nota'] == 3 and json.loads(ev['extra_json']) == {'fonte': 'evidencias', 'skill': DDD, 'origem': 'cartao'}
+    # A mesma conquista está no histórico do feixe e nas evidências: a fonte separa as duas (sem contar duas vezes).
+    fontes = Counter(json.loads(r[0])['fonte'] for r in
+                     con.execute("SELECT extra_json FROM avanco_evento WHERE avanco_id = '3fb7'"))
+    assert fontes == {'historico': 4, 'evidencias': 2}
     guardada = con.execute("SELECT estado, origem, prisma FROM avanco WHERE id = 'f479'").fetchone()
     assert tuple(guardada) == ('sugerido', 'lampejo', TST)
     assert con.execute("SELECT origem FROM avanco WHERE id = 'c04e'").fetchone()[0] == 'lampejo'
@@ -71,7 +73,6 @@ def test_totais_iguais(antigos):
     assert con.execute('SELECT oferecida_json FROM fila').fetchone()[0] == '["sessao03"]'
     assert con.execute('SELECT COUNT(*) FROM sessao_evento').fetchone()[0] == 4
     # O plano inteiro fica no perfil e a trajetória nasce na versão 1, da triagem.
-    import json
     plano = json.loads(con.execute("SELECT valor_json FROM perfil WHERE chave = 'plano'").fetchone()[0])
     assert plano == json.loads((antigos / 'career_state.json').read_text(encoding='utf-8'))['plano']
     assert json.loads(con.execute("SELECT valor_json FROM perfil WHERE chave = 'rotulos'").fetchone()[0]) == {
@@ -96,6 +97,8 @@ def test_idempotente(antigos, tmp_path):
     cru = sqlite3.connect(tmp_path / 'cru.db', isolation_level=None)
     for sql in banco.ESQUEMA:
         cru.execute(sql)
+    # Marcado pelo stub antigo (migrado_em sem a marca 'migracao'): a migração ainda roda quando chamada.
+    cru.execute("INSERT INTO meta (chave, valor) VALUES ('migrado_em', '2026-11-12T08:00:00')")
     primeira = migrar.migrar(cru)
     depois = _contagens(cru)
     segunda = migrar.migrar(cru)
@@ -120,10 +123,47 @@ def test_rollback(antigos, monkeypatch):
     cru.close()
     for nome in ARQUIVOS:  # os originais continuam lá, intactos
         assert (antigos / nome).read_bytes() == (DADOS / nome).read_bytes()
+    copia = antigos / f"migracao-{datetime.now():%Y%m%d}"
+    assert sorted(p.name for p in copia.iterdir()) == sorted(ARQUIVOS)  # a cópia sobrevive ao rollback
 
     monkeypatch.undo()
     con = banco.conectar()  # a próxima abertura tenta de novo e migra tudo
     assert migrar.totais_banco(con) == migrar.totais_json(antigos)
+    con.close()
+    assert sorted(p.name for p in copia.iterdir()) == sorted(ARQUIVOS)  # sem cópias repetidas na nova tentativa
+
+
+def test_linha_cortada_no_meio_de_um_acento(antigos):
+    """Gravação interrompida no meio de um caractere de 2 bytes: só aquela linha fica de fora."""
+    with (antigos / 'lumens.jsonl').open('ab') as f:
+        f.write('{"quando": "2026-11-09T10:00:00", "skill": "Gest'.encode('utf-8') + b'\xc3')
+    with (antigos / 'sessao.jsonl').open('ab') as f:
+        f.write(b'\xc3\n{"quando": "2026-11-09T10:00:00", "sessao": "sessao04"\n')
+    con = banco.conectar()
+    totais = migrar.totais_banco(con)
+    assert totais == migrar.totais_json(antigos)
+    assert (totais['lumens_total'], totais['lumens_propria']) == (201, 141)  # as 8 linhas boas
+    assert con.execute('SELECT COUNT(*) FROM sessao_evento').fetchone()[0] == 4
+    avisos = json.loads(con.execute("SELECT valor FROM meta WHERE chave = 'migracao'").fetchone()[0])['avisos']
+    assert any(a.startswith('lumens.jsonl: 2 linha') for a in avisos), avisos
+    assert any(a.startswith('sessao.jsonl: 2 linha') for a in avisos), avisos
+    con.close()
+
+
+def test_subida_depois_de_declarar(antigos):
+    """Base 1, declarou 2 no painel, depois subiu para 3: a declaração não some e a subida é 2 → 3."""
+    degraus = json.loads((antigos / 'degraus.json').read_text(encoding='utf-8'))
+    degraus['base'][FRONT] = 1
+    degraus['desde'][FRONT] = '2026-11-07T09:00:00'
+    degraus['historico'].append({'quando': '2026-11-07T09:00:00', 'skill': FRONT, 'para': 3, 'lm': 150, 'luz_propria': 50})
+    (antigos / 'degraus.json').write_text(json.dumps(degraus, ensure_ascii=False), encoding='utf-8')
+    auto = json.loads((antigos / 'autoavaliacao.json').read_text(encoding='utf-8'))
+    (antigos / 'autoavaliacao.json').write_text(json.dumps({**auto, FRONT: 3}, ensure_ascii=False), encoding='utf-8')
+    con = banco.conectar()
+    regs = [tuple(r) for r in con.execute('SELECT de, para, origem FROM nivel_registro WHERE prisma = ? '
+                                          'ORDER BY quando, id', (FRONT,))]
+    assert regs == [(None, 1, 'migrado'), (1, 2, 'declarado'), (2, 3, 'conquistado')]
+    assert migrar.totais_banco(con)['niveis'][FRONT] == 3 == migrar.totais_json(antigos)['niveis'][FRONT]
     con.close()
 
 

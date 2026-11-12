@@ -22,7 +22,6 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -86,36 +85,6 @@ def sessao_id(event: dict) -> str:
     return hashlib.sha256(event.get('session_id', '').encode()).hexdigest()[:8]
 
 
-def novas_na_sessao(sid: str, chave: str, skills: list[str]) -> list[str]:
-    """Skills que ainda não foram reconhecidas nesta sessão (uma vez por prisma por sessão e por origem).
-
-    O registro vai para `sessao_visto` com `INSERT OR IGNORE` numa transação curta (quem chega primeiro ganha). Se o
-    banco não responder, ninguém é reconhecido (falha fechada: sem registro da sessão não há como garantir a regra).
-    Linhas com mais de 7 dias são apagadas.
-    """
-    if not skills or banco.ocupado():
-        return []
-    agora = datetime.now()
-    corte = (agora - timedelta(days=7)).isoformat(timespec='seconds')
-    novas = []
-    try:
-        con = banco.conectar(espera_ms=banco.ESPERA_CURTA_MS)
-        try:
-            with banco.transacao(con):
-                con.execute('DELETE FROM sessao_visto WHERE quando < ?', (corte,))
-                for s in dict.fromkeys(skills):
-                    c = con.execute('INSERT OR IGNORE INTO sessao_visto (sessao, chave, prisma, quando) VALUES (?, ?, ?, ?)',
-                                    (sid, chave, s, agora.isoformat(timespec='seconds')))
-                    if c.rowcount == 1:
-                        novas.append(s)
-        finally:
-            con.close()
-    except Exception as e:
-        arquivos.registrar_erro('observer sessao_visto', e)
-        return []
-    return novas
-
-
 def registrar(sid: str, skill: str, ext: str, origem: str, modo: str, lm: int, luz: str, interveio: bool) -> bool:
     """Evento mascarado da sessão no banco (ou em `pendentes.jsonl` se o banco estiver ocupado)."""
     return banco.gravar_ou_pendurar('sessao_evento', {'sessao': sid, 'prisma': skill, 'extensao': ext, 'ferramenta': origem,
@@ -145,9 +114,8 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
     if modo != 'sob_demanda':
         plan = plano()
         gaps = lacunas(plan)
-        for skill in novas_na_sessao(sid, 'prompt', detectar(event.get('prompt', ''), gaps)):
-            lm = jogo.passivo(skill, 'prompt', sid)
-            registrar(sid, skill, 'prompt', 'prompt', modo, lm, 'propria', modo == 'ativo' and lm > 0)
+        for skill in detectar(event.get('prompt', ''), gaps):
+            lm = jogo.reconhecer(sid, 'prompt', skill, 'prompt', 'prompt', 'prompt', modo, modo == 'ativo')
             if lm and modo == 'ativo':
                 partes.append(f'[Luzia · luz própria] A pessoa DIRIGIU "{skill}" neste pedido (+{lm} lm de luz própria). '
                               f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · {skill}: você dirigiu isto, +{lm} lm de luz própria."')
@@ -193,16 +161,14 @@ def ao_usar_ferramenta(event: dict, cfg: dict) -> None:
     plan = plano()
     gaps = lacunas(plan)
     sid = sessao_id(event)
-    novas = novas_na_sessao(sid, 'agente', detectar(texto, gaps))
-    if not novas:
-        return
-    for i, skill in enumerate(novas):
-        lm = jogo.passivo(skill, 'refletida', sid)
-        registrar(sid, skill, ext, tool, modo, lm, 'refletida', modo == 'ativo' and i == 0)
-    if modo != 'ativo':
+    novas = []
+    for skill in detectar(texto, gaps):
+        primeira = modo == 'ativo' and not novas  # só o primeiro reconhecido abre lampejo (vira luz própria uma vez)
+        if jogo.reconhecer(sid, 'agente', skill, 'refletida', ext, tool, modo, primeira, lampejo=primeira) is not None:
+            novas.append(skill)
+    if not novas or modo != 'ativo':
         return
     skill = novas[0]
-    jogo.abrir_cartao(skill, sid)  # este cartão pode virar luz própria uma única vez
     info = gaps.get(skill, {})
     nivel = f"você {info.get('nivel')} → meta {info.get('meta')}" if info.get('nivel') is not None else 'lacuna do plano'
     saida('PostToolUse', (

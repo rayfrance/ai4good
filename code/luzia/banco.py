@@ -20,7 +20,7 @@ import sqlite3
 import time
 import traceback
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
@@ -47,9 +47,13 @@ OPERACOES = {
     'lumen': ('quando', 'prisma', 'lm', 'luz', 'fonte', 'ref'),
     'sessao_evento': ('quando', 'sessao', 'prisma', 'extensao', 'ferramenta', 'modo', 'lm', 'luz', 'interveio'),
     'lampejo': ('prisma', 'sessao', 'quando', 'estado', 'usado_em'),
+    # Um reconhecimento do observador inteiro (sessão visto + lúmen + evento + lampejo): aplicado por `_reconhecer`.
+    'reconhecimento': ('quando', 'sessao', 'chave', 'prisma', 'lm', 'luz', 'fonte', 'ref', 'teto', 'extensao',
+                       'ferramenta', 'modo', 'interveio', 'lampejo'),
 }
 # Colunas NOT NULL sem padrão (`quando` vem da hora do evento quando falta) e valores aceitos pelos CHECK do esquema.
-OBRIGATORIAS = {'lumen': ('prisma', 'lm', 'luz', 'fonte'), 'sessao_evento': (), 'lampejo': ('prisma',)}
+OBRIGATORIAS = {'lumen': ('prisma', 'lm', 'luz', 'fonte'), 'sessao_evento': (), 'lampejo': ('prisma',),
+               'reconhecimento': ('sessao', 'chave', 'prisma', 'lm', 'luz', 'fonte')}
 VALORES = {'luz': ('propria', 'refletida'), 'estado': ('aberto', 'convertido', 'guardado')}
 
 # Reservas marcadas em meta pela transação aberta de cada conexão (id(con) → arquivos): só podem ser apagadas
@@ -352,11 +356,48 @@ def _validar(operacao: str, dados: dict) -> dict:
     return dict(dados)
 
 
-def _inserir(con: sqlite3.Connection, operacao: str, dados: dict, quando: str) -> None:
+def _reconhecer(con: sqlite3.Connection, d: dict) -> int | None:
+    """Aplica um reconhecimento: o primeiro que chega ganha (`sessao_visto`, INSERT OR IGNORE).
+
+    Só se a linha de `sessao_visto` foi criada agora: lúmen (limitado por `teto` no dia do evento, contando os passivos
+    já no livro), evento da sessão e, se pedido, lampejo. Devolve o lm aplicado, ou None se já tinha sido reconhecido.
+    Roda igual na hora (hook) e na absorção dos pendentes, então nada se perde e nada se duplica.
+    """
+    quando = d['quando']
+    try:  # poda as sessões com mais de 7 dias
+        corte = (datetime.fromisoformat(quando) - timedelta(days=7)).isoformat(timespec='seconds')
+        con.execute('DELETE FROM sessao_visto WHERE quando < ?', (corte,))
+    except ValueError:
+        pass
+    c = con.execute('INSERT OR IGNORE INTO sessao_visto (sessao, chave, prisma, quando) VALUES (?, ?, ?, ?)',
+                    (d['sessao'], d['chave'], d['prisma'], quando))
+    if c.rowcount != 1:
+        return None
+    lm = int(d['lm'])
+    if d.get('teto') is not None:
+        ja = con.execute("SELECT COALESCE(SUM(lm), 0) FROM lumen WHERE prisma = ? AND fonte LIKE 'passivo%' "
+                         'AND substr(quando, 1, 10) = ?', (d['prisma'], quando[:10])).fetchone()[0]
+        lm = min(lm, max(0, int(d['teto']) - int(ja)))
+    if lm:
+        con.execute('INSERT INTO lumen (quando, prisma, lm, luz, fonte, ref) VALUES (?, ?, ?, ?, ?, ?)',
+                    (quando, d['prisma'], lm, d['luz'], d['fonte'], d.get('ref') or ''))
+    con.execute('INSERT INTO sessao_evento (quando, sessao, prisma, extensao, ferramenta, modo, lm, luz, interveio) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (quando, d['sessao'], d['prisma'], d.get('extensao'), d.get('ferramenta'), d.get('modo'), lm, d['luz'],
+                 1 if d.get('interveio') and lm > 0 else 0))
+    if d.get('lampejo'):
+        con.execute("INSERT INTO lampejo (prisma, sessao, quando, estado) VALUES (?, ?, ?, 'aberto')",
+                    (d['prisma'], d['sessao'], quando))
+    return lm
+
+
+def _inserir(con: sqlite3.Connection, operacao: str, dados: dict, quando: str):
     """Uma linha na tabela da operação; sem `quando` nos dados, vale a hora em que o evento aconteceu."""
     linha = dict(dados)
     if 'quando' in OPERACOES[operacao] and not linha.get('quando'):
         linha['quando'] = quando
+    if operacao == 'reconhecimento':
+        return _reconhecer(con, linha)
     colunas = list(linha)  # nomes já conferidos contra OPERACOES
     con.execute(f'INSERT INTO {operacao} ({", ".join(colunas)}) VALUES ({", ".join(["?"] * len(colunas))})',
                 [linha[c] for c in colunas])
@@ -567,7 +608,7 @@ def ocupado() -> bool:
     return time.monotonic() < _OCUPADO_ATE.get(caminho(), 0.0)
 
 
-def gravar_ou_pendurar(operacao: str, dados: dict, ajustar=None) -> bool:
+def gravar_ou_pendurar(operacao: str, dados: dict, ajustar=None, retorno: dict | None = None) -> bool:
     """Caminho quente do hook: grava o evento com espera curta (ESPERA_CURTA_MS) e devolve True.
 
     Se o banco não abre, não migra ou está travado (qualquer falha do SQLite, do disco ou da migração), acrescenta
@@ -576,6 +617,7 @@ def gravar_ou_pendurar(operacao: str, dados: dict, ajustar=None) -> bool:
 
     `ajustar(con, dados)` (opcional) roda dentro da mesma transação curta, antes do INSERT: devolve os dados finais
     ou None (nada a gravar). Se o banco falhar, os dados originais vão para os pendentes.
+    `retorno` (opcional) recebe em 'resultado' o que a operação devolveu (ex.: lm de um reconhecimento).
     """
     dados = _validar(operacao, dados)
     quando = datetime.now().isoformat(timespec='seconds')
@@ -590,7 +632,9 @@ def gravar_ou_pendurar(operacao: str, dados: dict, ajustar=None) -> bool:
         with transacao(con):
             finais = ajustar(con, dict(dados)) if ajustar is not None else dados
             if finais is not None:
-                _inserir(con, operacao, _validar(operacao, finais), quando)
+                resultado = _inserir(con, operacao, _validar(operacao, finais), quando)
+                if retorno is not None:
+                    retorno['resultado'] = resultado
         return True
     except Exception as e:  # a sessão nunca trava por causa do banco
         arquivos.registrar_erro('banco.gravar_ou_pendurar', e)
@@ -653,6 +697,17 @@ def _bloqueada(marca: dict) -> RuntimeError:
         f'private/{MIGRACAO_FALHOU} for apagado.')
 
 
+def _completar(con: sqlite3.Connection) -> None:
+    """Banco já pronto de uma versão anterior deste esquema: cria só as tabelas que faltam (CREATE IF NOT EXISTS)."""
+    existentes = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    faltam = [sql for sql in ESQUEMA if sql.startswith('CREATE TABLE')
+              and sql.split('EXISTS', 1)[1].split('(', 1)[0].strip() not in existentes]
+    if faltam:
+        with transacao(con, absorver=False):
+            for sql in faltam:
+                con.execute(sql)
+
+
 def garantir(con: sqlite3.Connection) -> None:
     """Cria o esquema que faltar e roda a migração dos JSON uma única vez, numa transação exclusiva.
 
@@ -666,6 +721,7 @@ def garantir(con: sqlite3.Connection) -> None:
     a próxima abertura tenta de novo.
     """
     if _pronto(con):
+        _completar(con)
         return
     from . import migrar  # import tardio: a migração usa este módulo e não pode criar ciclo
     arquivo, versao = _marca_falha(con), migrar.versao()

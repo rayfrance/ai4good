@@ -110,7 +110,7 @@ def test_dossie_em_linguagem_formal(plan):
     for proibida in ('feixe', 'degrau', 'prisma', 'lúmen', 'lampejo'):
         assert proibida not in texto
     assert 'skill' in texto and 'nível' in texto and 'ações' in texto
-    assert not re.search(r'lm', texto)
+    assert not re.search(r'\blm\b', texto)
 
 
 def test_dossie_lista_pedidos_aceitos(plan):
@@ -416,23 +416,61 @@ def test_passivo_com_banco_ocupado_continua_respeitando_o_teto(privado, plan):
 
 def test_reconhecimento_uma_vez_por_sessao_no_banco_e_poda(privado, plan):
     _sql("INSERT INTO sessao_visto (sessao, chave, prisma, quando) VALUES ('velha', 'agente', ?, ?)", DDD, _agora(dias=8))
-    assert observer.novas_na_sessao('abc', 'agente', [DDD, TESTES]) == [DDD, TESTES]
-    assert observer.novas_na_sessao('abc', 'agente', [DDD, TESTES]) == []
-    assert observer.novas_na_sessao('abc', 'prompt', [DDD]) == [DDD]  # outra origem
-    assert observer.novas_na_sessao('def', 'agente', [DDD]) == [DDD]  # outra sessão
+    assert jogo.reconhecer('abc', 'agente', DDD, 'refletida') == 10
+    assert jogo.reconhecer('abc', 'agente', DDD, 'refletida') is None
+    assert jogo.reconhecer('abc', 'prompt', DDD, 'prompt') == 20  # outra origem
+    assert jogo.reconhecer('def', 'agente', DDD, 'refletida') == 10  # outra sessão
     assert _consulta("SELECT 1 FROM sessao_visto WHERE sessao = 'velha'") == []
+    assert len(_consulta('SELECT 1 FROM sessao_evento')) == 3
     assert not (privado / 'sessao_vistos.json').exists()
 
 
-def test_reconhecimento_falha_fechada_com_banco_travado(privado, plan):
+def test_reconhecimento_com_banco_travado_nao_se_perde(privado, plan, capsys):
+    evento, cfg = _evento(privado, sessao='trava')
     soltar, t = _travar_banco(privado, 30)
     try:
         inicio = time.monotonic()
-        assert observer.novas_na_sessao('abc', 'agente', [DDD]) == []
-        assert time.monotonic() - inicio < 4
+        observer.ao_usar_ferramenta(evento, cfg)
+        observer.ao_usar_ferramenta(evento, cfg)  # repetido na mesma sessão, ainda travado
+        observer.ao_enviar_prompt({**evento, 'prompt': 'modele um Aggregate'}, cfg)
+        assert time.monotonic() - inicio < banco.ESPERA_CURTA_MS / 1000 + 2
     finally:
         soltar.set()
         t.join()
+    assert _consulta('SELECT 1 FROM lumen') == []  # ainda pendente
+    _sql('SELECT 1')  # a próxima transação absorve
+    lumens = [(r['lm'], r['fonte']) for r in _consulta('SELECT * FROM lumen WHERE prisma = ? ORDER BY id', DDD)]
+    assert lumens == [(10, 'passivo-refletida'), (20, 'passivo-prompt')]
+    ev = _consulta("SELECT ferramenta FROM sessao_evento WHERE sessao = ? AND prisma = ? ORDER BY id",
+                   observer.sessao_id(evento), DDD)
+    assert [r['ferramenta'] for r in ev] == ['Write', 'prompt']
+    assert len(_consulta('SELECT 1 FROM lampejo')) == 1
+
+
+def test_reconhecimento_pendurado_duas_vezes_vale_uma(privado, plan):
+    dados = {'sessao': 's2', 'chave': 'agente', 'prisma': DDD, 'lm': 10, 'luz': 'refletida', 'fonte': 'passivo-refletida',
+             'teto': 40, 'ferramenta': 'Write'}
+    linha = json.dumps({'operacao': 'reconhecimento', 'dados': dados, 'quando': _agora()}) + '\n'
+    (privado / 'pendentes.jsonl').write_text(linha * 2, encoding='utf-8')
+    _sql('SELECT 1')
+    assert len(_consulta('SELECT 1 FROM lumen')) == 1
+    assert len(_consulta('SELECT 1 FROM sessao_evento')) == 1
+
+
+def test_reconhecimento_pendurado_respeita_o_teto_na_absorcao(privado, plan):
+    _sql("INSERT INTO lumen (quando, prisma, lm, luz, fonte, ref) VALUES (?, ?, 35, 'propria', 'passivo-prompt', '')",
+         _agora(), DDD)
+    dados = {'sessao': 's3', 'chave': 'agente', 'prisma': DDD, 'lm': 10, 'luz': 'refletida', 'fonte': 'passivo-refletida',
+             'teto': 40}
+    (privado / 'pendentes.jsonl').write_text(
+        json.dumps({'operacao': 'reconhecimento', 'dados': dados, 'quando': _agora()}) + '\n', encoding='utf-8')
+    _sql('SELECT 1')
+    assert sum(r['lm'] for r in _consulta('SELECT lm FROM lumen WHERE prisma = ?', DDD)) == 40
+
+
+def test_banco_antigo_sem_sessao_visto_ganha_a_tabela(privado, plan):
+    _sql('DROP TABLE sessao_visto')
+    assert jogo.reconhecer('x', 'agente', DDD, 'refletida') == 10
 
 
 def test_dossie_pedido_sem_modelo_mostra_leitura_indisponivel(plan):

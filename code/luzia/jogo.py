@@ -502,14 +502,34 @@ def passivo(skill: str, tipo: str, sessao: str = '') -> int:
 
     def no_teto(con, d):
         ja = ja_hoje(con)  # a transação absorveu os pendentes antes: o que este processo pendurou já está no livro
-        _PENDURADO.pop(marca, None)
         lm = limitar(ja)
         resultado['lm'] = lm
         return {**d, 'lm': lm} if lm else None
 
-    if not banco.gravar_ou_pendurar('lumen', dados, ajustar=no_teto):
+    if banco.gravar_ou_pendurar('lumen', dados, ajustar=no_teto):
+        _PENDURADO.pop(marca, None)  # só depois do COMMIT: os pendentes deste processo já estão no livro
+    else:
         _PENDURADO[marca] = _PENDURADO.get(marca, 0) + cheio  # foi para os pendentes com o valor cheio
     return resultado['lm']
+
+
+def reconhecer(sessao: str, chave: str, skill: str, tipo: str, extensao: str = '', ferramenta: str = '',
+               modo: str = '', interveio: bool = False, lampejo: bool = False) -> int | None:
+    """Um reconhecimento do observador, inteiro e numa tentativa curta: uma vez por prisma por sessão e por origem
+    (`chave`: 'prompt' ou 'agente'), lúmen passivo dentro do teto do dia, evento da sessão e, se pedido, lampejo.
+
+    Devolve o lm ganho (0 se o teto já encheu) ou None se a sessão já tinha reconhecido este prisma. Se o banco estiver
+    ocupado, o reconhecimento inteiro vai para os pendentes (nada se perde) e a função devolve o valor cheio do tipo,
+    provisório: na absorção vale o primeiro que chegar e o teto do dia. Nunca levanta por causa do banco.
+    """
+    dados = {'sessao': sessao, 'chave': chave, 'prisma': skill, 'lm': PASSIVO[tipo],
+             'luz': 'refletida' if tipo == 'refletida' else 'propria', 'fonte': f'passivo-{tipo}', 'ref': sessao,
+             'teto': None if tipo == 'conversao' else TETO_PASSIVO_DIA, 'extensao': extensao, 'ferramenta': ferramenta,
+             'modo': modo, 'interveio': 1 if interveio else 0, 'lampejo': 1 if lampejo else 0}
+    retorno: dict = {}
+    if banco.gravar_ou_pendurar('reconhecimento', dados, retorno=retorno):
+        return retorno.get('resultado')
+    return PASSIVO[tipo]
 
 
 # ------------------------------------------------------------------ lampejos (tabela `lampejo`)

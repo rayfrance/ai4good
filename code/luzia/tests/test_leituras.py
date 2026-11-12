@@ -177,3 +177,43 @@ def test_base_sem_nomes_privados(con, privado):
     for proibido in ('ProdutoZeta', 'ClienteAlfa', '#42', 'AB#99', 'abcdef123456'):
         assert proibido not in b_prisma
         assert proibido not in b_entrega
+
+
+def _muitas_entregas(con, n):
+    agora = datetime.now().replace(microsecond=0).isoformat(timespec='seconds')
+    with banco.transacao(con):
+        for i in range(n):
+            cur = con.execute(
+                "INSERT INTO entrega (chave, titulo, inicio, fim, commits, arquivos, linhas, areas_json, ids_privados_json, fonte) "
+                "VALUES (?, ?, ?, ?, 1, 1, 10, '[]', '[]', 'commit')", (f'cm-{i}', f'Entrega {i}', agora, agora))
+            con.execute("INSERT INTO entrega_prisma (entrega_id, prisma, termos_json) VALUES (?, ?, '[]')", (cur.lastrowid, DDD))
+
+
+def test_lotes_de_no_maximo_8_alvos_por_chamada(con, monkeypatch):
+    from luzia import leituras
+
+    _muitas_entregas(con, 17)  # 17 entregas + 3 prismas = 20 alvos
+    chamadas = []
+    _simular_modelo(monkeypatch, chamadas)
+    assert leituras.gerar(con) == 20
+    assert [len(c['payload']['alvos']) for c in chamadas] == [8, 8, 4]
+    assert leituras.vencidas(con) == []
+
+
+def test_lote_incompleto_nao_grava_nada_dele_mas_os_outros_lotes_sim(con, monkeypatch):
+    from luzia import leituras
+
+    _muitas_entregas(con, 17)
+    chamadas = []
+    _simular_modelo(monkeypatch, chamadas)
+    simulado = pipeline.run_plan
+
+    def segundo_lote_incompleto(payload, **kw):
+        res, rec = simulado(payload, **kw)
+        if len(chamadas) == 2:  # o modelo esquece um alvo do segundo lote
+            res.plan['leituras'] = res.plan['leituras'][:-1]
+        return res, rec
+
+    monkeypatch.setattr(pipeline, 'run_plan', segundo_lote_incompleto)
+    assert leituras.gerar(con) == 12  # lotes 1 (8) e 3 (4) entram; o 2º não grava leitura nenhuma
+    assert len(leituras.vencidas(con)) == 8

@@ -232,9 +232,20 @@ def vencidas(con: sqlite3.Connection) -> list[tuple[str, str]]:
     return out
 
 
+TAMANHO_LOTE = 8  # alvos por chamada: um banco grande não vira um prompt gigante
+
+
 def gerar(con: sqlite3.Connection, alvos: list[tuple[str, str]] | None = None) -> int:
-    """Gera leituras numa única chamada ao modelo e grava todas ou nenhuma numa transação."""
+    """Gera as leituras em lotes de até 8 alvos por chamada ao modelo; cada lote é gravado inteiro ou não é gravado.
+
+    Devolve quantas leituras entraram (um lote que falhou ou veio incompleto não grava nada, e os outros seguem).
+    """
     lista = list(dict.fromkeys(alvos if alvos is not None else vencidas(con)))
+    return sum(_gerar_lote(con, lista[i:i + TAMANHO_LOTE]) for i in range(0, len(lista), TAMANHO_LOTE))
+
+
+def _gerar_lote(con: sqlite3.Connection, lista: list[tuple[str, str]]) -> int:
+    """Uma chamada ao modelo para estes alvos; grava todas as leituras ou nenhuma, numa transação."""
     if not lista:
         return 0
     itens = []

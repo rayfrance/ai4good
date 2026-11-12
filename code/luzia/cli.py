@@ -340,7 +340,7 @@ def bt_leituras() -> dict | None:
         return None
     with trajetoria.abrir() as con:
         n = len(leituras.vencidas(con))
-    return {'rotulo': f'Gerar {n} leitura(s)', 'descricao': 'renova as leituras vencidas numa só chamada ao modelo',
+    return {'rotulo': f'Gerar {n} leitura(s)', 'descricao': 'renova as leituras vencidas (até 8 por chamada ao modelo)',
             'rodar': 'leituras'} if n else None
 
 
@@ -644,7 +644,7 @@ def cmd_entregas(args, state: dict) -> None:
 
 
 def cmd_leituras() -> None:
-    """Renova numa só chamada todas as leituras vencidas (ou que faltam) de prismas e entregas."""
+    """Renova as leituras vencidas (ou que faltam) de prismas e entregas, em lotes de até 8 por chamada."""
     with trajetoria.abrir() as con:
         vencidas = leituras.vencidas(con)
     print('## ✦ Luzia · leituras com base')
@@ -660,7 +660,9 @@ def cmd_leituras() -> None:
         with trajetoria.abrir() as con:
             n = leituras.gerar(con, vencidas)
         if n:
-            print(f'✦ {n} leitura(s) renovada(s) numa só chamada ao modelo, cada uma com a base, o modelo e a data.')
+            resto = len(vencidas) - n
+            print(f'✦ {n} leitura(s) renovada(s), cada uma com a base, o modelo e a data.'
+                  + (f' {resto} ficou(aram) para depois (o modelo não respondeu a um lote): rode `leituras` de novo.' if resto > 0 else ''))
         else:
             print(f'Leitura indisponível: o modelo não respondeu e nada foi gravado '
                   f'({len(vencidas)} leitura(s) seguem vencidas; os fatos continuam na tela).')

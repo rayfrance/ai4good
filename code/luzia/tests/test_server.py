@@ -315,3 +315,24 @@ def test_leituras_automaticas_do_painel(api, monkeypatch):
     monkeypatch.setattr(modelo, 'pronto', lambda: False)
     _, st = api('GET', '/api/estado')
     assert st['modelo_pronto'] is False
+
+
+def test_reativar_pelo_painel_so_abre_o_pedido_e_o_prisma_segue_arquivado(api, monkeypatch):
+    """O botão Reativar do painel só abre o pedido: o prisma volta apenas quando a pessoa aceita a proposta."""
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem modelo')))
+    c, r = api('POST', '/api/pedido', {'acao': 'abrir', 'tipo': 'arquivar', 'prisma': TESTES, 'motivo': 'teste'})
+    assert c == 200
+    assert api('POST', '/api/pedido', {'acao': 'aceitar', 'id': r['pedido']['id']})[0] == 200
+    c, r = api('POST', '/api/pedido', {'acao': 'abrir', 'tipo': 'reativar', 'prisma': TESTES, 'motivo': 'Reativado pelo painel'})
+    assert c == 200 and r['pedido']['estado'] == 'aberto'  # aguarda o sim da pessoa no card do pedido
+    con = banco.conectar()
+    try:
+        assert con.execute('SELECT estado FROM prisma WHERE nome = ?', (TESTES,)).fetchone()['estado'] == 'arquivado'
+    finally:
+        con.close()
+    assert api('POST', '/api/pedido', {'acao': 'aceitar', 'id': r['pedido']['id']})[0] == 200
+    con = banco.conectar()
+    try:
+        assert con.execute('SELECT estado FROM prisma WHERE nome = ?', (TESTES,)).fetchone()['estado'] == 'ativo'
+    finally:
+        con.close()

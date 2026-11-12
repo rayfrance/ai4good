@@ -980,12 +980,9 @@ document.addEventListener('click', async (ev) => {
   if (ds.reativarPrisma) {
     t.disabled = true;
     const r = await api('/api/pedido', { acao: 'abrir', tipo: 'reativar', prisma: ds.reativarPrisma, motivo: 'Reativado pelo painel' });
-    if (!r.erro && r.pedido?.id) {
-      await api('/api/pedido', { acao: 'aceitar', id: r.pedido.id });
-      toast(`Prisma ${ds.reativarPrisma} reativado na trajetória!`);
-    } else {
-      toast(r.erro || 'Não foi possível reativar.');
-    }
+    // Como todo pedido: abre, a Luzia propõe e a pessoa aceita no card do pedido (nada muda sozinho).
+    toast(r.erro ? (r.erro || 'Não foi possível reativar.')
+      : `Pedido de reativar o Prisma ${ds.reativarPrisma} aberto: confira a proposta e aceite.`);
     await carregar();
     return;
   }

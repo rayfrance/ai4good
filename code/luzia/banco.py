@@ -57,6 +57,11 @@ VALORES = {'luz': ('propria', 'refletida'), 'estado': ('aberto', 'convertido', '
 # e a retira no fim, então um id reaproveitado no máximo adia a limpeza (nunca apaga antes da hora).
 _RESERVAS_ABERTAS: dict[int, list[Path]] = {}
 
+# Banco que falhou numa gravação do hook (caminho → até quando `time.monotonic()` o trata como ocupado): enquanto vale,
+# as gravações seguintes do mesmo processo vão direto para os pendentes, em vez de esperar de novo 1,5 s cada uma.
+_OCUPADO_ATE: dict[Path, float] = {}
+OCUPADO_POR_S = 5.0
+
 ESQUEMA = (
     """CREATE TABLE IF NOT EXISTS meta (
         chave TEXT PRIMARY KEY,
@@ -549,6 +554,11 @@ def absorver_pendentes(con: sqlite3.Connection) -> int:
     return _absorver(con)
 
 
+def ocupado() -> bool:
+    """O banco falhou numa gravação do hook há pouco (as próximas gravações nem esperam: vão direto para os pendentes)."""
+    return time.monotonic() < _OCUPADO_ATE.get(caminho(), 0.0)
+
+
 def gravar_ou_pendurar(operacao: str, dados: dict) -> bool:
     """Caminho quente do hook: grava o evento com espera curta (ESPERA_CURTA_MS) e devolve True.
 
@@ -558,6 +568,9 @@ def gravar_ou_pendurar(operacao: str, dados: dict) -> bool:
     """
     dados = _validar(operacao, dados)
     quando = datetime.now().isoformat(timespec='seconds')
+    if ocupado():
+        _pendurar(caminho().parent / PENDENTES, operacao, dados, quando)
+        return False
     limite = time.monotonic() + ESPERA_CURTA_MS / 1000
     con = None
     try:
@@ -568,6 +581,7 @@ def gravar_ou_pendurar(operacao: str, dados: dict) -> bool:
         return True
     except Exception as e:  # a sessão nunca trava por causa do banco
         arquivos.registrar_erro('banco.gravar_ou_pendurar', e)
+        _OCUPADO_ATE[caminho()] = time.monotonic() + OCUPADO_POR_S
         _pendurar(caminho().parent / PENDENTES, operacao, dados, quando)
         return False
     finally:

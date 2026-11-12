@@ -9,17 +9,19 @@ Roda localmente, sem chamar o modelo, só nos repositórios autorizados (`privat
   Também oferece os feixes que você mandou do painel (fila).
 - Um reconhecimento por skill por sessão; no máximo 40 lm passivos por skill por dia (regras em docs/luzia-ux.md).
 - Grava só o evento mascarado (horário, skill, extensão, origem). Nunca o caminho, o código ou o texto do prompt.
+- Tudo vai para o banco (`lumen`, `sessao_evento`, `lampejo`) por `banco.gravar_ou_pendurar`, com espera curta: se o banco
+  estiver ocupado, o evento fica em `pendentes.jsonl` e a próxima escrita o absorve. O hook nunca levanta nem trava a sessão.
 - SessionStart: se há algo a retomar (feixe em andamento, degrau pronto, fila), uma linha no fim da 1ª resposta.
 - Modos: `ativo` (cartão no chat), `passivo` (só registra e credita), `sob_demanda` (não observa).
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -29,7 +31,6 @@ from luzia import acoes, arquivos, banco, jogo, trajetoria  # noqa: E402
 
 PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
-LOG = PRIVATE / 'sessao.jsonl'
 SEEN = PRIVATE / 'sessao_vistos.json'
 CLI = arquivos.CLI
 
@@ -50,13 +51,13 @@ def read_json(path: Path, default):
 
 
 def plano() -> dict:
-    return trajetoria.plano()
+    return trajetoria.plano(banco.ESPERA_CURTA_MS)
 
 
 def lacunas(plan: dict) -> dict[str, dict]:
     """Skills com lacuna (nível < meta), com palavras-chave do plano + padrão em português."""
     out = {}
-    for nome, v in jogo.niveis(plan).items():
+    for nome, v in jogo.niveis(plan, espera_ms=banco.ESPERA_CURTA_MS).items():
         if v['nivel'] >= v['meta']:
             continue
         s = next((x for x in plan.get('skills', []) if x['nome'] == nome), {})
@@ -94,17 +95,28 @@ def novas_na_sessao(sid: str, chave: str, skills: list[str]) -> list[str]:
     return novas
 
 
-def registrar(sid: str, skill: str, ext: str, origem: str, modo: str, lm: int, luz: str, interveio: bool) -> None:
-    with LOG.open('a', encoding='utf-8') as f:
-        f.write(json.dumps({'quando': datetime.now().isoformat(timespec='seconds'), 'sessao': sid, 'skill': skill,
-                            'extensao': ext, 'ferramenta': origem, 'modo': modo, 'lm': lm, 'luz': luz,
-                            'interveio': interveio}, ensure_ascii=False) + '\n')
+def registrar(sid: str, skill: str, ext: str, origem: str, modo: str, lm: int, luz: str, interveio: bool) -> bool:
+    """Evento mascarado da sessão no banco (ou em `pendentes.jsonl` se o banco estiver ocupado)."""
+    return banco.gravar_ou_pendurar('sessao_evento', {'sessao': sid, 'prisma': skill, 'extensao': ext, 'ferramenta': origem,
+                                                      'modo': modo, 'lm': lm, 'luz': luz, 'interveio': 1 if interveio else 0})
 
 
 def saida(evento: str, contexto: str) -> None:
     print(json.dumps({'hookSpecificOutput': {'hookEventName': evento, 'additionalContext': contexto}}, ensure_ascii=True))
 
 
+def sem_quebrar(funcao):
+    """O observador nunca atrapalha a sessão: erro do banco ou de qualquer parte vira linha no erros.log (só o tipo)."""
+    @functools.wraps(funcao)
+    def protegida(*args, **kwargs):
+        try:
+            return funcao(*args, **kwargs)
+        except Exception as e:
+            arquivos.registrar_erro(f'observer {funcao.__name__}', e)
+    return protegida
+
+
+@sem_quebrar
 def ao_enviar_prompt(event: dict, cfg: dict) -> None:
     """UserPromptSubmit: luz própria quando você dirige o conceito; e a fila do painel."""
     sid, modo = sessao_id(event), cfg.get('modo', 'ativo')
@@ -140,6 +152,7 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
         saida('UserPromptSubmit', '\n'.join(partes))
 
 
+@sem_quebrar
 def ao_usar_ferramenta(event: dict, cfg: dict) -> None:
     """PostToolUse: luz refletida quando o agente aplica um conceito do seu plano."""
     modo = cfg.get('modo', 'ativo')
@@ -186,6 +199,7 @@ def ao_usar_ferramenta(event: dict, cfg: dict) -> None:
     ))
 
 
+@sem_quebrar
 def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
     """SessionStart: lembra o que dá para retomar, sem interromper."""
     if cfg.get('modo', 'ativo') == 'sob_demanda':
@@ -193,8 +207,9 @@ def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
     plan = plano()
     if not plan:
         return
-    andamento = jogo.em_andamento()
-    prontas = [s['nome'].split('(')[0].strip() for s in jogo.rota(plan)['skills'] if s['pronto'] and not s['na_meta']]
+    andamento = jogo.em_andamento(banco.ESPERA_CURTA_MS)
+    prontas = [s['nome'].split('(')[0].strip() for s in jogo.rota(plan, espera_ms=banco.ESPERA_CURTA_MS)['skills']
+               if s['pronto'] and not s['na_meta']]
     try:
         fila = acoes.fila(banco.ESPERA_CURTA_MS)
     except Exception as e:

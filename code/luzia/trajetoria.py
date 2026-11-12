@@ -25,9 +25,12 @@ def agora() -> str:
 
 
 @contextmanager
-def abrir() -> Iterator[sqlite3.Connection]:
-    """Conexão de curta duração para quem só precisa ler (ou fazer uma escrita)."""
-    con = banco.conectar()
+def abrir(espera_ms: int | None = None) -> Iterator[sqlite3.Connection]:
+    """Conexão de curta duração para quem só precisa ler (ou fazer uma escrita).
+
+    `espera_ms` encurta a espera (caminho quente do hook: use `banco.ESPERA_CURTA_MS`).
+    """
+    con = banco.conectar() if espera_ms is None else banco.conectar(espera_ms=espera_ms)
     try:
         yield con
     finally:
@@ -108,19 +111,19 @@ def declarar_nivel(con: sqlite3.Connection, nome: str, nivel: int) -> None:
         perfil_gravar(con, 'autoavaliacao', {**auto, nome: nivel})
 
 
-def estado() -> dict:
+def estado(espera_ms: int | None = None) -> dict:
     """Estado vivo da carreira (plano e resto da última triagem), do `perfil`; o arquivo só vale se o banco não tem plano."""
     if not arquivos.ESTADO.exists():
         arquivos.ler_estado()  # primeira vez: traz a foto do seminário para a pasta privada, antes de o banco migrar
-    with abrir() as con:
+    with abrir(espera_ms) as con:
         plano_db = perfil_ler(con, 'plano')
         if plano_db is None:
             return arquivos.ler_estado()
         return {**(perfil_ler(con, 'estado_legado', {}) or {}), 'plano': plano_db}
 
 
-def plano() -> dict:
-    return estado().get('plano', {})
+def plano(espera_ms: int | None = None) -> dict:
+    return estado(espera_ms).get('plano', {})
 
 
 def registrar_subida(con: sqlite3.Connection, nome: str, para: int, lm: int, luz_propria: int) -> None:
@@ -136,7 +139,7 @@ def registrar_subida(con: sqlite3.Connection, nome: str, para: int, lm: int, luz
 
 
 def historico_subidas(con: sqlite3.Connection) -> list[dict]:
-    """Níveis conquistados (a evidência do dossiê), no formato antigo do `degraus.json`."""
+    """Níveis conquistados (a evidência do dossiê), no formato que o painel e o dossiê já usam."""
     return [{'quando': r['quando'], 'skill': r['prisma'], 'para': r['para'], 'lm': r['lm'] or 0,
              'luz_propria': int(r['luz_propria'] or 0)}
             for r in con.execute("SELECT * FROM nivel_registro WHERE origem = 'conquistado' ORDER BY quando, id")]

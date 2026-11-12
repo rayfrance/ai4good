@@ -87,7 +87,7 @@ def estado() -> dict:
                          'acoes': [a['id'] for a in lista if a.get('entrega') == t.get('tarefa')]})
     indices = [e['indice'] for e in entregas if e['indice'] is not None]
 
-    lm_recentes = list(reversed(jogo.livro()))[:12]
+    lm_recentes = list(reversed(jogo.livro(limite=12)))
 
     return {
         'perfil': {'onde': plan.get('onde_esta', {}).get('resumo', ''), 'rotulos': list(pipeline.rotulos(state)),

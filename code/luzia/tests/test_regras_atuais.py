@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from luzia import acoes, banco, cli, instalar, jogo, observer, pipeline
+from luzia import acoes, arquivos, banco, cli, instalar, jogo, observer, pipeline
 
 DDD = 'Domain-Driven Design (DDD)'
 TESTES = 'Testes e Qualidade / SQL'
@@ -40,6 +40,14 @@ def _revisitado(plan, fid):
     jogo.enfileirar(fid)
     jogo.iniciar(fid, 'revisita')
     return jogo.conquistar(fid, 4, 't', plan)
+
+
+def _linhas(sql):
+    con = banco.conectar()
+    try:
+        return con.execute(sql).fetchall()
+    finally:
+        con.close()
 
 
 def _feixes():
@@ -177,25 +185,26 @@ def test_catalogo_sem_mudanca_nao_e_regravado(plan, sugeridos):
     espiao.close()
 
 
-def _corromper():
-    jogo.FEIXES.write_text('{"quebrado":', encoding='utf-8')
+def _corromper(privado):
+    """Um JSON de configuração quebrado (o jogo em si já não usa JSON: a leitura segura é a de `arquivos`)."""
+    caminho = privado / 'config-teste.json'
+    caminho.write_text('{"quebrado":', encoding='utf-8')
+    return caminho
 
 
 def test_json_corrompido_devolve_o_padrao(privado, sugeridos):
-    _corromper()
-    assert jogo._ler(jogo.FEIXES, {}) == {}
+    assert arquivos.ler_json(_corromper(privado), {}) == {}
 
 
 def test_uma_unica_copia_do_arquivo_ruim(privado, sugeridos):
-    _corromper()
-    jogo._ler(jogo.FEIXES, {})
-    jogo._ler(jogo.FEIXES, {})
-    assert len(list(privado.glob('feixes.json.corrompido-*'))) == 1
+    caminho = _corromper(privado)
+    arquivos.ler_json(caminho, {})
+    arquivos.ler_json(caminho, {})
+    assert len(list(privado.glob('config-teste.json.corrompido-*'))) == 1
 
 
 def test_erro_registrado_so_com_o_tipo(privado, sugeridos):
-    _corromper()
-    jogo._ler(jogo.FEIXES, {})
+    arquivos.ler_json(_corromper(privado), {})
     log = (privado / 'erros.log').read_text(encoding='utf-8')
     assert 'JSONDecodeError' in log
     assert 'quebrado' not in log
@@ -216,7 +225,7 @@ def test_hook_mostra_o_cartao_e_o_abre(privado, plan, capsys):
     evento = {'session_id': 's-teste', 'tool_name': 'Write', 'cwd': cfg['autorizados'][0],
               'tool_input': {'file_path': 'x.cs', 'content': ' '.join(info['palavras'][:3])}}
     observer.ao_usar_ferramenta(evento, cfg)
-    abertos = [x for x in jogo._ler(jogo.CARTOES, []) if x['estado'] == 'aberto']
+    abertos = [r for r in _linhas('SELECT * FROM lampejo') if r['estado'] == 'aberto']
     assert 'luz refletida' in capsys.readouterr().out
     assert abertos
 

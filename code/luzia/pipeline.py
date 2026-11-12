@@ -24,7 +24,6 @@ RUNS = ROOT / 'outputs' / 'sem2' / 'runs.jsonl'
 STATE_FILE = arquivos.ESTADO  # privado (fora do git); outputs/sem2 guarda só a foto do seminário
 AUTOAVAL = PRIVATE / 'autoavaliacao.json'
 OBSERVER_CFG = PRIVATE / 'observer.json'
-SESSION_LOG = PRIVATE / 'sessao.jsonl'
 
 
 def read_json(path: Path, default):
@@ -60,17 +59,13 @@ def _rotulos_de(state: dict) -> tuple[str, str]:
 
 
 def session_events(limit: int = 30) -> list[dict]:
-    """Eventos já mascarados que o observador (hook) registrou na sessão."""
-    if not SESSION_LOG.exists():
-        return []
-    lines = SESSION_LOG.read_text(encoding='utf-8').splitlines()[-limit:]
-    out = []
-    for line in lines:
-        try:
-            out.append(json.loads(line))
-        except Exception:
-            continue
-    return out
+    """Eventos já mascarados que o observador (hook) registrou na sessão, do mais antigo ao mais novo (os últimos `limit`)."""
+    with trajetoria.abrir() as con:
+        linhas = con.execute('SELECT quando, sessao, prisma, extensao, ferramenta, modo, lm, luz, interveio '
+                             'FROM sessao_evento ORDER BY id DESC LIMIT ?', (int(limit),)).fetchall()
+    return [{'quando': r['quando'], 'sessao': r['sessao'], 'skill': r['prisma'], 'extensao': r['extensao'],
+             'ferramenta': r['ferramenta'], 'modo': r['modo'], 'lm': r['lm'], 'luz': r['luz'],
+             'interveio': bool(r['interveio'])} for r in reversed(linhas)]
 
 
 def load_env() -> None:

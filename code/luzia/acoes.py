@@ -10,18 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from contextlib import contextmanager
 from datetime import datetime
-from pathlib import Path
 from urllib.parse import quote
 
 from . import arquivos, banco, trajetoria
 
 PRIVATE = arquivos.PRIVATE
-# Caminhos antigos: só a migração os lê; nada mais grava neles.
-EVID = PRIVATE / 'evidencias.jsonl'
-SALVAS = PRIVATE / 'acoes_guardadas.json'
-FILA = PRIVATE / 'fila.json'
 
 
 # ------------------------------------------------------------------ fila painel → harness
@@ -39,18 +33,7 @@ def _lista(texto) -> list:
 
 def _abrir(espera_ms: int | None):
     """Conexão normal, ou com espera curta (hook: nunca fica preso mais que o orçamento dele)."""
-    if espera_ms is None:
-        return trajetoria.abrir()
-    return _curta(espera_ms)
-
-
-@contextmanager
-def _curta(espera_ms: int):
-    con = banco.conectar(espera_ms=espera_ms)
-    try:
-        yield con
-    finally:
-        con.close()
+    return trajetoria.abrir(espera_ms)
 
 
 def fila(espera_ms: int | None = None) -> list[dict]:
@@ -86,10 +69,6 @@ def marcar_oferecida(acao_id: str, sessao: str, espera_ms: int | None = None) ->
 
 def aid(origem: str, titulo: str) -> str:
     return hashlib.sha1(f'{origem}|{titulo}'.encode('utf-8')).hexdigest()[:4]
-
-
-def _read_json(path: Path, default):
-    return arquivos.ler_json(path, default)
 
 
 # ------------------------------------------------------------------ eventos e evidências (livro `avanco_evento`)

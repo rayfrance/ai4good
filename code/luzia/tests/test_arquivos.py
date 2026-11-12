@@ -15,7 +15,7 @@ def test_private_vem_do_ambiente(privado):
     from luzia import arquivos, jogo
 
     assert arquivos.PRIVATE == Path(privado) == Path(os.environ['LUZIA_PRIVATE'])
-    assert jogo.FEIXES.parent == Path(privado)
+    assert jogo.DOSSIES.parent == Path(privado)
 
 
 def test_sem_ambiente_usa_a_pasta_private_do_pacote():
@@ -39,4 +39,11 @@ def test_observer_roda_como_script_na_pasta_do_ambiente(privado):
     r = subprocess.run([sys.executable, str(CODE / 'luzia' / 'observer.py')], input=json.dumps(evento),
                        env={**os.environ, 'LUZIA_PRIVATE': str(privado)}, capture_output=True, text=True, check=True)
     assert 'luz refletida' in r.stdout
-    assert (privado / 'lumens.jsonl').exists() and (privado / 'cartoes.json').exists()
+    from luzia import banco
+    con = banco.conectar()
+    try:
+        assert con.execute('SELECT COUNT(*) FROM lumen').fetchone()[0] == 1
+        assert con.execute('SELECT COUNT(*) FROM lampejo').fetchone()[0] == 1
+    finally:
+        con.close()
+    assert not (privado / 'lumens.jsonl').exists() and not (privado / 'cartoes.json').exists()

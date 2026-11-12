@@ -335,7 +335,7 @@ def hoje(plan: dict, state: dict) -> None:
     print('## ✦ Luzia · hoje')
     r = linha_rota(plan, state)
     lista = acoes.todas(plan)
-    hoje_lm = sum(x['lm'] for x in jogo.livro() if x['quando'][:10] == jogo.agora()[:10])
+    hoje_lm = sum(x['lm'] for x in jogo.livro(desde=jogo.agora()[:10]))
     andamento = sum(1 for f in lista if f['estado'] == 'em_andamento')
     prontas = [curto(s['nome']) for s in r['skills'] if s['pronto'] and not s['na_meta']]
     partes = [f'+{hoje_lm} lm hoje']

@@ -1,10 +1,11 @@
-"""Motor do jogo da Luzia: feixes, lúmens, degraus, rota e dossiê.
+"""Motor do jogo da Luzia: avanços (feixes), lúmens, níveis, lampejos, rota e dossiê.
 
-Regras em `docs/luzia-ux.md`. Tudo fica em `private/` (fora do git):
-- avanços (os feixes): estado em `avanco` e história em `avanco_evento`, no banco;
-- `lumens.jsonl`: livro de lúmens (skill, lm, luz própria ou refletida, fonte);
-- níveis, base, data do último nível e subidas: banco (`trajetoria.py`: `prisma` e `nivel_registro`);
-- `cartoes.json`: cartões que o observador mostrou (cada um pode virar luz própria uma vez).
+Regras em `docs/luzia-ux.md`. Tudo mora no banco `private/luzia.db` (fora do git):
+- avanços: estado em `avanco` e história em `avanco_evento`;
+- lúmens: livro `lumen` (prisma, lm, luz própria ou refletida, fonte), só de acréscimo;
+- níveis, base, data do último nível e subidas: `prisma` e `nivel_registro` (`trajetoria.py`);
+- lampejos: tabela `lampejo` (cada um pode virar luz própria uma única vez, nas 24 h seguintes).
+Os arquivos antigos só são lidos pela migração (`migrar.py`).
 """
 
 from __future__ import annotations
@@ -18,11 +19,6 @@ from pathlib import Path
 from . import arquivos, banco, trajetoria
 
 PRIVATE = arquivos.PRIVATE
-FEIXES = PRIVATE / 'feixes.json'  # só o caminho antigo: a migração lê, nada mais grava aqui
-LUMENS = PRIVATE / 'lumens.jsonl'
-DEGRAUS = PRIVATE / 'degraus.json'
-AUTOAVAL = PRIVATE / 'autoavaliacao.json'
-CARTOES = PRIVATE / 'cartoes.json'
 DOSSIES = PRIVATE / 'dossies'
 
 LIMIAR_DEGRAU = 150
@@ -50,20 +46,17 @@ def agora() -> str:
     return datetime.now().isoformat(timespec='seconds')
 
 
-def _ler(path: Path, padrao):
-    return arquivos.ler_json(path, padrao)
-
-
-def _gravar(path: Path, dados) -> None:
-    arquivos.gravar_json(path, dados)
-
-
 # ------------------------------------------------------------------ níveis e skills
-def niveis(plan: dict) -> dict[str, dict]:
-    """Prismas ativos da trajetória (os do plano e os incluídos por pedido), com nível e meta lidos do banco."""
-    with trajetoria.abrir() as con:
-        todos = {p['nome']: p for p in trajetoria.prismas(con, incluir_arquivados=True)}
-        declarados = trajetoria.declarados(con)
+def niveis(plan: dict, con: sqlite3.Connection | None = None, espera_ms: int | None = None) -> dict[str, dict]:
+    """Prismas ativos da trajetória (os do plano e os incluídos por pedido), com nível e meta lidos do banco.
+
+    Quem já tem uma conexão a passa em `con` (a rota consulta tudo numa só); `espera_ms` encurta a espera do hook.
+    """
+    if con is None:
+        with trajetoria.abrir(espera_ms) as nova:
+            return niveis(plan, nova)
+    todos = {p['nome']: p for p in trajetoria.prismas(con, incluir_arquivados=True)}
+    declarados = trajetoria.declarados(con)
     out = {}
     for s in plan.get('skills', []):
         nome = s['nome']
@@ -387,35 +380,50 @@ def motivos_descartados() -> list[dict]:
                 for f in avancos(con, estado='descartado')]
 
 
-def em_andamento() -> list[dict]:
+def em_andamento(espera_ms: int | None = None) -> list[dict]:
     """Avanços em andamento (sem histórico), para a linha de status e o aviso de início de sessão."""
-    with trajetoria.abrir() as con:
+    with trajetoria.abrir(espera_ms) as con:
         return avancos(con, estado='em_andamento', historico=False)
 
 
-# ------------------------------------------------------------------ lúmens
-def lancar(skill: str, lm: int, luz: str, fonte: str, ref: str = '') -> dict:
-    PRIVATE.mkdir(parents=True, exist_ok=True)
+
+
+# ------------------------------------------------------------------ lúmens (livro `lumen`, só de acréscimo)
+def _lumen(con: sqlite3.Connection, skill: str, lm: int, luz: str, fonte: str, ref: str = '') -> dict:
+    """Acrescenta um lúmen ao livro, dentro da transação de quem chama."""
     rec = {'quando': agora(), 'skill': skill, 'lm': int(lm), 'luz': luz, 'fonte': fonte, 'ref': ref}
-    with LUMENS.open('a', encoding='utf-8') as fh:
-        fh.write(json.dumps(rec, ensure_ascii=False) + '\n')
+    con.execute('INSERT INTO lumen (quando, prisma, lm, luz, fonte, ref) VALUES (?, ?, ?, ?, ?, ?)',
+                (rec['quando'], skill, rec['lm'], luz, fonte, ref))
     return rec
 
 
-def livro() -> list[dict]:
-    if not LUMENS.exists():
-        return []
-    out = []
-    for linha in LUMENS.read_text(encoding='utf-8').splitlines():
-        try:
-            out.append(json.loads(linha))
-        except Exception:
-            continue
-    return out
+def lancar(skill: str, lm: int, luz: str, fonte: str, ref: str = '') -> dict:
+    with trajetoria.abrir() as con, banco.transacao(con):
+        return _lumen(con, skill, lm, luz, fonte, ref)
+
+
+def livro(desde: str | None = None, limite: int | None = None) -> list[dict]:
+    """Lúmens na ordem em que entraram (quando, skill, lm, luz, fonte, ref). `desde`: data/hora mínima; `limite`: só os últimos."""
+    sql = 'SELECT quando, prisma AS skill, lm, luz, fonte, ref FROM lumen'
+    args: list = []
+    if desde:
+        sql += ' WHERE quando >= ?'
+        args.append(desde)
+    if limite:
+        sql += ' ORDER BY id DESC LIMIT ?'
+        args.append(int(limite))
+    else:
+        sql += ' ORDER BY id'
+    with trajetoria.abrir() as con:
+        linhas = [dict(r) for r in con.execute(sql, args)]
+    return linhas[::-1] if limite else linhas
 
 
 def conquistar(fid: str, nota: int, resumo: str, plan: dict) -> dict:
-    """Aplica a rubrica: ganha lúmens, ou volta como 'tente de novo'. Permite uma revisita para notas 2-3."""
+    """Aplica a rubrica: ganha lúmens, ou volta como 'tente de novo'. Permite uma revisita para notas 2-3.
+
+    O lúmen e a mudança do avanço (estado, nota, evento) entram numa transação só: ou os dois, ou nenhum.
+    """
     cat = sincronizar(plan)
     f = cat.get(fid)
     if not f:
@@ -438,91 +446,144 @@ def conquistar(fid: str, nota: int, resumo: str, plan: dict) -> dict:
             _evento(con, fid, 'tente de novo', nota=nota, resumo=resumo)
         return {'ganho': 0, 'tente_de_novo': True, 'feixe': _um(fid)}
     ganho = max(0, alvo - int(f.get('lm_ganho') or 0)) if revisita else alvo
-    if ganho:
-        lancar(skill, ganho, 'propria', 'feixe', fid)
     campos = {'nota': max(nota, int(f.get('nota') or 0)), 'lm_ganho': int(f.get('lm_ganho') or 0) + ganho, 'resumo': resumo}
     if revisita:
         campos.update(revisitas=1, revisita_aberta=False)
     with trajetoria.abrir() as con:
         with banco.transacao(con):
+            vivo = con.execute('SELECT estado, lm_ganho, revisitas, revisita_aberta FROM avanco WHERE id = ?', (fid,)).fetchone()
+            visto = (f.get('estado'), int(f.get('lm_ganho') or 0), int(f.get('revisitas') or 0), 1 if f.get('revisita_aberta') else 0)
+            if vivo is None or tuple(vivo) != visto:  # outro processo mexeu no avanço entre a leitura e a gravação
+                return {'erro': 'este feixe mudou enquanto você registrava: confira o estado e tente de novo'}
+            if ganho:
+                _lumen(con, skill, ganho, 'propria', 'feixe', fid)
             _atualizar_estado(con, fid, 'conquistado', campos)
             _evento(con, fid, 'revisitado' if revisita else 'conquistado', nota=nota, lm=ganho, resumo=resumo)
         f = _um(fid, con)
     return {'ganho': ganho, 'feixe': f, 'pode_revisitar': pode_revisitar(f)}
 
 
+def _passivo_do_dia(skill: str, espera_ms: int) -> int:
+    """Lúmens passivos que o prisma já ganhou hoje (conversões incluídas), lidos do banco com espera curta."""
+    with trajetoria.abrir(espera_ms) as con:
+        return int(con.execute("SELECT COALESCE(SUM(lm), 0) FROM lumen WHERE prisma = ? AND fonte LIKE 'passivo%' "
+                               'AND quando >= ?', (skill, agora()[:10])).fetchone()[0])
+
+
 def passivo(skill: str, tipo: str, sessao: str = '') -> int:
-    """Reconhecimento no dia a dia: 'refletida' (o agente aplicou), 'prompt' (você dirigiu) ou 'conversao'."""
-    hoje = agora()[:10]
-    ja = sum(r['lm'] for r in livro() if r['skill'] == skill and r['fonte'].startswith('passivo') and r['quando'][:10] == hoje)
+    """Reconhecimento no dia a dia: 'refletida' (o agente aplicou), 'prompt' (você dirigiu) ou 'conversao'.
+
+    Caminho quente do hook: lê o teto do dia com espera curta e grava por `banco.gravar_ou_pendurar` (nunca levanta).
+    Se o banco estiver ocupado, o evento vai para `pendentes.jsonl`; as linhas pendentes ainda não contam no teto
+    (o excesso possível fica limitado pela regra de um reconhecimento por prisma por sessão).
+    """
+    ja = 0
+    try:
+        if not banco.ocupado():  # banco que acabou de falhar: não espera de novo só para ler o teto
+            ja = _passivo_do_dia(skill, banco.ESPERA_CURTA_MS)
+    except Exception as e:  # sem ler o teto, o reconhecimento segue (e fica registrado o erro)
+        arquivos.registrar_erro('jogo.passivo teto', e)
     if tipo != 'conversao' and ja >= TETO_PASSIVO_DIA:
         return 0
     lm = PASSIVO[tipo] if tipo != 'conversao' else PASSIVO['conversao']
     lm = min(lm, max(0, TETO_PASSIVO_DIA - ja)) if tipo != 'conversao' else lm
     if lm:
-        lancar(skill, lm, 'refletida' if tipo == 'refletida' else 'propria', f'passivo-{tipo}', sessao)
+        banco.gravar_ou_pendurar('lumen', {'prisma': skill, 'lm': lm, 'luz': 'refletida' if tipo == 'refletida' else 'propria',
+                                           'fonte': f'passivo-{tipo}', 'ref': sessao})
     return lm
 
 
-def abrir_cartao(skill: str, sessao: str = '') -> None:
-    """O observador mostrou um cartão: ele pode virar luz própria uma única vez, nas próximas 24 h."""
-    corte = (datetime.now() - timedelta(days=7)).isoformat(timespec='seconds')
-    cartoes = [c for c in _ler(CARTOES, []) if c.get('quando', '') >= corte]
-    cartoes.append({'skill': skill, 'sessao': sessao, 'quando': agora(), 'estado': 'aberto'})
-    _gravar(CARTOES, cartoes)
+# ------------------------------------------------------------------ lampejos (tabela `lampejo`)
+def abrir_cartao(skill: str, sessao: str = '') -> bool:
+    """O observador mostrou um lampejo: ele pode virar luz própria uma única vez, nas próximas 24 h. Nunca levanta no banco ocupado."""
+    return banco.gravar_ou_pendurar('lampejo', {'prisma': skill, 'sessao': sessao})
+
+
+def _fechar_lampejo(con: sqlite3.Connection, skill: str, como: str) -> bool:
+    """Fecha o lampejo aberto mais recente do prisma (dentro da transação de quem chama). False se não houver."""
+    corte = (datetime.now() - timedelta(hours=VALIDADE_CARTAO_H)).isoformat(timespec='seconds')
+    r = con.execute("SELECT id FROM lampejo WHERE prisma = ? AND estado = 'aberto' AND quando >= ? "
+                    'ORDER BY quando DESC, id DESC LIMIT 1', (skill, corte)).fetchone()
+    if r is None:
+        return False
+    con.execute('UPDATE lampejo SET estado = ?, usado_em = ? WHERE id = ?', (como, agora(), r['id']))
+    return True
 
 
 def usar_cartao(skill: str, como: str) -> bool:
-    """Fecha o cartão aberto mais recente da skill ('convertido' ou 'guardado'). False se não houver."""
-    cartoes = _ler(CARTOES, [])
-    corte = (datetime.now() - timedelta(hours=VALIDADE_CARTAO_H)).isoformat(timespec='seconds')
-    for c in reversed(cartoes):
-        if c.get('skill') == skill and c.get('estado') == 'aberto' and c.get('quando', '') >= corte:
-            c.update(estado=como, usado_em=agora())
-            _gravar(CARTOES, cartoes)
-            return True
-    return False
+    """Fecha o lampejo aberto mais recente da skill ('convertido' ou 'guardado'). False se não houver."""
+    with trajetoria.abrir() as con, banco.transacao(con):
+        return _fechar_lampejo(con, skill, como)
 
 
 def converter(skill: str, nota: int, ref: str = '') -> dict:
-    """Resposta ao cartão do observador, avaliada pela rubrica: até +30 lm de luz própria, uma vez por cartão."""
+    """Resposta ao lampejo, avaliada pela rubrica: até +30 lm de luz própria, uma vez por lampejo.
+
+    Fechar o lampejo e lançar o lúmen acontecem na mesma transação.
+    """
     nota = max(0, min(4, int(nota)))
-    if not usar_cartao(skill, 'convertido' if nota >= 2 else 'guardado'):
-        return {'erro': 'não há cartão aberto da Luzia para esta skill: a conversão vale uma vez por cartão'}
     lm = round(PASSIVO['conversao'] * MULT.get(nota, 0))
-    if lm:
-        lancar(skill, lm, 'propria', 'passivo-conversao', ref)
+    with trajetoria.abrir() as con, banco.transacao(con):
+        if not _fechar_lampejo(con, skill, 'convertido' if nota >= 2 else 'guardado'):
+            return {'erro': 'não há lampejo aberto da Luzia para esta skill: a conversão vale uma vez por lampejo'}
+        if lm:
+            _lumen(con, skill, lm, 'propria', 'passivo-conversao', ref)
     return {'lm': lm, 'nota': nota}
 
 
-# ------------------------------------------------------------------ degraus e rota
-def _degraus() -> dict:
-    """Base, data do último nível, subidas conquistadas e marcos do dossiê (lidos do banco, no formato antigo)."""
-    with trajetoria.abrir() as con:
-        ativos = trajetoria.prismas(con)
-        return {'base': {p['nome']: trajetoria.base_de(con, p) for p in ativos},
-                'desde': {p['nome']: trajetoria.desde(con, p['nome']) for p in ativos},
-                'historico': trajetoria.historico_subidas(con),
-                'marcos_dossie': trajetoria.perfil_ler(con, 'marcos_dossie', [])}
+abrir_lampejo = abrir_cartao
+usar_lampejo = usar_cartao
 
 
-def garantir_base(plan: dict) -> dict:
+# ------------------------------------------------------------------ níveis e rota
+SQL_PROGRESSO = """
+    WITH ult AS (SELECT prisma, MAX(quando) AS desde FROM nivel_registro GROUP BY prisma)
+    SELECT l.prisma, SUM(l.lm) AS lm, SUM(CASE WHEN l.luz = 'propria' THEN l.lm ELSE 0 END) AS propria,
+           COUNT(DISTINCT CASE WHEN l.fonte = 'feixe' THEN l.ref END) AS feixes
+    FROM lumen l LEFT JOIN ult ON ult.prisma = l.prisma
+    WHERE l.quando > COALESCE(ult.desde, '')
+    GROUP BY l.prisma"""
+
+
+def _degraus(con: sqlite3.Connection | None = None, espera_ms: int | None = None) -> dict:
+    """Base, data do último nível, lúmens desde então, subidas conquistadas e marcos do dossiê (uma foto do banco).
+
+    Poucas consultas para todos os prismas de uma vez: a rota roda a cada atualização do painel.
+    """
+    if con is None:
+        with trajetoria.abrir(espera_ms) as nova:
+            return _degraus(nova)
+    ativos = trajetoria.prismas(con)
+    primeiro, ultimo, origem = {}, {}, {}
+    for r in con.execute('SELECT prisma, quando, para, origem FROM nivel_registro ORDER BY quando, id'):
+        primeiro.setdefault(r['prisma'], int(r['para']))
+        ultimo[r['prisma']], origem[r['prisma']] = r['quando'], r['origem']
+    progresso = {r['prisma']: (int(r['lm']), int(r['propria']), int(r['feixes'])) for r in con.execute(SQL_PROGRESSO)}
+    return {'base': {p['nome']: primeiro.get(p['nome'], p['nivel']) for p in ativos},
+            'desde': {p['nome']: ultimo.get(p['nome'], '') for p in ativos},
+            'origem_do_nivel': origem,
+            'progresso': progresso,
+            'historico': trajetoria.historico_subidas(con),
+            'marcos_dossie': trajetoria.perfil_ler(con, 'marcos_dossie', [])}
+
+
+def garantir_base(plan: dict, con: sqlite3.Connection | None = None) -> dict:
     """A base da rota é o primeiro registro do livro de níveis; skill sem registro ainda parte do nível atual."""
-    d = _degraus()
-    for nome, v in niveis(plan).items():
+    if con is None:
+        with trajetoria.abrir() as nova:
+            return garantir_base(plan, nova)
+    d = _degraus(con)
+    for nome, v in niveis(plan, con).items():
         d['base'].setdefault(nome, v['nivel'])
         d['desde'].setdefault(nome, '')
     return d
 
 
 def progresso_skill(skill: str, d: dict | None = None) -> dict:
+    """Progresso do prisma até o próximo nível: lúmens desde o último registro de nível (de qualquer origem)."""
     d = d or _degraus()
-    desde = d.get('desde', {}).get(skill, '')
-    regs = [r for r in livro() if r['skill'] == skill and r['quando'] > desde]
-    total = sum(r['lm'] for r in regs)
-    propria = sum(r['lm'] for r in regs if r['luz'] == 'propria')
+    total, propria, feixes = d.get('progresso', {}).get(skill, (0, 0, 0))
     share = (propria / total) if total else 0.0
-    feixes = len({r.get('ref') for r in regs if r.get('fonte') == 'feixe'})
     falta = []
     if total < LIMIAR_DEGRAU:
         falta.append(f'{LIMIAR_DEGRAU - total} lm')
@@ -534,9 +595,15 @@ def progresso_skill(skill: str, d: dict | None = None) -> dict:
             'limiar': LIMIAR_DEGRAU, 'feixes': feixes, 'falta': falta, 'pronto': not falta}
 
 
-def rota(plan: dict) -> dict:
-    d = garantir_base(plan)
-    nv = niveis(plan)
+progresso_prisma = progresso_skill
+
+
+def rota(plan: dict, con: sqlite3.Connection | None = None, espera_ms: int | None = None) -> dict:
+    if con is None:
+        with trajetoria.abrir(espera_ms) as nova:
+            return rota(plan, nova)
+    nv = niveis(plan, con)
+    d = garantir_base(plan, con)
     skills, total, feitos = [], 0, 0
     for nome, v in nv.items():
         base = int(d['base'].get(nome, v['nivel']))
@@ -547,8 +614,7 @@ def rota(plan: dict) -> dict:
         p = progresso_skill(nome, d)
         skills.append({'nome': nome, 'nivel': v['nivel'], 'meta': v['meta'], 'proximo': min(v['meta'], v['nivel'] + 1),
                        'na_meta': v['nivel'] >= v['meta'], **p})
-    lm_total = sum(r['lm'] for r in livro())
-    lm_propria = sum(r['lm'] for r in livro() if r['luz'] == 'propria')
+    lm_total, lm_propria = trajetoria.lumens_totais(con)
     marcos = [math.ceil(total * k / 3) for k in (1, 2, 3)] if total else []
     return {'niveis_total': total, 'niveis_feitos': feitos, 'degraus_total': total, 'degraus_feitos': feitos,
             'marcos': marcos, 'skills': skills,
@@ -557,65 +623,95 @@ def rota(plan: dict) -> dict:
 
 
 def subir(skill: str, plan: dict) -> dict:
-    """Confirma um degrau pronto: sobe o nível declarado, zera o progresso da skill e checa marco."""
-    d = garantir_base(plan)
-    nv = niveis(plan)
-    if skill not in nv:
-        return {'erro': 'skill não encontrada no seu plano'}
-    if nv[skill]['nivel'] >= nv[skill]['meta']:
-        return {'erro': 'esta skill já está na meta'}
-    p = progresso_skill(skill, d)
-    if not p['pronto']:
-        return {'erro': 'ainda não: falta ' + ', '.join(p['falta'])}
-    novo = min(nv[skill]['meta'], nv[skill]['nivel'] + 1)
+    """Confirma um nível pronto: sobe o nível (registro `conquistado`), zera o progresso do prisma e checa marco.
+
+    Só é chamada depois do sim da pessoa (CLI `subir` / botão do painel).
+    """
     with trajetoria.abrir() as con:
+        d = garantir_base(plan, con)
+        nv = niveis(plan, con)
+        if skill not in nv:
+            return {'erro': 'skill não encontrada no seu plano'}
+        if nv[skill]['nivel'] >= nv[skill]['meta']:
+            return {'erro': 'esta skill já está na meta'}
+        p = progresso_skill(skill, d)
+        if not p['pronto']:
+            return {'erro': 'ainda não: falta ' + ', '.join(p['falta'])}
+        novo = min(nv[skill]['meta'], nv[skill]['nivel'] + 1)
         if con.execute('SELECT 1 FROM prisma WHERE nome = ?', (skill,)).fetchone() is None:
             return {'erro': 'skill não encontrada na sua trajetória'}
         trajetoria.registrar_subida(con, skill, novo, p['lm'], p['luz_propria'])
-    r = rota(plan)
-    marco = None
-    marcos_feitos = list(d.get('marcos_dossie', []))
-    for i, m in enumerate(r['marcos'], 1):
-        if r['niveis_feitos'] >= m and i not in marcos_feitos:
-            marcos_feitos.append(i)
-            with trajetoria.abrir() as con, trajetoria.banco.transacao(con):
-                trajetoria.perfil_gravar(con, 'marcos_dossie', marcos_feitos)
-            marco = {'n': i, 'dossie': str(dossie(plan, f'marco {i} de 3'))}
+        r = rota(plan, con)
+        marco = None
+        marcos_feitos = list(d.get('marcos_dossie', []))
+        for i, m in enumerate(r['marcos'], 1):
+            if r['niveis_feitos'] >= m and i not in marcos_feitos:
+                marcos_feitos.append(i)
+                with banco.transacao(con):
+                    trajetoria.perfil_gravar(con, 'marcos_dossie', marcos_feitos)
+                marco = {'n': i, 'dossie': str(dossie(plan, f'marco {i} de 3', con))}
     return {'skill': skill, 'para': novo, 'rota': r, 'marco': marco}
 
 
 def ritmo(plan: dict, horizonte: str = '') -> dict:
     """Calibragem (não cronograma): feixes por semana para chegar no prazo que a pessoa imagina."""
-    r = rota(plan)
+    with trajetoria.abrir() as con:
+        r = rota(plan, con)
+        pend = [f for f in avancos(con, historico=False) if f.get('estado') in ('sugerido', 'na_fila')]
     faltam = sum(max(0, s['meta'] - s['nivel']) * LIMIAR_DEGRAU - (s['lm'] if not s['na_meta'] else 0) for s in r['skills'])
     meses = next((int(t) for t in str(horizonte).split() if t.isdigit()), 12)
-    with trajetoria.abrir() as con:
-        pend = [f for f in avancos(con, historico=False) if f.get('estado') in ('sugerido', 'na_fila')]
     medio = (sum(int(f.get('valor_lm', 40)) for f in pend) / len(pend)) if pend else 40
     semanas = max(1.0, meses * 4.33)
     return {'lm_faltam': max(0, faltam), 'meses': meses, 'feixes_semana': max(1, math.ceil(faltam / (medio * semanas)))}
 
 
 # ------------------------------------------------------------------ dossiê
-def dossie(plan: dict, titulo: str = 'agora') -> Path:
-    r = rota(plan)
-    with trajetoria.abrir() as con:
-        conq = avancos(con, estado='conquistado')
-    d = _degraus()
+TIPO_PEDIDO = {'incluir': 'incluir skill', 'arquivar': 'arquivar skill', 'reativar': 'reativar skill',
+               'mudar_meta': 'mudar a meta de uma skill'}
+SQL_PEDIDOS_ACEITOS = """
+    SELECT p.tipo, p.prisma, p.motivo, p.criado_em, p.decidido_em, l.texto, l.modelo, l.criado_em AS leitura_em
+    FROM pedido p LEFT JOIN leitura l ON l.id = p.leitura_id
+    WHERE p.estado = 'aceito' ORDER BY COALESCE(p.decidido_em, p.criado_em), p.id"""
+
+
+def dossie(plan: dict, titulo: str = 'agora', con: sqlite3.Connection | None = None) -> Path:
+    """Dossiê de evidências em linguagem formal (skill, nível, ação): só níveis conquistados contam como evidência."""
+    if con is None:
+        with trajetoria.abrir() as nova:
+            return dossie(plan, titulo, nova)
+    r = rota(plan, con)
+    conq = avancos(con, estado='conquistado')
+    d = _degraus(con)
+    pedidos = con.execute(SQL_PEDIDOS_ACEITOS).fetchall()
     linhas = [
         f'# Dossiê de evidências · {titulo} · {agora()[:10]}', '',
-        f"Rota: **{r['degraus_feitos']} de {r['degraus_total']} degraus** até Plena · {r['lm_total']} lm · {r['luz_propria']}% de luz própria.", '',
-        '## Degraus subidos',
+        f"Trajetória: **{r['niveis_feitos']} de {r['niveis_total']} níveis** até a meta · {r['lm_total']} lm de evidência acumulada · "
+        f"{r['luz_propria']}% de autoria própria.", '',
+        '## Níveis conquistados',
     ]
-    linhas += [f"- {h['quando'][:10]} · {h['skill']} → {h['para']} ({h['lm']} lm, {h['luz_propria']}% luz própria)" for h in d['historico']] or ['- nenhum ainda']
-    linhas += ['', '## Feixes conquistados (evidência avaliada pela rubrica 0–4)']
+    linhas += [f"- {h['quando'][:10]} · {h['skill']} → nível {h['para']} ({h['lm']} lm no período, {h['luz_propria']}% de autoria própria)"
+               for h in d['historico']] or ['- nenhum ainda']
+    linhas += ['', '## Ações concluídas (evidência avaliada pela rubrica 0–4)']
     for f in sorted(conq, key=lambda x: (x.get('historico') or [{}])[-1].get('quando', '')):
-        linhas.append(f"- **{f.get('titulo')}** · {f.get('skill_plano') or f.get('skill')} · nota {f.get('nota')}/4 · {f.get('lm_ganho')} lm — {f.get('resumo', '')}")
+        linhas.append(f"- **{f.get('titulo')}** · {f.get('skill_plano') or f.get('skill')} · nota {f.get('nota')}/4 · "
+                      f"{f.get('lm_ganho')} lm — {f.get('resumo', '')}")
     if not conq:
-        linhas.append('- nenhum ainda')
+        linhas.append('- nenhuma ainda')
+    linhas += ['', '## Pedidos de mudança aceitos']
+    for p in pedidos:
+        linha = f"- {(p['decidido_em'] or p['criado_em'])[:10]} · {TIPO_PEDIDO.get(p['tipo'], p['tipo'])} · {p['prisma']}"
+        if p['motivo']:
+            linha += f" — {p['motivo']}"
+        linhas.append(linha)
+        if p['texto']:
+            linhas.append(f"  - Análise: {p['texto']} (com base em {p['modelo']}, {(p['leitura_em'] or '')[:10]})")
+    if not pedidos:
+        linhas.append('- nenhum')
     linhas += ['', '## Por skill']
     for s in r['skills']:
-        linhas.append(f"- {s['nome']}: nível {s['nivel']} (meta {s['meta']}) · {s['lm']} lm desde o último degrau · {s['luz_propria']}% luz própria")
+        declarado = ' · nível declarado pela pessoa' if d['origem_do_nivel'].get(s['nome']) == 'declarado' else ''
+        linhas.append(f"- {s['nome']}: nível {s['nivel']} (meta {s['meta']}) · {s['lm']} lm desde o último nível · "
+                      f"{s['luz_propria']}% de autoria própria{declarado}")
     linhas += ['', '_Gerado localmente pela Luzia a partir das evidências registradas; não substitui a avaliação do seu líder._']
     DOSSIES.mkdir(parents=True, exist_ok=True)
     caminho = DOSSIES / f"dossie-{agora()[:10]}-{titulo.replace(' ', '-')}.md"

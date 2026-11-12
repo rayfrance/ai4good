@@ -455,7 +455,7 @@ def _lumens_ligados(con: sqlite3.Connection, r: sqlite3.Row, prismas_nomes: set[
     return out
 
 
-def detalhe(con: sqlite3.Connection, entrega_id: int) -> dict | None:
+def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = True) -> dict | None:
     """Detalhe completo de uma entrega ligada ao jogo (sem hashes nem ids privados)."""
     r = con.execute('SELECT * FROM entrega WHERE id = ?', (int(entrega_id),)).fetchone()
     if r is None:
@@ -493,11 +493,12 @@ def detalhe(con: sqlite3.Connection, entrega_id: int) -> dict | None:
     prop = _propriedade_entrega(con, r, commits, avancos_feitos)
 
     leitura_obj = None
-    try:
-        from . import leituras
-        leitura_obj = leituras.obter(con, 'entrega', str(eid))
-    except ImportError:
-        pass
+    if incluir_leitura:
+        try:
+            from . import leituras
+            leitura_obj = leituras.obter(con, 'entrega', str(eid))
+        except ImportError:
+            pass
 
     return {
         'id': eid,

@@ -1,0 +1,295 @@
+"""Leituras da Luzia com base visível, modelo e data (Tarefa 10).
+
+Toda leitura de IA guarda os fatos usados (`base_json`), o hash desses fatos (`base_hash`),
+o modelo e a data (`criado_em`). Só regenera quando o hash da base muda ou sob pedido, e
+renova todas as leituras vencidas numa única chamada em lote (tudo ou nada na transação).
+Sem modelo, sem chave ou sem internet: devolve 0 e nada é gravado.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sqlite3
+import time
+from datetime import datetime
+
+from . import arquivos, banco, entregas, jogo, pipeline, planner, trajetoria
+from .privacy import Redactor
+
+
+def _agora() -> str:
+    return datetime.now().isoformat(timespec='seconds')
+
+
+def _redator() -> Redactor:
+    return Redactor.from_file(arquivos.PRIVATE / 'termos.txt')
+
+
+def _limpar_texto(texto: str, redator: Redactor) -> str:
+    return redator.redact(entregas._limpar(str(texto or '')))
+
+
+def _base_prisma(con: sqlite3.Connection, nome: str, redator: Redactor) -> dict:
+    todos = {p['nome']: p for p in trajetoria.prismas(con, incluir_arquivados=True)}
+    p = todos.get(nome, {'nome': nome, 'nivel': 0, 'meta': 5, 'estado': 'ativo'})
+    plano = trajetoria.perfil_ler(con, 'plano') or {}
+    skill_tri = next((s for s in plano.get('skills', []) if s.get('nome') == nome), {})
+    diag = plano.get('diagnostico_fontes') or {}
+
+    entregas_rows = con.execute(
+        'SELECT e.id, e.titulo, e.commits, e.arquivos, e.linhas, ep.termos_json '
+        'FROM entrega_prisma ep JOIN entrega e ON e.id = ep.entrega_id '
+        'WHERE ep.prisma = ? ORDER BY e.fim DESC, e.id DESC',
+        (nome,),
+    ).fetchall()
+    termos_set: dict[str, None] = {}
+    entregas_resumo = []
+    for r in entregas_rows:
+        try:
+            ts = json.loads(r['termos_json'] or '[]')
+        except ValueError:
+            ts = []
+        for t in ts:
+            termos_set[str(t)] = None
+        entregas_resumo.append({
+            'titulo': _limpar_texto(r['titulo'] or '', redator),
+            'commits': int(r['commits'] or 0),
+            'arquivos': int(r['arquivos'] or 0),
+            'linhas': int(r['linhas'] or 0),
+        })
+
+    avs = jogo.avancos(con, prisma=nome, historico=False)
+    conquistados = [
+        {'titulo': _limpar_texto(a.get('titulo', ''), redator), 'tipo': a.get('tipo'),
+         'nota': a.get('nota'), 'lm_ganho': int(a.get('lm_ganho') or 0)}
+        for a in avs if a.get('estado') == 'conquistado'
+    ]
+    abertos = sum(1 for a in avs if a.get('estado') in ('sugerido', 'na_fila', 'em_andamento'))
+
+    lm_propria, lm_refletida = con.execute(
+        "SELECT COALESCE(SUM(CASE WHEN luz = 'propria' THEN lm END), 0), "
+        "COALESCE(SUM(CASE WHEN luz = 'refletida' THEN lm END), 0) "
+        'FROM lumen WHERE prisma = ?',
+        (nome,),
+    ).fetchone()
+    lm_propria, lm_refletida = int(lm_propria or 0), int(lm_refletida or 0)
+
+    ev_dirigido, ev_agente = con.execute(
+        "SELECT COALESCE(SUM(CASE WHEN ferramenta = 'prompt' THEN 1 ELSE 0 END), 0), "
+        "COALESCE(SUM(CASE WHEN ferramenta != 'prompt' THEN 1 ELSE 0 END), 0) "
+        'FROM sessao_evento WHERE prisma = ?',
+        (nome,),
+    ).fetchone()
+    lm_dir_cnt, lm_ag_cnt = con.execute(
+        "SELECT COALESCE(SUM(CASE WHEN luz = 'propria' THEN 1 ELSE 0 END), 0), "
+        "COALESCE(SUM(CASE WHEN luz = 'refletida' THEN 1 ELSE 0 END), 0) "
+        'FROM lumen WHERE prisma = ?',
+        (nome,),
+    ).fetchone()
+    dirigido = int(ev_dirigido or 0) + int(lm_dir_cnt or 0)
+    pelo_agente = int(ev_agente or 0) + int(lm_ag_cnt or 0)
+    total_interacoes = dirigido + pelo_agente
+    pct_dirigido = round(100 * dirigido / total_interacoes) if total_interacoes else None
+
+    return {
+        'prisma': nome,
+        'nivel': int(p.get('nivel') or 0),
+        'meta': int(p.get('meta') if p.get('meta') is not None else 5),
+        'estado': p.get('estado', 'ativo'),
+        'entregas_total': len(entregas_rows),
+        'commits_total': sum(int(r['commits'] or 0) for r in entregas_rows),
+        'termos_detectados': list(termos_set),
+        'entregas': entregas_resumo[:5],
+        'avancos_conquistados': conquistados,
+        'avancos_abertos': abertos,
+        'lumens': {'propria': lm_propria, 'refletida': lm_refletida, 'total': lm_propria + lm_refletida},
+        'uso_ia': {'dirigido': dirigido, 'pelo_agente': pelo_agente, 'pct_dirigido': pct_dirigido},
+        'triagem': {
+            'evidencia': _limpar_texto(skill_tri.get('evidencia', ''), redator),
+            'curriculo_vs_pratica': _limpar_texto(diag.get('conflito_curriculo_vs_realidade', ''), redator),
+        },
+    }
+
+
+def _base_entrega(con: sqlite3.Connection, entrega_id: str, redator: Redactor) -> dict:
+    try:
+        eid = int(entrega_id)
+    except ValueError:
+        return {'entrega_id': str(entrega_id)}
+    det = entregas.detalhe(con, eid, incluir_leitura=False)
+    if det is None:
+        return {'entrega_id': str(entrega_id)}
+    lm_ligados = det.get('lumens_ligados') or []
+    lm_prop = sum(int(l['lm']) for l in lm_ligados if l.get('luz') == 'propria')
+    lm_refl = sum(int(l['lm']) for l in lm_ligados if l.get('luz') == 'refletida')
+    prop = det.get('propriedade') or {}
+    dims = prop.get('dimensoes') or {}
+    return {
+        'entrega_id': eid,
+        'titulo': _limpar_texto(det.get('titulo', ''), redator),
+        'fatos': det.get('fatos') or {},
+        'prismas': [{'prisma': p['nome'], 'termos': p['termos']} for p in (det.get('prismas') or [])],
+        'avancos_feitos': [
+            {'titulo': _limpar_texto(a.get('titulo', ''), redator), 'estado': a.get('estado'),
+             'nota': a.get('nota'), 'dimensao': a.get('dimensao')}
+            for a in (det.get('avancos_feitos') or [])
+        ],
+        'lumens_ligados': {'propria': lm_prop, 'refletida': lm_refl, 'total': lm_prop + lm_refl},
+        'propriedade': {
+            'indice': prop.get('indice'),
+            'base': prop.get('base'),
+            'dimensoes': {k: (v.get('nota') if isinstance(v, dict) else None) for k, v in dims.items()},
+        },
+    }
+
+
+def _base_pedido(con: sqlite3.Connection, pedido_id: str, redator: Redactor) -> dict:
+    try:
+        pid = int(pedido_id)
+    except ValueError:
+        pid = -1
+    r = con.execute('SELECT * FROM pedido WHERE id = ?', (pid,)).fetchone()
+    resumo = trajetoria.resumo(con)
+    ativos = [{'nome': p['nome'], 'nivel': p['nivel'], 'meta': p['meta']} for p in trajetoria.prismas(con)]
+    if r is None:
+        return {'pedido_id': str(pedido_id), 'trajetoria': resumo, 'prismas_ativos': ativos}
+    return {
+        'pedido_id': int(r['id']),
+        'tipo': r['tipo'],
+        'prisma': r['prisma'],
+        'motivo': _limpar_texto(r['motivo'] or '', redator),
+        'trajetoria': resumo,
+        'prismas_ativos': ativos,
+    }
+
+
+def base(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str) -> dict:
+    """Fatos determinísticos e anonimizados que fundamentam a leitura de um prisma, entrega ou pedido."""
+    redator = _redator()
+    alvo_id = str(alvo_id)
+    if alvo_tipo == 'prisma':
+        return _base_prisma(con, alvo_id, redator)
+    if alvo_tipo == 'entrega':
+        return _base_entrega(con, alvo_id, redator)
+    if alvo_tipo == 'pedido':
+        return _base_pedido(con, alvo_id, redator)
+    raise ValueError(f'tipo de alvo desconhecido para leitura: {alvo_tipo!r}')
+
+
+def hash_base(dados_base: dict) -> str:
+    """SHA-256 canônico (JSON com chaves ordenadas) da base de fatos."""
+    canonico = json.dumps(dados_base, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(canonico.encode('utf-8')).hexdigest()
+
+
+def obter(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str) -> dict | None:
+    """Leitura mais recente gravada para (alvo_tipo, alvo_id), indicando se está vencida."""
+    alvo_id = str(alvo_id)
+    r = con.execute(
+        'SELECT id, texto, base_json, base_hash, modelo, criado_em FROM leitura '
+        'WHERE alvo_tipo = ? AND alvo_id = ? ORDER BY id DESC LIMIT 1',
+        (alvo_tipo, alvo_id),
+    ).fetchone()
+    if r is None:
+        return None
+    try:
+        base_salva = json.loads(r['base_json'] or '{}')
+    except ValueError:
+        base_salva = {}
+    atual_hash = hash_base(base(con, alvo_tipo, alvo_id))
+    return {
+        'id': int(r['id']),
+        'alvo_tipo': alvo_tipo,
+        'alvo_id': alvo_id,
+        'texto': r['texto'],
+        'base': base_salva,
+        'base_hash': r['base_hash'],
+        'modelo': r['modelo'],
+        'criado_em': r['criado_em'],
+        'vencida': r['base_hash'] != atual_hash,
+    }
+
+
+def vencidas(con: sqlite3.Connection) -> list[tuple[str, str]]:
+    """Alvos ('prisma'|'entrega', id) sem leitura ou cujo hash da base mudou."""
+    candidatos: list[tuple[str, str]] = [('prisma', p['nome']) for p in trajetoria.prismas(con)]
+    candidatos += [('entrega', str(r['id'])) for r in con.execute('SELECT id FROM entrega ORDER BY fim DESC, id DESC')]
+    out: list[tuple[str, str]] = []
+    for tipo, aid in candidatos:
+        r = con.execute(
+            'SELECT base_hash FROM leitura WHERE alvo_tipo = ? AND alvo_id = ? ORDER BY id DESC LIMIT 1',
+            (tipo, aid),
+        ).fetchone()
+        if r is None or r['base_hash'] != hash_base(base(con, tipo, aid)):
+            out.append((tipo, aid))
+    return out
+
+
+def gerar(con: sqlite3.Connection, alvos: list[tuple[str, str]] | None = None) -> int:
+    """Gera leituras numa única chamada ao modelo e grava todas ou nenhuma numa transação."""
+    lista = list(dict.fromkeys(alvos if alvos is not None else vencidas(con)))
+    if not lista:
+        return 0
+    itens = []
+    for tipo, aid in lista:
+        aid_s = str(aid)
+        b = base(con, tipo, aid_s)
+        itens.append({
+            'alvo': f'{tipo}:{aid_s}',
+            'alvo_tipo': tipo,
+            'alvo_id': aid_s,
+            'base': b,
+            'base_hash': hash_base(b),
+        })
+
+    payload = {
+        'alvos': [
+            {'alvo': it['alvo'], 'tipo': it['alvo_tipo'], 'id': it['alvo_id'], 'fatos': it['base']}
+            for it in itens
+        ],
+    }
+    t0 = time.perf_counter()
+    try:
+        res, rec = pipeline.run_plan(
+            payload,
+            prep_seconds=time.perf_counter() - t0,
+            label='leituras-lote',
+            save_current_state=False,
+            schema=planner.LEITURAS_SCHEMA,
+            intro='Fatos medidos localmente pela Luzia para gerar leituras com base (anonimizados por LGPD):',
+        )
+    except Exception as e:
+        arquivos.registrar_erro('leituras.gerar', e)
+        return 0
+
+    brutas = (res.plan or {}).get('leituras') if isinstance(res.plan, dict) else None
+    if not isinstance(brutas, list):
+        return 0
+
+    por_chave: dict[str, str] = {}
+    for item in brutas:
+        if isinstance(item, dict) and isinstance(item.get('alvo'), str) and isinstance(item.get('texto'), str):
+            txt = item['texto'].strip()
+            if txt:
+                por_chave[item['alvo']] = txt
+
+    redator = _redator()
+    prontas: list[tuple[dict, str]] = []
+    for it in itens:
+        txt = por_chave.get(it['alvo']) or por_chave.get(it['alvo_id'])
+        if not txt:
+            return 0  # lote incompleto: grava todas ou nenhuma
+        prontas.append((it, _limpar_texto(txt, redator)))
+
+    modelo_nome = (rec or {}).get('modelo') or getattr(res, 'model', '') or 'desconhecido'
+    quando = (rec or {}).get('quando') or _agora()
+    with banco.transacao(con):
+        for it, txt in prontas:
+            con.execute(
+                'INSERT INTO leitura (alvo_tipo, alvo_id, texto, base_json, base_hash, modelo, criado_em) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                (it['alvo_tipo'], it['alvo_id'], txt, json.dumps(it['base'], ensure_ascii=False, sort_keys=True),
+                 it['base_hash'], modelo_nome, quando),
+            )
+    return len(prontas)

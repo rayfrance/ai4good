@@ -152,6 +152,18 @@ OPPORTUNITIES_SCHEMA = f"""Devolva exatamente este JSON:
 3 oportunidades, priorizando as skills detectadas nos eventos da sessão e as maiores lacunas (alvo - nível).
 {REGRAS_ACOES}"""
 
+LEITURAS_SCHEMA = """Devolva exatamente este JSON:
+{
+  "leituras": [
+    {
+      "alvo": str,
+      "texto": str
+    }
+  ]
+}
+Para cada item recebido em "alvos", devolva um item em "leituras" copiando exatamente o identificador "alvo".
+"texto": no máximo 3 frases curtas, escritas somente a partir dos fatos recebidos naquele alvo (o que a Luzia observa nos fatos e o próximo foco). Nunca invente dados e nunca cite nomes da empresa, produtos internos, clientes, colegas, hashes ou números de PR/ticket."""
+
 
 @dataclass
 class LLMResult:

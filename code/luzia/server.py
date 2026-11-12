@@ -113,6 +113,7 @@ def estado() -> dict:
             'espectro': _espectro(p['nivel']),
             'leitura': leituras_prismas.get(nome),
             **prog,
+            'avancos_conquistados': prog.get('feixes', 0),
             'degraus': subidas,
             'niveis_conquistados': subidas,
         })
@@ -129,10 +130,10 @@ def estado() -> dict:
         prop = det.get('propriedade', {})
         entregas_out.append({
             'id': det['id'],
-            'chave': det['chave'],
+            'chave': det.get('chave', ''),
             'titulo': det['titulo'],
             'tarefa': det['titulo'],
-            'fonte': det['fonte'],
+            'fonte': det.get('fonte', 'git'),
             'fatos': det['fatos'],
             'prismas': det['prismas'],
             'skills': [x['prisma'] for x in det['prismas']],
@@ -170,6 +171,9 @@ def estado() -> dict:
     modo_atual = pipeline.read_json(pipeline.OBSERVER_CFG, {}).get('modo', 'ativo')
     modo_nome = observer.NOMES_FOCO.get(modo_atual, modo_atual)
 
+    r_ritmo = jogo.ritmo(plan, cfg.get('horizonte', ''))
+    r_ritmo['avancos_semana'] = r_ritmo.get('feixes_semana', 1)
+
     return {
         'perfil': {
             'onde': plan.get('onde_esta', {}).get('resumo', ''),
@@ -184,7 +188,7 @@ def estado() -> dict:
             'resumo': rota_jogo,
         },
         'rota': rota_jogo,
-        'ritmo': jogo.ritmo(plan, cfg.get('horizonte', '')),
+        'ritmo': r_ritmo,
         'modelo': modelo.status(),
         'regras': {
             'limiar': jogo.LIMIAR_DEGRAU,

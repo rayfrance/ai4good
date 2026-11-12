@@ -95,6 +95,10 @@ def test_entrega_detalhe_e_ampliar(api):
                 (eid, DDD, json.dumps(['aggregate', 'domain'])),
             )
 
+    code_st, st_ent = api('GET', '/api/estado')
+    assert code_st == 200
+    assert any(e['id'] == eid for e in st_ent['entregas'])
+
     code, det = api('GET', f'/api/entrega?id={eid}')
     assert code == 200
     for k in ('fatos', 'prismas', 'avancos_feitos', 'avancos_uteis', 'lumens_ligados', 'propriedade', 'leitura'):

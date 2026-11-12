@@ -1,27 +1,38 @@
-"""Observador de sessão da Luzia (hooks do Claude Code, 100% local, sem chamar modelo).
+"""Observador de foco da Luzia: hooks do Claude Code (PostToolUse, UserPromptSubmit e SessionStart).
 
-Pega eventos de `SessionStart`, `UserPromptSubmit` e `PostToolUse` via stdin (JSON),
-verifica se o repositório está autorizado, cruza o texto com as lacunas da trajetória
-e devolve contexto curto para o Claude agir como a Luzia, dentro do foco escolhido:
-- `ativo` ("em foco, com lampejos"): avisa quando o agente usa um conceito da lacuna (luz refletida +10 lm) ou quando a pessoa dirige (+20 lm).
-- `passivo` ("em foco, em silêncio"): só registra lúmens e eventos no banco; não injeta lampejo no meio da sessão.
-- `sob_demanda` ("fora de foco"): não observa; a Luzia só fala quando chamada por `/luzia:...`.
+Roda localmente, sem chamar o modelo, só nos repositórios autorizados (`private/observer.json`).
 
-LGPD: nunca guarda o código nem o prompt bruto — só horário, prisma, extensão e modo.
+- PostToolUse (edição de arquivo ou `git commit`): se o conceito de um prisma (skill) com lacuna aparece no
+  que o agente escreveu, é **luz refletida** (+10 lm). Em foco com lampejos (`ativo`), a Luzia mostra um lampejo com uma
+  pergunta: 1 frase sua converte em **luz própria** (até +30 lm).
+- UserPromptSubmit: se o conceito aparece no **seu prompt** (você dirigiu), é **luz própria** (+20 lm).
+  Também oferece os avanços que você mandou do painel (fila).
+- Um reconhecimento por prisma por sessão; no máximo 40 lm passivos por prisma por dia (regras em docs/luzia-ux.md).
+- Grava só o evento mascarado (horário, prisma, extensão, origem). Nunca o caminho, o código ou o texto do prompt.
+- Tudo vai para o banco (`lumen`, `sessao_evento`, `lampejo`) por `banco.gravar_ou_pendurar`, com espera curta: se o banco
+  estiver ocupado, o evento fica em `pendentes.jsonl` e a próxima escrita o absorve. O hook nunca levanta nem trava a sessão.
+- SessionStart: se há algo a retomar (avanço em andamento, nível pronto, fila), uma linha no fim da 1ª resposta.
+- Modos do foco: `ativo` (em foco, com lampejos), `passivo` (em foco, em silêncio), `sob_demanda` (fora de foco).
 """
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
 import re
 import sys
 from pathlib import Path
 
-from . import acoes, arquivos, banco, jogo, trajetoria
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+
+from luzia import acoes, arquivos, banco, jogo, trajetoria  # noqa: E402
 
 PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
 CONFIG = CFG
+CLI = arquivos.CLI
 
 MODOS_VALIDOS = ('ativo', 'passivo', 'sob_demanda')
 NOMES_FOCO = {
@@ -30,272 +41,225 @@ NOMES_FOCO = {
     'sob_demanda': 'fora de foco',
 }
 
-# Vocabulário técnico por prisma (usado quando o plano ainda não trouxe `palavras_chave`).
-PALAVRAS_PADRAO: dict[str, list[str]] = {
-    'ddd': ['aggregate', 'agregado', 'bounded context', 'value object', 'domain event', 'domain service', 'invariante', 'entidade de domínio'],
-    'clean architecture': ['usecase', 'use case', 'application layer', 'domain layer', 'infrastructure', 'repository', 'injeção de dependência', 'inversion'],
-    'arquitetura': ['clean architecture', 'camada', 'desacopl', 'interface', 'solid', ' controller', 'service', 'handler', 'dto'],
-    'teste': ['xunit', 'nunit', 'mstest', '[fact]', '[theory]', 'moq', 'fluentassertions', 'assert.', 'mock', 'unit test', 'caso de borda'],
-    'sql': ['select ', 'join ', 'group by', 'index ', 'migration', 'linq', 'ef core', 'dbcontext', 'query', 'transação'],
-    'c#': ['async ', 'await ', 'ienumerable', 'iqueryable', ' cancellationtoken', 'middleware', 'httpclient', ' backgroundservice'],
-    '.net': ['asp.net', 'program.cs', 'startup.cs', 'servicecollection', 'addscoped', 'addtransient', 'addsingleton'],
-    'front': ['react', 'usestate', 'useeffect', 'component', 'razor', '.cshtml', 'fetch(', 'addeventlistener', ' viewmodel'],
+PALAVRAS_PADRAO = {
+    'Domain-Driven Design (DDD)': ['Domain', 'Aggregate', 'ValueObject', 'Value Object', 'Entity', 'Repository', 'BoundedContext',
+                                   'DomainEvent', 'agregado', 'objeto de valor', 'entidade', 'subdomínio', 'contexto delimitado', 'DDD'],
+    'Arquitetura .NET / Clean Architecture': ['Interface', 'UseCase', 'Application', 'Infrastructure', 'DependencyInjection',
+                                              'IServiceCollection', 'camada', 'injeção de dependência', 'desacopl', 'clean architecture'],
+    'Testes e Qualidade / SQL': ['Test', 'xunit', 'Assert', 'Mock', 'Fact', 'teste', 'cobertura', 'SELECT', 'JOIN', 'índice'],
+    'Back-end C# / .NET e Integrações': ['HttpClient', 'Controller', 'Integration', 'async Task', 'integração', 'endpoint', 'retry'],
+    'Front-end (JS / Razor / React)': ['.cshtml', 'useState', 'fetch(', 'jQuery', 'componente', 'modal', 'razor'],
+    'Programação Agêntica e Fluxo com IA': ['CLAUDE.md', 'AGENTS.md', '.claude', 'subagente', 'hook', 'skill', 'plan mode'],
 }
 
-PERGUNTAS_PADRAO: dict[str, str] = {
-    'ddd': 'Qual regra de negócio aqui pertence ao domínio e ficaria protegida mesmo se a tela ou o banco mudassem?',
-    'arquitetura': 'Se a regra principal desta mudança trocar amanhã, você mexe em um lugar só ou em mais de uma camada?',
-    'teste': 'Qual caso de borda desta mudança quebraria em produção se ninguém testar agora?',
-    'sql': 'Esta consulta ou mudança de dados continua rápida e inteira se o volume crescer dez vezes?',
-    'c#': 'Se a chamada externa desta mudança falhar ou demorar, o que acontece com o fluxo principal?',
-    'front': 'A regra que está nesta tela mora só aqui ou ficou dividida com o back-end?',
-}
+
+def read_json(path: Path, default):
+    return arquivos.ler_json(path, default)
 
 
 def config() -> dict:
-    cfg = arquivos.ler_json(CONFIG, {})
-    modo = cfg.get('modo', 'ativo')
-    return {
-        'modo': modo if modo in MODOS_VALIDOS else 'ativo',
-        'autorizados': [str(Path(p).resolve()) for p in cfg.get('autorizados', [])],
-    }
+    return read_json(CFG, {'modo': 'ativo', 'autorizados': [], 'agente': 'claude-code'})
 
 
-def salvar_modo(modo: str, autorizados: list[str] | None = None) -> dict:
-    if modo not in MODOS_VALIDOS:
-        raise ValueError(f'modo inválido: {modo}')
-    atual = config()
-    novo = {'modo': modo, 'autorizados': autorizados if autorizados is not None else atual['autorizados']}
-    arquivos.gravar_json(CONFIG, novo)
-    return novo
+def definir_modo(modo: str) -> dict:
+    cfg = config()
+    cfg['modo'] = modo
+    arquivos.gravar_json(CFG, cfg)
+    return cfg
 
 
-def autorizado(cwd: str, cfg: dict) -> bool:
-    if not cwd or not cfg.get('autorizados'):
-        return False
-    try:
-        atual = Path(cwd).resolve()
-    except OSError:
-        return False
-    for base in cfg['autorizados']:
-        try:
-            b = Path(base).resolve()
-            if atual == b or b in atual.parents:
-                return True
-        except OSError:
-            continue
-    return False
+salvar_modo = definir_modo
 
 
 def plano() -> dict:
     return trajetoria.plano(banco.ESPERA_CURTA_MS)
 
 
-def _chave_padrao(nome_skill: str) -> str:
-    s = nome_skill.lower()
-    for k in ('ddd', 'clean architecture', 'arquitetura', 'teste', 'sql', 'c#', '.net', 'front'):
-        if k in s:
-            return 'arquitetura' if k == 'clean architecture' else ('c#' if k == '.net' else k)
-    return ''
-
-
 def lacunas(plan: dict) -> dict[str, dict]:
-    """Prismas ativos com nível < meta (os que merecem atenção do observador)."""
-    out: dict[str, dict] = {}
-    nv = jogo.niveis(plan, espera_ms=banco.ESPERA_CURTA_MS)
-    palavras_plano = {s.get('nome', ''): list(s.get('palavras_chave') or []) for s in plan.get('skills', [])}
-    palavras_banco: dict[str, list[str]] = {}
-    try:
-        with trajetoria.abrir(banco.ESPERA_CURTA_MS) as con:
-            for p in trajetoria.prismas(con):
-                palavras_banco[p['nome']] = list(p.get('palavras') or [])
-    except Exception as e:
-        arquivos.registrar_erro('observer.lacunas prismas', e)
-    for nome, info in nv.items():
-        atual, meta = info['nivel'], info['meta']
-        if atual >= meta:
+    """Prismas (skills) com lacuna (nível < meta), com palavras-chave do plano + padrão em português."""
+    out = {}
+    for nome, v in jogo.niveis(plan, espera_ms=banco.ESPERA_CURTA_MS).items():
+        if v['nivel'] >= v['meta']:
             continue
-        chave = _chave_padrao(nome)
-        palavras = list(palavras_plano.get(nome) or []) + list(palavras_banco.get(nome) or []) + PALAVRAS_PADRAO.get(chave, [])
-        seen: set[str] = set()
-        limpas = [p.lower() for p in palavras if p and not (p.lower() in seen or seen.add(p.lower()))]
-        if limpas:
-            out[nome] = {
-                'nivel': atual,
-                'meta': meta,
-                'palavras': limpas,
-                'pergunta': PERGUNTAS_PADRAO.get(chave, f'Por que esta decisão em {nome} foi feita assim e qual seria a alternativa?'),
-            }
-    return out
+        s = next((x for x in plan.get('skills', []) if x['nome'] == nome), {})
+        out[nome] = {'palavras': list(dict.fromkeys((s.get('palavras_chave') or []) + PALAVRAS_PADRAO.get(nome, []))),
+                     'nivel': v['nivel'], 'meta': v['meta']}
+    return out or {k: {'palavras': p, 'nivel': None, 'meta': None} for k, p in PALAVRAS_PADRAO.items()}
 
 
-def detectar(texto: str, lac: dict[str, dict]) -> tuple[str, dict, str] | None:
-    """Devolve (nome_prisma, info, termo_encontrado) para a primeira lacuna que aparece no texto."""
-    t = texto.lower()
-    for nome, info in lac.items():
-        for p in info['palavras']:
-            padrao = r'(?<![\w])' + re.escape(p.strip()) + r'(?![\w])'
-            if re.search(padrao, t):
-                return nome, info, p.strip()
-    return None
+def detectar(texto: str, gaps: dict) -> list[str]:
+    achadas = []
+    for skill, info in gaps.items():
+        for w in info['palavras']:
+            if w and len(w) >= 3 and re.search(r'(?<![A-Za-z])' + re.escape(w), texto, re.IGNORECASE):
+                achadas.append(skill)
+                break
+    return achadas
 
 
-def saida_hook(evento: str, contexto: str) -> None:
-    print(json.dumps({
-        'hookSpecificOutput': {
-            'hookEventName': evento,
-            'additionalContext': contexto,
-        }
-    }, ensure_ascii=False))
+def authorized(cwd: str, cfg: dict) -> bool:
+    roots = cfg.get('autorizados') or []
+    cwd_n = cwd.replace('\\', '/').lower()
+    return any(cwd_n.startswith(r.replace('\\', '/').lower()) for r in roots)
 
 
-def ao_iniciar_sessao(evento: dict, cfg: dict) -> None:
-    if cfg['modo'] == 'sob_demanda':
-        return
-    plan = plano()
-    lac = lacunas(plan)
-    resumo = ', '.join(f"Prisma {n} ({v['nivel']}→{v['meta']})" for n, v in list(lac.items())[:3])
-    partes = []
-    if resumo:
-        partes.append(f"Luzia ({NOMES_FOCO.get(cfg['modo'], 'em foco')}): prismas (skills) em desenvolvimento nesta trajetória: {resumo}.")
-    try:
-        with trajetoria.abrir(banco.ESPERA_CURTA_MS) as con:
-            r = jogo.rota(plan, con)
-            andamento = jogo.avancos(con, estado='em_andamento', historico=False)
-            pendentes = acoes.fila(banco.ESPERA_CURTA_MS)
-        prontos = [s['nome'] for s in r['skills'] if s['pronto'] and not s['na_meta']]
-    except Exception as e:
-        arquivos.registrar_erro('observer.ao_iniciar_sessao', e)
-        andamento, prontos, pendentes = [], [], []
-    if prontos:
-        partes.append(f"Nível pronto para confirmar em Prisma {prontos[0]} (o nível só muda com o sim da pessoa em /luzia:hoje).")
-    if andamento:
-        partes.append(f"Avanço em andamento: #{andamento[0]['id']} \"{andamento[0].get('titulo', '')}\".")
-    if pendentes:
-        nomes = ', '.join(f"#{x['id']} \"{x.get('titulo', '')}\"" for x in pendentes[:2])
-        partes.append(f"A pessoa enviou do painel para fazer aqui: {nomes}.")
-    if len(partes) > 1:
-        partes.append(
-            '[Luzia · início] Na sua PRIMEIRA resposta desta sessão, depois de responder ao que a pessoa pediu, '
-            'acrescente UMA linha curta lembrando o que está aberto e sugerindo `/luzia:hoje`.'
-        )
-    if partes:
-        saida_hook('SessionStart', ' '.join(partes))
+autorizado = authorized
 
 
-def ao_enviar_prompt(evento: dict, cfg: dict) -> None:
-    if cfg['modo'] == 'sob_demanda':
-        return
-    sessao = str(evento.get('session_id', 'sem-sessao'))
-    partes: list[str] = []
+def sessao_id(event: dict) -> str:
+    return hashlib.sha256(event.get('session_id', '').encode()).hexdigest()[:8]
 
-    try:
-        nao_oferecidas = [x for x in acoes.fila(banco.ESPERA_CURTA_MS) if sessao not in x.get('oferecida_em', [])]
-    except Exception as e:
-        arquivos.registrar_erro('observer.ao_enviar_prompt fila', e)
-        nao_oferecidas = []
-    if nao_oferecidas:
-        f = nao_oferecidas[0]
+
+def registrar(sid: str, skill: str, ext: str, origem: str, modo: str, lm: int, luz: str, interveio: bool) -> bool:
+    """Evento mascarado da sessão no banco (ou em `pendentes.jsonl` se o banco estiver ocupado)."""
+    return banco.gravar_ou_pendurar('sessao_evento', {'sessao': sid, 'prisma': skill, 'extensao': ext, 'ferramenta': origem,
+                                                      'modo': modo, 'lm': lm, 'luz': luz, 'interveio': 1 if interveio else 0})
+
+
+def saida(evento: str, contexto: str) -> None:
+    print(json.dumps({'hookSpecificOutput': {'hookEventName': evento, 'additionalContext': contexto}}, ensure_ascii=True))
+
+
+def sem_quebrar(funcao):
+    """O observador nunca atrapalha a sessão: erro do banco ou de qualquer parte vira linha no erros.log (só o tipo)."""
+    @functools.wraps(funcao)
+    def protegida(*args, **kwargs):
         try:
-            acoes.marcar_oferecida(f['id'], sessao, banco.ESPERA_CURTA_MS)
+            return funcao(*args, **kwargs)
         except Exception as e:
-            arquivos.registrar_erro('observer.ao_enviar_prompt marcar_oferecida', e)
-        partes.append(
-            f"[Luzia · fila] A pessoa clicou no painel em \"Fazer no Claude Code\" para o avanço #{f['id']} "
-            f"\"{f.get('titulo', '')}\". Depois de responder ao que ela escreveu agora, ofereça em botões "
-            f"(AskUserQuestion): \"Abrir em sessão nova\" (recomendado), \"Fazer aqui\" ou \"Depois\". "
-            f"Se ela escolher fazer, siga `/luzia:fazer {f['id']}`."
-        )
-
-    prompt = str(evento.get('prompt', ''))
-    achado = detectar(prompt, lacunas(plano())) if len(prompt) >= 12 else None
-    if achado:
-        nome, info, _ = achado
-        lm = jogo.reconhecer(sessao, 'prompt', nome, 'prompt', modo=cfg['modo'])
-        if lm is not None and cfg['modo'] == 'ativo' and lm > 0:
-            partes.append(
-                f"[Luzia · luz própria +{lm} lm] A pessoa trouxe **{nome}** no próprio prompt "
-                f"(Prisma {nome}, nível {info['nivel']}→{info['meta']}). Reconheça em uma linha curta no fim da resposta."
-            )
-    if partes:
-        saida_hook('UserPromptSubmit', ' '.join(partes))
+            arquivos.registrar_erro(f'observer {funcao.__name__}', e)
+    return protegida
 
 
-def _texto_ferramenta(nome_ferramenta: str, entrada: dict) -> tuple[str, str]:
-    """Extrai o texto analisável e a extensão do arquivo, sem guardar caminho."""
-    if nome_ferramenta in ('Write', 'Edit', 'MultiEdit'):
-        caminho = str(entrada.get('file_path') or entrada.get('path') or '')
-        ext = Path(caminho).suffix.lower() if caminho else ''
-        partes = [
-            str(entrada.get('content', '')),
-            str(entrada.get('new_string', '')),
-            ' '.join(str(e.get('new_string', '')) for e in entrada.get('edits', []) if isinstance(e, dict)),
-        ]
-        return ' '.join(partes), ext
-    if nome_ferramenta == 'Bash':
-        cmd = str(entrada.get('command', ''))
-        if 'git commit' in cmd:
-            return cmd, '.git-commit'
-    return '', ''
-
-
-def cartao_refletida(skill: str, pergunta: str, lm: int = 10) -> str:
-    """Lampejo compacto de 3 linhas + ações pelo CLI da Luzia."""
-    cli = arquivos.CLI
-    sk = skill.replace('"', '')
-    pg = pergunta.replace('"', "'")
+def cartao_refletida(skill: str, pergunta: str = '<a pergunta>', nivel: str = 'lacuna da trajetória', lm: int = 10) -> str:
     return (
-        f"[Luzia · luz refletida +{lm} lm em Prisma {skill}] Você acabou de aplicar este prisma pela pessoa. "
-        'Termine a tarefa normalmente e, no fim da resposta, mostre este lampejo de 3 linhas:\n'
-        f'> **✦ Lampejo da Luzia · Prisma {skill}** (+{lm} lm de luz refletida · responda e ganhe até +30 lm de luz própria)\n'
-        f'> _{pergunta}_\n'
-        '> Responda em 1–2 linhas agora, ou diga **guardar** para virar um avanço seu.\n'
-        'Em seguida, ofereça em botões (AskUserQuestion): "Responder agora" e "Guardar para depois". '
-        f'Se ela responder agora, avalie pela rubrica 0–4 ({acoes.RUBRICA_TXT}) e rode '
-        f'`{cli} lampejo "{sk}" --acao converter --nota <0-4>` (vale uma única vez por lampejo). '
-        f'Se ela escolher guardar, rode `{cli} guardar "{sk}" --pergunta "{pg}"`.'
+        f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica Prisma {skill} ({nivel}). Isso rendeu '
+        f'+{lm} lm de luz REFLETIDA para a pessoa: quem aplicou foi o agente. Termine a tarefa normalmente. No FIM da resposta, '
+        'mostre este lampejo em no máximo 3 linhas:\n'
+        f'✦ Lampejo da Luzia · Prisma {skill} reconhecido nesta mudança · +{lm} lm (luz refletida)\n'
+        '<1 linha: onde o conceito aparece concretamente nesta mudança>\n'
+        f'▸ Em 1 frase: {pergunta} · vira luz própria: até +30 lm\n'
+        'Depois, use AskUserQuestion com "Responder agora" e "Guardar para depois". Responder: espere a frase, avalie pela '
+        'rubrica 0-4 (0 não explicou, 1 descreveu o código, 2 explicou o porquê, 3 comparou com alternativa, 4 ligou ao '
+        f'conceito e aos trade-offs), dê retorno em 1 linha e rode: {CLI} lampejo --skill "{skill}" --pergunta "<a pergunta>" '
+        f'--nota <0-4> --resumo "<1 linha, sem nomes da empresa>". Guardar: rode {CLI} lampejo --skill "{skill}" '
+        '--pergunta "<a pergunta>". Nunca cite nomes da empresa, clientes ou colegas.'
     )
 
 
-def ao_usar_ferramenta(evento: dict, cfg: dict) -> None:
-    if cfg['modo'] == 'sob_demanda':
+@sem_quebrar
+def ao_enviar_prompt(event: dict, cfg: dict) -> None:
+    """UserPromptSubmit: luz própria quando você dirige o conceito; e a fila do painel."""
+    sid, modo = sessao_id(event), cfg.get('modo', 'ativo')
+    partes = []
+    if modo != 'sob_demanda':
+        plan = plano()
+        gaps = lacunas(plan)
+        for skill in detectar(event.get('prompt', ''), gaps):
+            lm = jogo.reconhecer(sid, 'prompt', skill, 'prompt', 'prompt', 'prompt', modo, modo == 'ativo')
+            if lm and modo == 'ativo':
+                partes.append(f'[Luzia · em foco · luz própria] A pessoa DIRIGIU Prisma "{skill}" neste pedido (+{lm} lm de luz própria). '
+                              f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · Prisma {skill}: você dirigiu isto, +{lm} lm de luz própria."')
+    try:  # espera curta: o hook não pode travar a sessão; sem a fila, o resto do aviso sai igual
+        pend = [f for f in acoes.fila(banco.ESPERA_CURTA_MS) if sid not in f.get('oferecida_em', [])]
+    except Exception as e:
+        arquivos.registrar_erro('observer fila', e)
+        pend = []
+    if pend:
+        item = pend[0]
+        try:
+            acoes.marcar_oferecida(item['id'], sid, banco.ESPERA_CURTA_MS)
+        except Exception as e:  # o aviso sai mesmo se o banco estiver ocupado; o erro fica registrado
+            arquivos.registrar_erro('observer fila', e)
+        partes.append(
+            f'[Luzia · fila] A pessoa enviou do painel o avanço #{item["id"]} ("{item.get("titulo", "")}"). Responda primeiro ao '
+            'que ela pediu. No FIM, em uma linha começando com "✦ Luzia:", lembre o avanço e use AskUserQuestion com '
+            '"Abrir em sessão nova", "Fazer aqui" e "Depois". Sessão nova: rode '
+            f'`{CLI} prompt {item["id"]} --onde "sessão nova"` e abra uma sessão/agente novo com esse texto pela ferramenta do seu '
+            f'harness (se não houver, faça aqui). Fazer aqui: rode `{CLI} fazer {item["id"]} --onde aqui` e siga o roteiro.'
+        )
+    if partes:
+        saida('UserPromptSubmit', '\n'.join(partes))
+
+
+@sem_quebrar
+def ao_usar_ferramenta(event: dict, cfg: dict) -> None:
+    """PostToolUse: luz refletida quando o agente aplica um conceito da sua trajetória."""
+    modo = cfg.get('modo', 'ativo')
+    if modo == 'sob_demanda':
         return
-    ferramenta = str(evento.get('tool_name', ''))
-    entrada = evento.get('tool_input') or {}
-    if not isinstance(entrada, dict):
+    tool, ti = event.get('tool_name', ''), event.get('tool_input') or {}
+    if tool == 'Bash':
+        cmd = ti.get('command', '')
+        if 'git commit' not in cmd:
+            return
+        texto, ext = cmd, 'commit'
+    else:
+        caminho = ti.get('file_path', '')
+        edits = ' '.join(e.get('new_string', '') for e in ti.get('edits', []) if isinstance(e, dict))
+        texto = ' '.join([Path(caminho).name, ti.get('content', ''), ti.get('new_string', ''), edits])
+        ext = Path(caminho).suffix.lower() or 'arquivo'
+    plan = plano()
+    gaps = lacunas(plan)
+    sid = sessao_id(event)
+    novas = []
+    for skill in detectar(texto, gaps):
+        primeira = modo == 'ativo' and not novas  # só o primeiro reconhecido abre lampejo (vira luz própria uma vez)
+        if jogo.reconhecer(sid, 'agente', skill, 'refletida', ext, tool, modo, primeira, lampejo=primeira) is not None:
+            novas.append(skill)
+    if not novas or modo != 'ativo':
         return
-    texto, ext = _texto_ferramenta(ferramenta, entrada)
-    if len(texto) < 20:
+    skill = novas[0]
+    info = gaps.get(skill, {})
+    nivel = f"você {info.get('nivel')} → meta {info.get('meta')}" if info.get('nivel') is not None else 'lacuna da trajetória'
+    saida('PostToolUse', cartao_refletida(skill, '<pergunta concreta de líder técnico sobre o porquê desta decisão>', nivel=nivel, lm=10))
+
+
+@sem_quebrar
+def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
+    """SessionStart: lembra o que dá para retomar, sem interromper."""
+    if cfg.get('modo', 'ativo') == 'sob_demanda':
         return
-    achado = detectar(texto, lacunas(plano()))
-    if not achado:
+    plan = plano()
+    if not plan:
         return
-    nome, info, _ = achado
-    sessao = str(evento.get('session_id', 'sem-sessao'))
-    interveio = cfg['modo'] == 'ativo'
-    lm = jogo.reconhecer(sessao, 'agente', nome, 'refletida', extensao=ext, ferramenta=ferramenta,
-                         modo=cfg['modo'], interveio=interveio, lampejo=interveio)
-    if lm is not None and interveio:
-        saida_hook('PostToolUse', cartao_refletida(nome, info['pergunta'], lm=lm))
+    andamento = jogo.em_andamento(banco.ESPERA_CURTA_MS)
+    prontas = [s['nome'].split('(')[0].strip() for s in jogo.rota(plan, espera_ms=banco.ESPERA_CURTA_MS)['skills']
+               if s['pronto'] and not s['na_meta']]
+    try:
+        fila = acoes.fila(banco.ESPERA_CURTA_MS)
+    except Exception as e:
+        arquivos.registrar_erro('observer fila', e)
+        fila = []
+    partes = []
+    if prontas:
+        partes.append(f"Prisma {', '.join(prontas)} pronto para subir de nível")
+    if andamento:
+        partes.append(f'avanço em andamento: "{andamento[0].get("titulo", "")}"')
+    if fila:
+        partes.append(f'{len(fila)} avanço(s) na fila do painel')
+    if partes:
+        saida('SessionStart', f"[Luzia · em foco · início] {'; '.join(partes)}. Não interrompa o que a pessoa pedir. No FIM da sua "
+                              'primeira resposta, em UMA linha: "✦ Luzia (em foco): <resumo curto disso> · /luzia:hoje para continuar."')
 
 
 def main() -> None:
     try:
-        cru = sys.stdin.read()
-        evento = json.loads(cru) if cru.strip() else {}
-    except json.JSONDecodeError:
+        event = json.load(sys.stdin)
+    except Exception:
         return
-    cfg = config()
-    cwd = str(evento.get('cwd') or '')
-    if not autorizado(cwd, cfg):
+    cfg = read_json(CFG, {'modo': 'ativo', 'autorizados': []})
+    if not authorized(event.get('cwd', ''), cfg):
         return
-    nome_ev = str(evento.get('hook_event_name', ''))
-    if nome_ev == 'SessionStart':
-        ao_iniciar_sessao(evento, cfg)
-    elif nome_ev == 'UserPromptSubmit':
-        ao_enviar_prompt(evento, cfg)
-    elif nome_ev == 'PostToolUse':
-        ao_usar_ferramenta(evento, cfg)
+    try:
+        if event.get('hook_event_name') == 'UserPromptSubmit':
+            ao_enviar_prompt(event, cfg)
+        elif event.get('hook_event_name') == 'SessionStart':
+            ao_iniciar_sessao(event, cfg)
+        else:
+            ao_usar_ferramenta(event, cfg)
+    except Exception as e:  # o observador nunca deve atrapalhar a sessão, mas o erro fica registrado
+        arquivos.registrar_erro(f"observer {event.get('hook_event_name', '')}", e)
 
 
 if __name__ == '__main__':

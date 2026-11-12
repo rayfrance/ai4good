@@ -1,11 +1,18 @@
 ---
 description: "Luzia · sua trajetória até a meta, por níveis de cada prisma (skill), com espectro, leituras e pedidos de mudança"
+argument-hint: "[pedido abrir <incluir|arquivar|reativar|mudar_meta> \"<prisma>\" --motivo \"...\"]"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
 
 ```bash
 cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli trajetoria
+```
+
+Se a pessoa passou argumentos (`$ARGUMENTS`) que começam com `pedido` (ex.: `pedido abrir incluir "Mensageria" --motivo "..."`, `pedido aceitar 3`), rode no lugar do comando acima:
+
+```bash
+cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli $ARGUMENTS
 ```
 
 Mostre a saída como veio (markdown visual), sem resumir.

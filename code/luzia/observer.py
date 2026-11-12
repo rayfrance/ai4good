@@ -37,6 +37,7 @@ CFG = PRIVATE / 'observer.json'
 CONFIG = CFG
 CLI = arquivos.CLI
 
+AGENTES = ('claude-code', 'codex', 'cursor', 'antigravity', 'outro')
 MODOS_VALIDOS = ('ativo', 'passivo', 'sob_demanda')
 NOMES_FOCO = {
     'ativo': 'em foco, com lampejos',

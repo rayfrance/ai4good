@@ -15,12 +15,21 @@ Para receber o bloco com o caminho certo desta máquina: `python -m luzia.instal
   - "Avanços" (com filtros opcionais): `LUZIA avancos [--estado E] [--prisma P] [--tipo T]`
   - "Acender novos avanços de um prisma": `LUZIA acender "<prisma>"`
   - "Entregas e propriedade intelectual": `LUZIA entregas [--ampliar DIAS]` e `LUZIA entrega <id>`
+  - "Não achou minhas entregas / meu nome no git é outro": `LUZIA identidade` e `LUZIA identidade adicionar "<nome ou e-mail>"`
+  - "Acender avanços para provar a propriedade de uma entrega": `LUZIA acender-entrega <id>` (2 avanços: P3 e P4)
+  - "Atualizar as leituras vencidas (cada leitura mostra base, modelo e data)": `LUZIA leituras`
+  - "Trocar o modelo / o agente": `LUZIA modelo usar <provedor> <modelo>` (a chave nunca pelo chat: painel ou `.env`) e `LUZIA agente <nome>`
   - "Declarar nível de partida (0–5)": `LUZIA nivel "<prisma>" <0-5>`
   - "Plano em horizontes / próximo nível": `LUZIA next-level` · Dossiê formal: `LUZIA dossie`
 - Toda saída pode terminar com `LUZIA_CLI`, `LUZIA_PERGUNTA` e `LUZIA_BOTOES` (JSON com `rotulo`, `descricao`, `rodar`). Não mostre essas linhas brutas: apresente as opções ao usuário (ou lista numerada) e, após a escolha, rode `LUZIA <rodar>`.
 - Avanço (`rodar` = `fazer <id>`): se este harness abre agente/sessão nova com um prompt, ofereça isso com o texto de `LUZIA prompt <id>`; senão rode `LUZIA fazer <id>` e siga o `ROTEIRO PARA O AGENTE`: uma pergunta por vez, não faça o trabalho no lugar da pessoa, avalie pela rubrica 0–4 e rode o `registrar` que ele indica (sem nomes da empresa, produtos internos, clientes ou colegas).
+- **Foco sem hooks (reconhecimento passivo).** Este harness não tem hooks, então você mesma chama o foco:
+  - Depois de **editar arquivos**: `LUZIA foco --arquivos <caminhos editados> --cwd "<pasta do projeto>"`. A Luzia lê só o `git diff` desses caminhos e não guarda código.
+  - No **começo de um pedido** da pessoa que cite um conceito: grave o texto do pedido num arquivo temporário e rode `LUZIA foco --prompt-arquivo <arquivo> --cwd "<pasta do projeto>"`; apague o arquivo em seguida. O texto não é guardado.
+  - Opcional: `--sessao <id>` (sem ele, vale um id por pasta e por dia).
+  - Regras (as mesmas do hook): +10 lm de luz refletida quando você aplicou o conceito, +20 lm de luz própria quando a pessoa o dirigiu no pedido, uma vez por prisma por sessão, teto de 40 lm por prisma por dia, lampejo só em "em foco, com lampejos". Se a saída trouxer um lampejo, mostre no fim da resposta e ofereça os botões "Responder agora" e "Guardar para depois". Se não trouxer nada novo, não comente.
 - Nível pronto: só rode `LUZIA subir "<prisma>"` com o **sim explícito** da pessoa.
 - Painel local: `LUZIA career-map` (`http://localhost:8501`).
 ```
 
-Limite: o foco automático com lampejos (`PostToolUse`, `UserPromptSubmit`, `SessionStart`) depende de hooks de ferramenta e hoje roda nativamente no Claude Code. Nos outros harnesses, a Luzia acompanha tudo pelos comandos `LUZIA`.
+Os hooks (`PostToolUse`, `UserPromptSubmit`, `SessionStart`) rodam nativamente só no Claude Code. Nos outros harnesses, o comando `LUZIA foco` (acima) dá o mesmo reconhecimento passivo, e o resto da Luzia vem dos comandos `LUZIA`.

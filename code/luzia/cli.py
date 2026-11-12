@@ -474,13 +474,15 @@ def hoje(plan: dict, state: dict) -> None:
 
 def _botoes_pedido(pid: int, p: dict) -> list[dict]:
     prop = p.get('proposta') or {}
-    nv = prop.get('nivel_partida', 1)
-    mt = prop.get('meta', 3)
-    return [
-        {'rotulo': f'Aceitar pedido #{pid}', 'descricao': f"aplicar mudança em Prisma {curto(p['prisma'], 24)}", 'rodar': f'pedido aceitar {pid}'},
-        {'rotulo': f'Ajustar pedido #{pid}', 'descricao': f'rever proposta (nível {nv} → meta {mt})', 'rodar': f'pedido ajustar {pid} --nivel {nv} --meta {mt}'},
-        {'rotulo': f'Recusar pedido #{pid}', 'descricao': 'arquivar pedido sem mudar a trajetória', 'rodar': f'pedido recusar {pid}'},
-    ]
+    bts = [{'rotulo': f'Aceitar pedido #{pid}', 'descricao': f"aplicar mudança em Prisma {curto(p['prisma'], 24)}",
+            'rodar': f'pedido aceitar {pid}'}]
+    if p.get('tipo') in ('incluir', 'mudar_meta'):  # arquivar e reativar não têm nível nem meta a ajustar
+        bts.append({'rotulo': f'Ajustar pedido #{pid}',
+                    'descricao': f"mudar nível ou meta (proposta: nível {prop.get('nivel_partida', 1)} → meta {prop.get('meta', 3)})",
+                    'rodar': f'pedido ajustar {pid}'})  # sem valores: a Luzia pergunta o novo nível e a nova meta
+    bts.append({'rotulo': f'Recusar pedido #{pid}', 'descricao': 'arquivar pedido sem mudar a trajetória',
+                'rodar': f'pedido recusar {pid}'})
+    return bts
 
 
 def _id_pedido(extras: list[str], sub: str) -> int:
@@ -537,6 +539,20 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
 
     if sub == 'ajustar':
         pid = _id_pedido(extras, sub)
+        atual = next((x for x in pedidos.listar(con) if x['id'] == pid), None)
+        if atual is not None and atual['estado'] in ('aberto', 'proposto'):
+            if atual['tipo'] not in ('incluir', 'mudar_meta'):
+                print(f"O pedido `#{pid}` ({atual['tipo']}) não tem nível nem meta a ajustar: aceite ou recuse.")
+                botoes(_botoes_pedido(pid, atual), 'Como você quer decidir este pedido?')
+                return
+            if args.nivel is None and args.meta is None:  # nunca reenvia os mesmos valores: pergunta os novos
+                prop = atual.get('proposta') or {}
+                print(f"Qual nível de partida (0 a 5) e qual meta (1 a 5) você quer para o Prisma {atual['prisma']}? "
+                      f"Hoje a proposta é nível {prop.get('nivel_partida', '?')} → meta {prop.get('meta', '?')}. "
+                      f"Diga os dois números e a Luzia roda `pedido ajustar {pid} --nivel <0-5> --meta <1-5>`.")
+                botoes([b for b in _botoes_pedido(pid, atual) if 'Ajustar' not in b['rotulo']],
+                       'Ajustar para qual nível e meta? Responda no chat, ou decida já:')
+                return
         p = pedidos.propor(con, pid, nivel=args.nivel, meta=args.meta)
         print(f"✦ **Pedido `#{pid}` ajustado** · **Prisma {p['prisma']}** (estado: **{p['estado']}**)")
         _print_proposta(p)
@@ -808,7 +824,7 @@ def cmd_foco(args) -> None:
 COMANDOS = [
     'hoje', 'triage', 'trajetoria', 'next-level', 'rota',
     'entregas', 'entrega', 'acender-entrega', 'feedback-progress', 'feedback-skills-opportunities', 'identidade',
-    'leituras', 'foco',
+    'leituras', 'foco', 'agente',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido',
     'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo',
@@ -837,6 +853,7 @@ def main() -> None:
     ap.add_argument('--ampliar', type=int, default=0)
     ap.add_argument('--nivel', type=int, default=None)
     ap.add_argument('--meta', type=int, default=None)
+    ap.add_argument('--base-url', default='', help='modelo usar: endereço do provedor compatível com OpenAI')
     ap.add_argument('--prompt-arquivo', default='', help='foco: arquivo temporário com o texto do pedido (nunca é gravado)')
     ap.add_argument('--arquivos', nargs='+', default=[], help='foco: caminhos editados; o código é lido do git diff e nunca gravado')
     ap.add_argument('--cwd', default='', help='foco: pasta do projeto da pessoa (a CLI roda de dentro do plugin)')
@@ -863,13 +880,52 @@ def main() -> None:
         botoes(bts_foco, 'Qual foco da Luzia você prefere agora?')
         return
 
+    if args.comando == 'modelo' and args.valor == 'usar':
+        extras = [x for x in restantes if not x.startswith('--')]
+        if any(x.startswith('--chave') or x.lower() in ('chave', 'key') for x in restantes):
+            print('◐ A chave nunca passa pelo chat: coloque-a em Ajustes > Modelo da Luzia, no painel, ou no `.env` desta máquina.')
+            botoes([BT_PAINEL, BT_TRAJETORIA], 'Como seguimos?')
+            return
+        if len(extras) < 2:
+            print('Use: `modelo usar <provedor> <modelo>`, com provedor ' + ', '.join(modelo.PROVEDORES) + '.')
+            botoes([BT_PAINEL, BT_TRAJETORIA], 'Como seguimos?')
+            return
+        try:
+            modelo.salvar(extras[0].lower(), extras[1], args.base_url)
+        except ValueError as e:
+            print(f'◐ Não troquei o modelo: {e}. Provedores: ' + ', '.join(modelo.PROVEDORES) + '.')
+            botoes([BT_PAINEL, BT_TRAJETORIA], 'Como seguimos?')
+            return
+        st = modelo.status()
+        print(f"✦ Modelo da Luzia agora: **{st['nome_provedor']}** · `{st['modelo']}`. "
+              f"Chave: {'configurada' if st['chave_configurada'] else 'FALTANDO (coloque no painel, em Ajustes, ou no `.env`; nunca no chat)'}.")
+        botoes([{'rotulo': 'Testar o modelo', 'descricao': 'uma chamada curta para conferir', 'rodar': 'modelo testar'},
+                BT_PAINEL], 'Quer testar o modelo?')
+        return
+
+    if args.comando == 'agente':
+        cfg = observer.config()
+        escolhas = observer.AGENTES
+        if args.valor in escolhas:
+            cfg['agente'] = args.valor
+            arquivos.gravar_json(observer.CFG, cfg)
+            print(f'✦ Agente da Luzia ajustado para **{args.valor}**.')
+        elif args.valor:
+            print(f"◐ Agente desconhecido: `{args.valor}`. Use um de: {', '.join(escolhas)}.")
+        else:
+            print(f"✦ Agente atual da Luzia: **{cfg.get('agente', 'claude-code')}**. Opções: {', '.join(escolhas)}.")
+        botoes([{'rotulo': nome, 'descricao': 'usar este agente', 'rodar': f'agente {nome}'}
+                for nome in escolhas if nome != cfg.get('agente', 'claude-code')][:3], 'Qual agente você usa?')
+        return
+
     if args.comando == 'modelo':
         s = modelo.status()
         print('## ✦ Luzia · modelo')
         print(f"**{s['nome_provedor']}** · `{s['modelo']}`" + (f" · {s['base_url']}" if s.get('base_url') else ''))
         print(f"chave: {'configurada' if s['chave_configurada'] else 'FALTANDO'} · "
               f"SDK: {'instalado' if s['sdk_instalado'] else 'falta: pip install ' + s['pip']}")
-        print('Troque em Ajustes > Modelo da Luzia, no painel. A chave fica só no .env desta máquina.')
+        print('Troque em Ajustes > Modelo da Luzia, no painel, ou pelo chat: `modelo usar <provedor> <modelo>`. '
+              'A chave nunca passa pelo chat: coloque-a no painel ou no .env desta máquina.')
         if args.valor == 'testar':
             r = modelo.chamar('Responda só com o JSON {"ok": true}.', 'Responda só com JSON.')
             print(f"teste: {r['texto'].strip()[:60]} · {r['segundos']:.1f} s · {r['tokens_in']}→{r['tokens_out']} tokens · {r['provedor']}/{r['modelo']}")

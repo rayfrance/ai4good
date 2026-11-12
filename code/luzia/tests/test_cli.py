@@ -280,3 +280,82 @@ def test_entrega_detalhe_mostra_p1_a_p4_com_base(privado, monkeypatch):
     assert 'P3 · aplicação conceitual: sem base' in v and 'P4 · domínio arquitetural: sem base' in v
     assert re.search(r'Propriedade na entrega:\*\* \*\*82%\*\* · medida em 2 de 4 dimensões', v), v
     assert tem_rodape_botoes(s)
+
+
+# ------------------------------------------------------------------ pedidos: erros, sem modelo e leitura com base (A6–A8)
+def _modelo_pedido(monkeypatch, modelo_nome='gemini/gemini-2.5-flash'):
+    def fake(payload, **kw):
+        ped = payload.get('pedido') or {}
+        nv = ped.get('nivel_solicitado') if ped.get('nivel_solicitado') is not None else 1
+        mt = ped.get('meta_solicitada') if ped.get('meta_solicitada') is not None else 3
+        res = {'nivel_partida': nv, 'meta': mt, 'palavras_chave': ['tracing'], 'acoes': [],
+               'analise': f'Partida no nível {nv} rumo à meta {mt}.'}
+        return SimpleNamespace(plan=res, model=modelo_nome), {'quando': '2026-11-12T15:00:00', 'modelo': modelo_nome}
+
+    monkeypatch.setattr(pipeline, 'run_plan', fake)
+
+
+def test_pedido_mostra_analise_com_base_modelo_e_data(privado, monkeypatch):
+    _modelo_pedido(monkeypatch)
+    for argv in (('pedido', 'abrir', 'incluir', 'Observabilidade', '--motivo', 'Monitorar'),
+                 ('pedido', 'ajustar', '1', '--nivel', '2', '--meta', '4')):
+        v = visivel(rodar(monkeypatch, *argv))
+        linha = next(l for l in v.splitlines() if 'Partida no nível' in l)
+        assert 'com base em' in linha and 'gemini/gemini-2.5-flash' in linha and '2026-11-12' in linha, linha
+
+
+def test_pedido_erros_no_chat_terminam_em_botoes(privado, monkeypatch):
+    _modelo_pedido(monkeypatch)
+    s = rodar(monkeypatch, 'pedido', 'abrir', 'incluir', 'Observabilidade')
+    assert tem_rodape_botoes(s)
+    casos = [
+        (('pedido', 'abrir', 'incluir', 'Observabilidade'), 'já existe um pedido em aberto'),
+        (('pedido', 'abrir', 'inventado', 'Outro'), 'tipo de pedido inválido'),
+        (('pedido', 'aceitar', 'abc'), 'número do pedido'),
+        (('pedido', 'ajustar', '999'), 'pedido desconhecido'),
+        (('pedido', 'aceitar', '1'), 'aceito'),
+        (('pedido', 'aceitar', '1'), 'já foi aceito'),
+        (('pedido', 'recusar', '1'), 'já foi aceito'),
+        (('pedido', 'ajustar', '1', '--meta', '5'), 'já foi aceito'),
+    ]
+    for argv, esperado in casos:
+        s = rodar(monkeypatch, *argv)
+        assert esperado in visivel(s), (argv, s)
+        assert tem_rodape_botoes(s), (argv, s)
+
+
+def test_pedido_sem_modelo_nao_trava_a_pessoa(privado, monkeypatch):
+    def sem_modelo(*a, **k):
+        raise RuntimeError('Falta a chave GEMINI_API_KEY: configure em Ajustes > Modelo da Luzia.')
+
+    monkeypatch.setattr(pipeline, 'run_plan', sem_modelo)
+    s = rodar(monkeypatch, 'pedido', 'abrir', 'incluir', 'Observabilidade', '--nivel', '2', '--meta', '4')
+    v = visivel(s)
+    assert 'proposto' in v and 'nível **2 → meta 4/5**' in v and 'leitura indisponível' in v
+    assert any(b['rodar'] == 'pedido aceitar 1' for b in botoes_de(s))
+    s = rodar(monkeypatch, 'pedido', 'abrir', 'incluir', 'Observabilidade')  # tentar de novo explica, não trava
+    assert 'já existe um pedido em aberto' in visivel(s) and tem_rodape_botoes(s)
+    s = rodar(monkeypatch, 'pedido', 'aceitar', '1')
+    assert 'aceito' in visivel(s) and tem_rodape_botoes(s)
+    with trajetoria.abrir() as con:
+        assert {p['nome']: (p['nivel'], p['meta']) for p in trajetoria.prismas(con)}['Observabilidade'] == (2, 4)
+
+
+def test_toda_leitura_impressa_tem_base_modelo_e_data(privado, monkeypatch):
+    from luzia import leituras, modelo
+    monkeypatch.setattr(entregas, 'atualizar', lambda con, dias=90: {'novas': 0, 'atualizadas': 0})
+    monkeypatch.setattr(modelo, 'pronto', lambda: False)
+    with trajetoria.abrir() as con:
+        eid = _semear_entrega(con)
+        b = leituras.base(con, 'entrega', str(eid))
+        with banco.transacao(con):
+            con.execute("INSERT INTO leitura (alvo_tipo, alvo_id, texto, base_json, base_hash, modelo, criado_em) "
+                        "VALUES ('entrega', ?, 'Entrega focada no domínio.', ?, ?, 'gemini/teste', '2026-11-11T09:00:00')",
+                        (str(eid), json.dumps(b), leituras.hash_base(b)))
+    for argv in (('entregas',), ('entrega', str(eid))):
+        v = visivel(rodar(monkeypatch, *argv))
+        linha = next(l for l in v.splitlines() if 'Entrega focada no domínio.' in l)
+        assert 'com base em: 2 commit(s), 4 arquivo(s), 90 linhas e 1 prisma(s)' in linha, linha
+        assert 'gemini/teste · 2026-11-11' in linha, linha
+    v = visivel(rodar(monkeypatch, 'trajetoria'))  # prisma sem leitura: diz por quê, nunca fica vazio
+    assert 'leitura indisponível: configure o modelo' in v

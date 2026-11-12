@@ -190,6 +190,7 @@ def estado() -> dict:
         'rota': rota_jogo,
         'ritmo': r_ritmo,
         'modelo': modelo.status(),
+        'modelo_pronto': modelo.pronto(),
         'regras': {
             'limiar': jogo.LIMIAR_DEGRAU,
             'min_propria': int(jogo.MIN_PROPRIA * 100),
@@ -357,6 +358,38 @@ class Handler(BaseHTTPRequestHandler):
             arquivos.registrar_erro(f'server POST {self.path.split("?")[0]}', e)
             self._json({'erro': f'não deu certo ({type(e).__name__})'}, 500)
 
+    @staticmethod
+    def _pedido(dados: dict) -> dict:
+        """Uma ação de pedido de mudança; erro de uso levanta ValueError (vira 400 com a mensagem)."""
+        def numero(chave: str, rotulo: str) -> int | None:
+            v = dados.get(chave)
+            if v is None or v == '':
+                return None
+            if isinstance(v, bool) or not str(v).lstrip('#').isdigit():
+                raise ValueError(f'{rotulo} inválido: use um número')
+            return int(str(v).lstrip('#'))
+
+        acao = str(dados.get('acao', '')).strip().lower()
+        with trajetoria.abrir() as con:
+            if acao == 'abrir':
+                tipo = str(dados.get('tipo', '')).strip()
+                prisma = str(dados.get('prisma') or dados.get('skill') or '').strip()
+                nivel, meta = numero('nivel', 'nível'), numero('meta', 'meta')
+                p = pedidos.abrir(con, tipo, prisma, str(dados.get('motivo', '')).strip())
+                if tipo in ('incluir', 'mudar_meta') and dados.get('propor', True):
+                    p = pedidos.propor(con, p['id'], nivel=nivel, meta=meta)
+                return p
+            if acao not in ('ajustar', 'propor', 'aceitar', 'recusar'):
+                raise ValueError('ação de pedido inválida')
+            pid = numero('id', 'número do pedido')
+            if pid is None:
+                raise ValueError('informe o número do pedido')
+            if acao in ('ajustar', 'propor'):
+                return pedidos.propor(con, pid, nivel=numero('nivel', 'nível'), meta=numero('meta', 'meta'))
+            if acao == 'aceitar':
+                return pedidos.aceitar(con, pid)
+            return pedidos.recusar(con, pid)
+
     def _post(self, path: str, dados: dict) -> None:
         if path in ('/api/nivel', '/api/autoavaliacao'):
             if 'prisma' in dados or 'skill' in dados:
@@ -383,48 +416,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'ok': True})
 
         if path == '/api/pedido':
-            acao = str(dados.get('acao', '')).strip().lower()
-            with trajetoria.abrir() as con:
-                if acao == 'abrir':
-                    tipo = str(dados.get('tipo', '')).strip()
-                    prisma = str(dados.get('prisma') or dados.get('skill') or '').strip()
-                    motivo = str(dados.get('motivo', '')).strip()
-                    p = pedidos.abrir(con, tipo, prisma, motivo)
-                    if 'erro' in p:
-                        return self._json({'erro': p['erro']}, 400)
-                    if tipo in ('incluir', 'mudar_meta') and dados.get('propor', True):
-                        prop = pedidos.propor(
-                            con, p['id'],
-                            nivel=int(dados['nivel']) if dados.get('nivel') is not None else None,
-                            meta=int(dados['meta']) if dados.get('meta') is not None else None,
-                        )
-                        if 'erro' in prop:
-                            return self._json({'erro': prop['erro'], 'pedido': p}, 400)
-                        p = prop
-                    return self._json({'ok': True, 'pedido': p})
-                if acao in ('ajustar', 'propor'):
-                    pid = int(dados.get('id') or 0)
-                    p = pedidos.propor(
-                        con, pid,
-                        nivel=int(dados['nivel']) if dados.get('nivel') is not None else None,
-                        meta=int(dados['meta']) if dados.get('meta') is not None else None,
-                    )
-                    if 'erro' in p:
-                        return self._json({'erro': p['erro']}, 400)
-                    return self._json({'ok': True, 'pedido': p})
-                if acao == 'aceitar':
-                    pid = int(dados.get('id') or 0)
-                    p = pedidos.aceitar(con, pid)
-                    if 'erro' in p:
-                        return self._json({'erro': p['erro']}, 400)
-                    return self._json({'ok': True, 'pedido': p})
-                if acao == 'recusar':
-                    pid = int(dados.get('id') or 0)
-                    p = pedidos.recusar(con, pid)
-                    if 'erro' in p:
-                        return self._json({'erro': p['erro']}, 400)
-                    return self._json({'ok': True, 'pedido': p})
-            return self._json({'erro': 'ação de pedido inválida'}, 400)
+            try:
+                return self._json({'ok': True, 'pedido': self._pedido(dados)})
+            except (ValueError, RuntimeError) as e:  # pedido duplicado, já decidido, id ou número inválido
+                return self._json({'erro': str(e)}, 400)
 
         if path == '/api/leituras':
             alvos_raw = dados.get('alvos')

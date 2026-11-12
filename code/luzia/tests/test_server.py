@@ -213,3 +213,43 @@ def test_seguranca_origem_e_host_403(api):
 
     c_host, _ = api('GET', '/api/estado', headers={'Host': 'evil.example'})
     assert c_host == 403
+
+
+def _modelo_pedido_falso(monkeypatch):
+    def fake(payload, **kw):
+        ped = payload.get('pedido') or {}
+        res = {'nivel_partida': ped.get('nivel_solicitado') or 1, 'meta': ped.get('meta_solicitada') or 3,
+               'palavras_chave': ['fila'], 'acoes': [], 'analise': 'Análise de teste.'}
+        return SimpleNamespace(plan=res, model='gemini/x'), {'quando': '2026-11-12T16:00:00', 'modelo': 'gemini/x'}
+
+    monkeypatch.setattr(pipeline, 'run_plan', fake)
+
+
+def test_pedido_erros_api_devolvem_400_json(api, monkeypatch):
+    _modelo_pedido_falso(monkeypatch)
+    c, r = api('POST', '/api/pedido', {'acao': 'abrir', 'tipo': 'incluir', 'prisma': 'Mensageria'})
+    assert c == 200
+    pid = r['pedido']['id']
+    casos = [
+        ({'acao': 'abrir', 'tipo': 'incluir', 'prisma': 'Mensageria'}, 'já existe um pedido em aberto'),
+        ({'acao': 'abrir', 'tipo': 'inventado', 'prisma': 'Outro'}, 'tipo de pedido inválido'),
+        ({'acao': 'aceitar', 'id': 'abc'}, 'número do pedido'),
+        ({'acao': 'ajustar', 'id': 999}, 'pedido desconhecido'),
+        ({'acao': 'ajustar', 'id': pid, 'nivel': 'x'}, 'nível'),
+    ]
+    for corpo, esperado in casos:
+        c, r = api('POST', '/api/pedido', corpo)
+        assert c == 400 and esperado in r.get('erro', ''), (corpo, c, r)
+    assert api('POST', '/api/pedido', {'acao': 'aceitar', 'id': pid})[0] == 200
+    for corpo in ({'acao': 'aceitar', 'id': pid}, {'acao': 'recusar', 'id': pid}):
+        c, r = api('POST', '/api/pedido', corpo)
+        assert c == 400 and 'já foi aceito' in r['erro'], (corpo, r)
+
+
+def test_pedido_api_sem_modelo_propoe_e_aceita(api, monkeypatch):
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem internet')))
+    c, r = api('POST', '/api/pedido', {'acao': 'abrir', 'tipo': 'incluir', 'prisma': 'Mensageria', 'nivel': 1, 'meta': 3})
+    assert c == 200 and r['pedido']['estado'] == 'proposto'
+    assert r['pedido']['leitura'] is None and 'leitura indisponível' in r['pedido']['proposta']['leitura_indisponivel']
+    c, r = api('POST', '/api/pedido', {'acao': 'aceitar', 'id': r['pedido']['id']})
+    assert c == 200 and r['pedido']['estado'] == 'aceito'

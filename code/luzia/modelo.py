@@ -104,6 +104,12 @@ def status() -> dict:
     }
 
 
+def pronto() -> bool:
+    """Há um modelo utilizável (SDK instalado e chave, exceto no compatível com OpenAI, que pode ser local)."""
+    s = status()
+    return bool(s['sdk_instalado'] and (s['chave_configurada'] or s['provedor'] == 'openai'))
+
+
 def extrair_json(texto: str) -> dict:
     texto = (texto or '').strip()
     if texto.startswith('```'):

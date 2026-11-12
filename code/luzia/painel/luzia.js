@@ -161,36 +161,45 @@ function espectroPrisma(s, legenda = true) {
 }
 
 function resumoBaseLeitura(leitura, fallbackFatos = '') {
+  // Os mesmos fatos que a CLI mostra depois de "com base em" (cli.base_resumo), lidos da base guardada.
   if (leitura && leitura.base && typeof leitura.base === 'object') {
     const b = leitura.base;
-    if (b.tipo === 'prisma') {
-      const nEnt = (b.entregas || []).length;
-      const nAv = (b.avancos || []).length;
+    const alvo = leitura.alvo_tipo;
+    if (alvo === 'prisma') {
       const lm = b.lumens || {};
-      return `nível ${b.nivel ?? '?'}/${b.meta ?? '?'} · ${lm.total ?? 0} lm (${lm.luz_propria_pct ?? 0}% própria) · ${nAv} avanço(s) · ${nEnt} entrega(s)`;
+      return `nível ${b.nivel ?? '?'}/${b.meta ?? '?'} · ${lm.total ?? 0} lm (${lm.propria ?? 0} de luz própria) · ${(b.avancos_conquistados || []).length} avanço(s) conquistado(s) · ${b.entregas_total ?? 0} entrega(s)`;
     }
-    if (b.tipo === 'entrega' || b.fatos) {
+    if (alvo === 'entrega') {
       const f = b.fatos || {};
-      return `${f.commits ?? 1} commit(s) · ${f.arquivos ?? 0} arquivo(s) · +${f.linhas ?? 0} linhas`;
+      return `${f.commits ?? 0} commit(s) · ${f.arquivos ?? 0} arquivo(s) · ${f.linhas ?? 0} linhas · ${(b.prismas || []).length} prisma(s)`;
     }
-    if (b.tipo === 'pedido') {
-      return `pedido ${b.acao_pedido || ''} · Prisma ${b.prisma || ''}`;
+    if (alvo === 'pedido') {
+      return `pedido (${TIPO_PEDIDO_NOME[b.tipo] || b.tipo || ''} · Prisma ${b.prisma || ''}) e a trajetória atual`;
     }
   }
   return fallbackFatos || 'fatos determinísticos registrados';
 }
 
-function blocoLeitura(leitura, fallbackFatos = '', compacto = false) {
-  const resumo = esc(resumoBaseLeitura(leitura, fallbackFatos));
+function motivoSemLeitura(indisponivel = '') {
+  if (indisponivel) return indisponivel;
+  return E && E.modelo_pronto
+    ? 'A Luzia ainda não tem base para uma leitura.'
+    : 'Leitura indisponível: configure o modelo em Ajustes.';
+}
+
+function blocoLeitura(leitura, fallbackFatos = '', compacto = false, indisponivel = '') {
   if (!leitura || !leitura.texto || !leitura.modelo) {
+    const gerar = E && E.modelo_pronto && !indisponivel
+      ? `<button class="btn link mini" data-gerar-leituras="1">${ic('raio', 'p')}Gerar leituras</button>` : '';
     return `<div class="leitura-assinada indisponivel">
       <div class="leitura-cab">
-        <span><b>Leitura da Luzia</b> · com base em: ${resumo}</span>
-        <button class="btn link mini" data-gerar-leituras="1">${ic('raio', 'p')}Atualizar leituras</button>
+        <span><b>Leitura da Luzia</b> · fatos: ${esc(fallbackFatos || 'os medidos acima')}</span>
+        ${gerar}
       </div>
-      <p class="leitura-texto">Leitura indisponível para a base atual — os fatos medidos continuam visíveis acima.</p>
+      <p class="leitura-texto">${esc(motivoSemLeitura(indisponivel))} Os fatos medidos continuam visíveis.</p>
     </div>`;
   }
+  const resumo = esc(resumoBaseLeitura(leitura, fallbackFatos));
   const data = esc(String(leitura.criado_em || '').slice(0, 10) || 'hoje');
   const modelo = esc(leitura.modelo);
   const vencida = leitura.vencida ? ` · <span class="tag luz">base mudou</span>` : '';
@@ -474,12 +483,8 @@ function renderCardPedido(p) {
   const aberto = ['aberto', 'proposto'].includes(p.estado);
   const nvSug = prop.nivel_partida ?? 1;
   const metaSug = prop.meta ?? 4;
-  const leituraPedido = prop.analise ? {
-    texto: prop.analise,
-    modelo: prop.modelo || (p.leitura_id ? E.modelo?.modelo : ''),
-    criado_em: p.criado_em,
-    base: { tipo: 'pedido', acao_pedido: p.tipo, prisma: p.prisma },
-  } : null;
+  // A leitura guardada do pedido (texto, modelo e data de quando foi gerada), nunca o modelo configurado agora.
+  const comAnalise = ['incluir', 'mudar_meta'].includes(p.tipo) && (prop.nivel_partida != null || prop.meta != null);
 
   return `<div class="pedido-card ${esc(p.estado)}">
     <div class="pedido-cab">
@@ -496,7 +501,7 @@ function renderCardPedido(p) {
         ${(prop.palavras_chave || []).map((w) => `<span class="tag">${esc(w)}</span>`).join('')}
         ${(prop.acoes || []).length ? `<span class="tag">${prop.acoes.length} avanço(s) inicial(is)</span>` : ''}
       </div>` : ''}
-    ${prop.analise ? blocoLeitura(leituraPedido, `pedido #${p.id} · Prisma ${p.prisma}`, true) : ''}
+    ${comAnalise ? blocoLeitura(p.leitura, `pedido #${p.id} · Prisma ${p.prisma}`, true, prop.leitura_indisponivel) : ''}
     ${aberto ? `<div class="pedido-ajuste">
       <button class="btn prim mini" data-pedido-aceitar="${p.id}">${ic('check', 'p')}Aceitar proposta</button>
       ${['incluir', 'mudar_meta'].includes(p.tipo) ? `

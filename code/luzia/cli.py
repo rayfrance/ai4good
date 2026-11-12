@@ -285,9 +285,7 @@ def rota_texto(plan: dict, state: dict | None = None) -> None:
         pronto = ' · **nível pronto para subir**' if s['pronto'] else f" · falta: {_vocab_novo(', '.join(s['falta']))}"
         print(f"   {rotulo_p} · `{esp}` nível {s['nivel']} → meta {s['meta']}  `{bar(min(s['lm'], s['limiar']), s['limiar'], 10)}` "
               f"{s['lm']}/{s['limiar']} lm · luz própria {s['luz_propria']}%{pronto}")
-        leit = leit_map.get(s['nome'])
-        if leit and leit.get('texto') and leit.get('modelo'):
-            print(f"      _Leitura da Luzia · com base nos fatos do prisma · {leit['modelo']} · {str(leit.get('criado_em', ''))[:10]}:_ {leit['texto']}")
+        print('      ' + leitura_txt(leit_map.get(s['nome'])))
 
 
 def propriedade_entregas(state: dict) -> list[dict]:
@@ -304,6 +302,39 @@ def print_entrega(e: dict, todas: list[dict]) -> None:
     for a in todas:
         if a.get('origem') == 'entrega' and a.get('entrega') == e['tarefa']:
             print(f'   {feixe_linha(a)}' + (f" → acende {a['dimensao']}" if a.get('dimensao') else ''))
+
+
+def base_resumo(alvo_tipo: str | None, base: dict | None) -> str:
+    """Os fatos que fundamentaram uma leitura, em uma linha (o que vai depois de "com base em")."""
+    b = base if isinstance(base, dict) else {}
+    if alvo_tipo == 'prisma':
+        lm = b.get('lumens') or {}
+        return (f"nível {b.get('nivel', '?')}/{b.get('meta', '?')}, {lm.get('total', 0)} lm "
+                f"({lm.get('propria', 0)} de luz própria), {len(b.get('avancos_conquistados') or [])} avanço(s) "
+                f"conquistado(s) e {b.get('entregas_total', 0)} entrega(s) do prisma")
+    if alvo_tipo == 'entrega':
+        f = b.get('fatos') or {}
+        return (f"{f.get('commits', 0)} commit(s), {f.get('arquivos', 0)} arquivo(s), {f.get('linhas', 0)} linhas e "
+                f"{len(b.get('prismas') or [])} prisma(s) atravessado(s) da entrega")
+    if alvo_tipo == 'pedido':
+        return (f"o pedido ({b.get('tipo', '')} em Prisma {b.get('prisma', '')}) e a trajetória atual "
+                f"({len(b.get('prismas_ativos') or [])} prisma(s) ativo(s))")
+    return 'os fatos medidos pela Luzia'
+
+
+def motivo_sem_leitura() -> str:
+    return ('a Luzia ainda não tem base para uma leitura' if modelo.pronto()
+            else 'leitura indisponível: configure o modelo (`modelo`, ou Ajustes no painel)')
+
+
+def leitura_txt(leit: dict | None, base_txt: str | None = None, indisponivel: str = '') -> str:
+    """Toda leitura de IA na tela: texto + "com base em" + modelo + data; sem leitura, diz por quê (nunca vazio)."""
+    if leit and leit.get('texto') and leit.get('modelo'):
+        base_txt = base_txt or base_resumo(leit.get('alvo_tipo'), leit.get('base'))
+        venc = ' · a base mudou desde então' if leit.get('vencida') else ''
+        return (f"_Leitura da Luzia · com base em: {base_txt} · {leit['modelo']} · "
+                f"{str(leit.get('criado_em') or '')[:10]}{venc}:_ {leit['texto']}")
+    return f"_Leitura da Luzia: {indisponivel or motivo_sem_leitura()}._"
 
 
 NOME_DIMENSAO = {'P1': 'direção no prompt', 'P2': 'coesão da entrega', 'P3': 'aplicação conceitual',
@@ -424,99 +455,93 @@ def _botoes_pedido(pid: int, p: dict) -> list[dict]:
     ]
 
 
+def _id_pedido(extras: list[str], sub: str) -> int:
+    if not extras or not str(extras[0]).lstrip('#').isdigit():
+        raise ValueError(f'informe o número do pedido: `pedido {sub} <número>`')
+    return int(str(extras[0]).lstrip('#'))
+
+
+def _print_proposta(p: dict) -> None:
+    proposta = p.get('proposta') or {}
+    if not proposta:
+        return
+    ganho = int(proposta.get('ganho_niveis') or 0)
+    print(f"- **Proposta da Luzia:** nível **{proposta.get('nivel_partida')} → meta {proposta.get('meta')}/5**"
+          f" · a trajetória {'ganha' if ganho >= 0 else 'perde'} {abs(ganho)} nível(is)")
+    if p.get('tipo') in ('incluir', 'mudar_meta'):
+        print('- **Análise do pedido:** ' + leitura_txt(p.get('leitura'), indisponivel=proposta.get('leitura_indisponivel', '')))
+    for a in (proposta.get('acoes') or [])[:3]:
+        print(f"  - Avanço inicial sugerido: **{a.get('titulo', '')}** ({a.get('tipo', '')})")
+
+
 def cmd_pedido(args, restantes: list[str], plan: dict) -> None:
+    """Pedido de mudança pelo chat; todo erro vira uma mensagem clara terminando em botões (nunca traceback)."""
     sub = (args.valor or (restantes[0] if restantes else '')).strip().lower()
     extras = restantes[1:] if args.valor and restantes and restantes[0] == args.valor else list(restantes)
     with trajetoria.abrir() as con:
-        if sub == 'abrir':
-            if len(extras) < 2:
-                print('Informe o tipo e o prisma: `pedido abrir <incluir|arquivar|reativar|mudar_meta> "<prisma>" --motivo "..."`')
-                botoes([BT_TRAJETORIA, BT_PAINEL])
-                return
-            tipo, nome_prisma = extras[0], extras[1]
-            motivo = args.motivo if args.motivo != 'nao_faz_sentido' else ''
-            p = pedidos.abrir(con, tipo, nome_prisma, motivo)
-            if 'erro' in p:
-                print(f"Não foi possível abrir o pedido: {_vocab_novo(p['erro'])}")
-                botoes([BT_TRAJETORIA, BT_PAINEL])
-                return
-            if tipo in ('incluir', 'mudar_meta'):
-                prop = pedidos.propor(con, p['id'], nivel=args.nivel, meta=args.meta)
-                if 'erro' not in prop:
-                    p = prop
-            proposta = p.get('proposta') or {}
-            print(f"✦ **Pedido `#{p['id']}` aberto** · **{p['tipo']}** em **Prisma {p['prisma']}** (estado: **{p['estado']}**)")
-            if p.get('motivo'):
-                print(f"- **Motivo:** {p['motivo']}")
-            if proposta:
-                print(f"- **Proposta da Luzia:** nível **{proposta.get('nivel_partida')} → meta {proposta.get('meta')}/5**")
-                if proposta.get('analise'):
-                    print(f"- **Leitura da proposta:** _{proposta['analise']}_")
-                for a in (proposta.get('acoes') or [])[:3]:
-                    print(f"  - Avanço inicial sugerido: **{a.get('titulo', '')}** ({a.get('tipo', '')})")
-            botoes(_botoes_pedido(p['id'], p), 'Como você quer decidir este pedido?')
-            return
+        try:
+            _pedido(con, sub, extras, args)
+        except (ValueError, RuntimeError) as e:
+            print(f'Não foi possível concluir o pedido: {e}.')
+            abertos = [x for x in pedidos.listar(con)  # o pedido que já está aberto para este prisma, se for o caso
+                       if x['estado'] in ('aberto', 'proposto') and str(e).endswith(f"prisma {x['prisma']}")]
+            bts = _botoes_pedido(abertos[0]['id'], abertos[0]) if abertos else []
+            botoes(bts + [BT_TRAJETORIA, BT_PAINEL], 'Como seguimos com a sua trajetória?')
 
-        if sub == 'ajustar':
-            if not extras:
-                print('Informe o id do pedido: `pedido ajustar <id> [--nivel N] [--meta M]`')
-                botoes([BT_TRAJETORIA, BT_PAINEL])
-                return
-            pid = int(extras[0])
-            p = pedidos.propor(con, pid, nivel=args.nivel, meta=args.meta)
-            if 'erro' in p:
-                print(f"Não foi possível ajustar o pedido #{pid}: {_vocab_novo(p['erro'])}")
-                botoes([BT_TRAJETORIA, BT_PAINEL])
-                return
-            proposta = p.get('proposta') or {}
-            print(f"✦ **Pedido `#{pid}` ajustado** · **Prisma {p['prisma']}** → nível **{proposta.get('nivel_partida')} → meta {proposta.get('meta')}/5**")
-            print(f"- **Leitura da proposta:** _{proposta.get('analise', '')}_")
-            botoes(_botoes_pedido(pid, p), 'Aceitar esta nova proposta ou ajustar de novo?')
-            return
 
-        if sub == 'aceitar':
-            if not extras:
-                print('Informe o id do pedido: `pedido aceitar <id>`')
-                botoes([BT_TRAJETORIA, BT_PAINEL])
-                return
-            pid = int(extras[0])
-            p = pedidos.aceitar(con, pid)
-            if 'erro' in p:
-                print(f"Não foi possível aceitar o pedido #{pid}: {_vocab_novo(p['erro'])}")
-                botoes([BT_TRAJETORIA, BT_PAINEL])
-                return
-            plan = pipeline.load_state().get('plano', {})
-            print(f"★ **Pedido `#{pid}` aceito** — trajetória atualizada com **{p['tipo']}** em **Prisma {p['prisma']}**.")
-            botoes([BT_TRAJETORIA, *proximos_botoes(plan)[:2]], 'Qual é o próximo passo na nova trajetória?')
-            return
-
-        if sub == 'recusar':
-            if not extras:
-                print('Informe o id do pedido: `pedido recusar <id>`')
-                botoes([BT_TRAJETORIA, BT_PAINEL])
-                return
-            pid = int(extras[0])
-            p = pedidos.recusar(con, pid)
-            if 'erro' in p:
-                print(f"Não foi possível recusar o pedido #{pid}: {_vocab_novo(p['erro'])}")
-                botoes([BT_TRAJETORIA, BT_PAINEL])
-                return
-            print(f"Pedido `#{pid}` recusado — sua trajetória permanece inalterada.")
+def _pedido(con, sub: str, extras: list[str], args) -> None:
+    if sub == 'abrir':
+        if len(extras) < 2:
+            print('Informe o tipo e o prisma: `pedido abrir <incluir|arquivar|reativar|mudar_meta> "<prisma>" --motivo "..."`')
             botoes([BT_TRAJETORIA, BT_PAINEL])
             return
+        tipo, nome_prisma = extras[0], extras[1]
+        motivo = args.motivo if args.motivo != 'nao_faz_sentido' else ''
+        p = pedidos.abrir(con, tipo, nome_prisma, motivo)
+        if tipo in ('incluir', 'mudar_meta'):
+            p = pedidos.propor(con, p['id'], nivel=args.nivel, meta=args.meta)
+        print(f"✦ **Pedido `#{p['id']}` aberto** · **{p['tipo']}** em **Prisma {p['prisma']}** (estado: **{p['estado']}**)")
+        if p.get('motivo'):
+            print(f"- **Motivo:** {p['motivo']}")
+        _print_proposta(p)
+        botoes(_botoes_pedido(p['id'], p), 'Como você quer decidir este pedido?')
+        return
 
-        lista = pedidos.listar(con)
-        if not lista:
-            print('Nenhum pedido de mudança registrado na sua trajetória.')
-            botoes([BT_TRAJETORIA, BT_PAINEL])
-            return
-        print('## ✦ Luzia · pedidos de mudança da trajetória')
-        bts: list[dict] = []
-        for p in lista[:5]:
-            print(f"- Pedido `#{p['id']}` · **{p['tipo']}** em **Prisma {p['prisma']}** — **{p['estado']}** ({p.get('motivo', '')})")
-            if p['estado'] in ('aberto', 'proposto') and not bts:
-                bts.extend(_botoes_pedido(p['id'], p))
-        botoes(bts or [BT_TRAJETORIA, BT_PAINEL])
+    if sub == 'ajustar':
+        pid = _id_pedido(extras, sub)
+        p = pedidos.propor(con, pid, nivel=args.nivel, meta=args.meta)
+        print(f"✦ **Pedido `#{pid}` ajustado** · **Prisma {p['prisma']}** (estado: **{p['estado']}**)")
+        _print_proposta(p)
+        botoes(_botoes_pedido(pid, p), 'Aceitar esta nova proposta ou ajustar de novo?')
+        return
+
+    if sub == 'aceitar':
+        pid = _id_pedido(extras, sub)
+        p = pedidos.aceitar(con, pid)
+        plan = pipeline.load_state().get('plano', {})
+        print(f"★ **Pedido `#{pid}` aceito** — trajetória atualizada com **{p['tipo']}** em **Prisma {p['prisma']}**.")
+        botoes([BT_TRAJETORIA, *proximos_botoes(plan)[:2]], 'Qual é o próximo passo na nova trajetória?')
+        return
+
+    if sub == 'recusar':
+        pid = _id_pedido(extras, sub)
+        pedidos.recusar(con, pid)
+        print(f"Pedido `#{pid}` recusado — sua trajetória permanece inalterada.")
+        botoes([BT_TRAJETORIA, BT_PAINEL])
+        return
+
+    lista = pedidos.listar(con)
+    if not lista:
+        print('Nenhum pedido de mudança registrado na sua trajetória.')
+        botoes([BT_TRAJETORIA, BT_PAINEL])
+        return
+    print('## ✦ Luzia · pedidos de mudança da trajetória')
+    bts: list[dict] = []
+    for p in lista[:5]:
+        print(f"- Pedido `#{p['id']}` · **{p['tipo']}** em **Prisma {p['prisma']}** — **{p['estado']}** ({p.get('motivo', '')})")
+        if p['estado'] in ('aberto', 'proposto') and not bts:
+            bts.extend(_botoes_pedido(p['id'], p))
+    botoes(bts or [BT_TRAJETORIA, BT_PAINEL])
 
 
 def cmd_entregas(args, state: dict, entrada_path: Path, rotulo: str) -> None:
@@ -553,9 +578,7 @@ def cmd_entregas(args, state: dict, entrada_path: Path, rotulo: str) -> None:
                 f"{fatos.get('arquivos', 0)} arquivo(s) · {fatos.get('linhas', 0)} linhas\n"
                 f"   Prismas atravessados: {prismas_nomes}"
             )
-            leit = leit_map.get(str(e['id']))
-            if leit and leit.get('texto') and leit.get('modelo'):
-                print(f"   _Leitura da Luzia ({leit['modelo']} · {str(leit.get('criado_em', ''))[:10]}):_ {leit['texto']}")
+            print('   ' + leitura_txt(leit_map.get(str(e['id']))))
             if len(bts) < 2:
                 bts.append({'rotulo': f"Ver entrega #{e['id']}", 'descricao': curto(e['titulo'], 40), 'rodar': f"entrega {e['id']}"})
     else:
@@ -586,14 +609,7 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
     prop = det.get('propriedade') or {}
     for linha in linhas_propriedade(prop):
         print(linha)
-    leit = det.get('leitura')
-    if leit and leit.get('texto') and leit.get('modelo'):
-        print(
-            f"\n> **Leitura da Luzia** · _com base nos fatos da entrega · {leit['modelo']} · {str(leit.get('criado_em', ''))[:10]}_\n"
-            f"> {leit['texto']}"
-        )
-    else:
-        print('\n_Leitura da Luzia: leitura indisponível (os fatos determinísticos acima estão completos)._')
+    print('\n' + leitura_txt(det.get('leitura')))
 
     if det['avancos_feitos']:
         print('\n**Avanços feitos para esta entrega**')
@@ -706,8 +722,12 @@ def main() -> None:
         state = pipeline.load_state()
         plan = state.get('plano', {})
         print('## ✦ Luzia · triagem')
-        print(f"Onde você está: {(plan.get('onde_esta') or {}).get('resumo', '')}\n"
-              f"Aonde quer chegar: {(plan.get('aonde_quer_chegar') or {}).get('resumo', '')}\n")
+        base_tri = 'sua entrada, currículo, commits e histórico autorizados (anonimizados)'
+        for rotulo_tri, campo in (('Onde você está', 'onde_esta'), ('Aonde quer chegar', 'aonde_quer_chegar')):
+            texto = (plan.get(campo) or {}).get('resumo', '')
+            leit = {'texto': texto, 'modelo': rec.get('modelo'), 'criado_em': rec.get('quando')}
+            print(f"{rotulo_tri}: {leitura_txt(leit, base_tri)}")
+        print()
         rota_texto(plan, state)
         primeiros = [a for a in acoes.todas(plan) if a['origem'] == 'rota']
         print('\n**Primeiros avanços:**')
@@ -723,7 +743,9 @@ def main() -> None:
         plan = pipeline.load_state().get('plano', {})
         sessao = [a for a in acoes.todas(plan) if a['origem'] == 'sessão']
         print('## ✦ Luzia · oportunidades nesta sessão')
-        print(f"_{resp.get('resumo_sessao', '')}_\n")
+        if resp.get('resumo_sessao'):
+            print(leitura_txt({'texto': resp['resumo_sessao'], 'modelo': rec.get('modelo'), 'criado_em': rec.get('quando')},
+                              f"{rec.get('eventos_sessao', 0)} evento(s) mascarado(s) da sessão e o seu plano") + '\n')
         for a in sessao:
             print(feixe_linha(a))
             print(f"   ↳ {a.get('gatilho', '')}")

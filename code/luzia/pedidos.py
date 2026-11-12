@@ -5,6 +5,8 @@ Regras (spec, seções 6 e 11):
 - "Ajustar" (`propor` com novo nível/meta) pode se repetir sem limite; cada proposta fica guardada no histórico.
 - Tipos `arquivar` e `reativar` não chamam o modelo.
 - Em `incluir` e `mudar_meta`, a análise da Luzia é gravada como leitura com base (`alvo_tipo='pedido'`).
+  Sem modelo (sem chave, sem internet, erro): a proposta sai do nível/meta pedidos pela pessoa (ou dos atuais),
+  sem análise e sem avanços ("leitura indisponível"), fica `proposto` e pode ser aceita.
 - `mudar_meta` nunca altera o nível atual nem os lúmens (e não cria `nivel_registro`).
 - `arquivar` tira o prisma dos níveis da trajetória, preservando todos os lúmens, avanços e histórico; `reativar` devolve tudo.
 - `aceitar` cria uma nova versão da trajetória (`trajetoria_versao`).
@@ -17,7 +19,7 @@ import sqlite3
 import time
 from datetime import datetime
 
-from . import acoes, arquivos, banco, entregas, jogo, leituras, pipeline, planner, trajetoria
+from . import acoes, arquivos, banco, entregas, jogo, leituras, modelo, pipeline, planner, trajetoria
 from .privacy import Redactor
 
 TIPOS = ('incluir', 'arquivar', 'reativar', 'mudar_meta')
@@ -87,6 +89,15 @@ def _montar_pedido(con: sqlite3.Connection, r: sqlite3.Row) -> dict:
         'criado_em': r['criado_em'],
         'decidido_em': r['decidido_em'],
     }
+
+
+def _nivel(valor, padrao: int) -> int:
+    """Nível 0–5 vindo do modelo; valor ausente ou fora do formato fica com o padrão."""
+    try:
+        n = int(valor)
+    except (TypeError, ValueError):
+        n = int(padrao)
+    return max(0, min(5, n))
 
 
 def _ganho_niveis(con: sqlite3.Connection, tipo: str, nome: str, nivel_novo: int, meta_nova: int) -> int:
@@ -184,33 +195,43 @@ def propor(con: sqlite3.Connection, pedido_id: int, nivel: int | None = None, me
         },
     }
     t0 = time.perf_counter()
-    res, rec = pipeline.run_plan(
-        payload,
-        prep_seconds=time.perf_counter() - t0,
-        label='pedido-propor',
-        save_current_state=False,
-        schema=planner.PEDIDO_SCHEMA,
-        intro='Fatos da trajetória atual e pedido de mudança feito pela pessoa desenvolvedora:',
-    )
-    dados_llm = res.plan if isinstance(res.plan, dict) else {}
+    indisponivel = ''
+    try:
+        res, rec = pipeline.run_plan(
+            payload,
+            prep_seconds=time.perf_counter() - t0,
+            label='pedido-propor',
+            save_current_state=False,
+            schema=planner.PEDIDO_SCHEMA,
+            intro='Fatos da trajetória atual e pedido de mudança feito pela pessoa desenvolvedora:',
+        )
+        dados_llm = res.plan if isinstance(res.plan, dict) else {}
+    except Exception as e:  # sem modelo, sem chave ou sem internet: a proposta sai dos valores da própria pessoa
+        arquivos.registrar_erro('pedidos.propor', e)
+        res, rec, dados_llm = None, {}, {}
+        indisponivel = f'leitura indisponível: {modelo.resumo_erro(e)}'
+
     if tipo == 'mudar_meta':
         nv_final = nv_atual
     elif nv_pedido is not None:
         nv_final = max(0, min(5, nv_pedido))
     else:
-        nv_final = max(0, min(5, int(dados_llm.get('nivel_partida', nv_atual or 1))))
+        nv_final = _nivel(dados_llm.get('nivel_partida'), nv_atual if indisponivel else (nv_atual or 1))
 
     if mt_pedido is not None:
         mt_final = max(0, min(5, mt_pedido))
     else:
-        mt_final = max(0, min(5, int(dados_llm.get('meta', mt_atual or 4))))
+        mt_final = _nivel(dados_llm.get('meta'), mt_atual or 4)
 
     palavras = [str(w).strip() for w in (dados_llm.get('palavras_chave') or palavras_atuais) if str(w).strip()]
+    if not palavras and indisponivel:  # fato, não leitura: as palavras do próprio nome do prisma
+        palavras = [w for w in nome.replace('/', ' ').split() if len(w) >= 4]
     acoes_brutas = [a for a in (dados_llm.get('acoes') or []) if isinstance(a, dict) and a.get('titulo')][:3]
     for a in acoes_brutas:
         a['skill'] = nome
         a['dimensao'] = None
-    analise = _limpar(dados_llm.get('analise') or f'Proposta para {nome} (nível {nv_final} → meta {mt_final}).')
+    # Só texto do modelo vira leitura; sem análise do modelo, nada de frase montada fingindo ser a Luzia.
+    analise = _limpar(dados_llm.get('analise') or '') if isinstance(dados_llm.get('analise'), str) else ''
 
     prop = {
         'nivel_partida': nv_final,
@@ -221,18 +242,22 @@ def propor(con: sqlite3.Connection, pedido_id: int, nivel: int | None = None, me
         'ganho_niveis': _ganho_niveis(con, tipo, nome, nv_final, mt_final),
         'quando': (rec or {}).get('quando') or _agora(),
     }
+    if indisponivel:
+        prop['leitura_indisponivel'] = indisponivel
     novo_hist = [*hist, prop]
     modelo_nome = (rec or {}).get('modelo') or getattr(res, 'model', '') or 'desconhecido'
     quando = prop['quando']
 
     with banco.transacao(con):
-        cur_l = con.execute(
-            'INSERT INTO leitura (alvo_tipo, alvo_id, texto, base_json, base_hash, modelo, criado_em) '
-            "VALUES ('pedido', ?, ?, ?, ?, ?, ?)",
-            (str(pid), analise, json.dumps(b, ensure_ascii=False, sort_keys=True), b_hash, modelo_nome, quando),
-        )
-        lid = int(cur_l.lastrowid)
-        con.execute(
+        lid = None
+        if analise:
+            cur_l = con.execute(
+                'INSERT INTO leitura (alvo_tipo, alvo_id, texto, base_json, base_hash, modelo, criado_em) '
+                "VALUES ('pedido', ?, ?, ?, ?, ?, ?)",
+                (str(pid), analise, json.dumps(b, ensure_ascii=False, sort_keys=True), b_hash, modelo_nome, quando),
+            )
+            lid = int(cur_l.lastrowid)
+        con.execute(  # a leitura ligada é sempre a desta proposta (ou nenhuma): uma análise velha não fica
             "UPDATE pedido SET proposta_json = ?, leitura_id = ?, estado = 'proposto' WHERE id = ?",
             (json.dumps({'atual': prop, 'historico': novo_hist}, ensure_ascii=False), lid, pid),
         )

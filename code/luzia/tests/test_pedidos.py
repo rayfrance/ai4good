@@ -223,3 +223,58 @@ def test_recusar_nao_muda_trajetoria(con, monkeypatch):
     assert trajetoria.versoes(con) == versoes_antes
     assert trajetoria.resumo(con) == resumo_antes
     assert len(pedidos.listar(con)) == 1
+
+
+def test_sem_modelo_propoe_com_os_valores_da_pessoa_e_aceita(con, monkeypatch):
+    """Modelo fora do ar ou sem chave: a proposta sai dos valores pedidos (ou atuais), sem análise, e pode ser aceita."""
+    from luzia import pedidos
+
+    def sem_modelo(*a, **k):
+        raise RuntimeError('Falta a chave GEMINI_API_KEY: configure em Ajustes > Modelo da Luzia.')
+
+    monkeypatch.setattr(pipeline, 'run_plan', sem_modelo)
+    ped = pedidos.abrir(con, 'incluir', MENSAGERIA, 'Filas no projeto')
+    p = pedidos.propor(con, ped['id'], nivel=2, meta=4)
+    assert p['estado'] == 'proposto'
+    assert (p['proposta']['nivel_partida'], p['proposta']['meta']) == (2, 4)
+    assert p['proposta']['acoes'] == [] and not p['proposta'].get('analise')
+    assert p['proposta']['leitura_indisponivel'] and 'GEMINI_API_KEY' in p['proposta']['leitura_indisponivel']
+    assert p['leitura'] is None and p['leitura_id'] is None
+    assert con.execute("SELECT COUNT(*) FROM leitura WHERE alvo_tipo = 'pedido'").fetchone()[0] == 0
+    aceito = pedidos.aceitar(con, ped['id'])
+    assert aceito['estado'] == 'aceito'
+    assert {p['nome']: (p['nivel'], p['meta']) for p in trajetoria.prismas(con)}[MENSAGERIA] == (2, 4)
+
+    # mudar meta sem modelo: nível atual, meta pedida
+    ped2 = pedidos.abrir(con, 'mudar_meta', DDD, 'Quero ir além')
+    p2 = pedidos.propor(con, ped2['id'], meta=5)
+    assert (p2['proposta']['nivel_partida'], p2['proposta']['meta']) == (1, 5) and p2['estado'] == 'proposto'
+    # sem nada pedido: os valores atuais
+    p3 = pedidos.propor(con, ped2['id'])
+    assert (p3['proposta']['nivel_partida'], p3['proposta']['meta']) == (1, 4)
+
+
+def test_ajuste_sem_modelo_nao_herda_analise_antiga(con, monkeypatch):
+    from luzia import pedidos
+
+    _simular_modelo_pedido(monkeypatch, [])
+    ped = pedidos.abrir(con, 'incluir', MENSAGERIA, 'Filas')
+    assert pedidos.propor(con, ped['id'])['leitura'] is not None
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem internet')))
+    p = pedidos.propor(con, ped['id'], nivel=3, meta=5)
+    assert p['leitura'] is None and p['leitura_id'] is None  # a análise velha era de outra proposta
+
+
+def test_texto_que_nao_veio_do_modelo_nunca_vira_leitura(con, monkeypatch):
+    from luzia import pedidos
+
+    def sem_analise(payload, **kw):
+        plan_out = {'nivel_partida': 1, 'meta': 3, 'palavras_chave': ['fila'], 'acoes': []}
+        res = planner.LLMResult(plan=plan_out, raw='{}', seconds=0.1, tokens_in=1, tokens_out=1, model='gemini/x')
+        return res, {'quando': '2026-11-12T10:00:00', 'modelo': res.model}
+
+    monkeypatch.setattr(pipeline, 'run_plan', sem_analise)
+    ped = pedidos.abrir(con, 'incluir', MENSAGERIA, 'Filas')
+    p = pedidos.propor(con, ped['id'])
+    assert not p['proposta'].get('analise') and p['leitura'] is None
+    assert con.execute("SELECT COUNT(*) FROM leitura WHERE alvo_tipo = 'pedido'").fetchone()[0] == 0

@@ -263,3 +263,20 @@ def test_dossie_formal(privado, monkeypatch):
     assert DDD in secao_conq
     assert TESTES not in secao_conq
     assert 'Pausa temporária' in conteudo
+
+
+# ------------------------------------------------------------------ entrega: propriedade P1–P4 com base (A4)
+def test_entrega_detalhe_mostra_p1_a_p4_com_base(privado, monkeypatch):
+    with trajetoria.abrir() as con:
+        eid = _semear_entrega(con)
+        with banco.transacao(con):
+            con.execute("INSERT INTO commit_ (hash, entrega_id, data, mensagem, arquivos, linhas, areas_json) "
+                        "VALUES ('h1', ?, '2026-11-10T10:00:00', 'feat: agregado', 4, 90, '[\"C#/.NET\"]')", (eid,))
+    s = rodar(monkeypatch, 'entrega', str(eid))
+    v = visivel(s)
+    assert 'None' not in v and 'n/d%' not in v
+    assert re.search(r'P1 · direção no prompt: \*\*65\*\* \(inferido · geral\)', v), v
+    assert re.search(r'P2 · coesão da entrega: \*\*100\*\* \(calculado\) — 100 − 0 \(4 arquivos\)', v), v
+    assert 'P3 · aplicação conceitual: sem base' in v and 'P4 · domínio arquitetural: sem base' in v
+    assert re.search(r'Propriedade na entrega:\*\* \*\*82%\*\* · medida em 2 de 4 dimensões', v), v
+    assert tem_rodape_botoes(s)

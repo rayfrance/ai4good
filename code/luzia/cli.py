@@ -306,6 +306,28 @@ def print_entrega(e: dict, todas: list[dict]) -> None:
             print(f'   {feixe_linha(a)}' + (f" → acende {a['dimensao']}" if a.get('dimensao') else ''))
 
 
+NOME_DIMENSAO = {'P1': 'direção no prompt', 'P2': 'coesão da entrega', 'P3': 'aplicação conceitual',
+                 'P4': 'domínio arquitetural'}
+SEM_BASE_DIMENSAO = {'P1': 'sem base — a triagem ainda não leu seus prompts',
+                     'P2': 'sem base — a entrega não tem commits medidos',
+                     'P3': 'sem base — acende quando você explica o conceito num avanço desta entrega',
+                     'P4': 'sem base — acende quando você defende a decisão num avanço desta entrega'}
+
+
+def linhas_propriedade(prop: dict) -> list[str]:
+    """P1–P4 de uma entrega com a base de cada nota (o mesmo que o painel mostra)."""
+    indice = prop.get('indice')
+    out = [f"- **Propriedade na entrega:** **{f'{indice}%' if indice is not None else '—'}** · "
+           f"medida em {prop.get('base') or '0 de 4 dimensões'}"]
+    for k in ('P1', 'P2', 'P3', 'P4'):
+        d = (prop.get('dimensoes') or {}).get(k)
+        if d:
+            out.append(f"   - {k} · {NOME_DIMENSAO[k]}: **{d['nota']}** ({d.get('tipo', '')}) — {d.get('base', '')}")
+        else:
+            out.append(f"   - {k} · {NOME_DIMENSAO[k]}: {SEM_BASE_DIMENSAO[k]}")
+    return out
+
+
 def avisar_degraus(plan: dict) -> None:
     for s in jogo.rota(plan)['skills']:
         if s['pronto'] and not s['na_meta']:
@@ -561,13 +583,9 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
         print('- **Prismas atravessados:** ' + ', '.join(
             f"Prisma {p['prisma']} ({', '.join(p['termos'])})" for p in det['prismas']
         ))
-    prop = det.get('propriedade', {})
-    p2 = (prop.get('p2_coesao') or {}).get('nota')
-    print(
-        f"- **Propriedade na entrega:** geral **{prop.get('indice')}%** · "
-        f"P1 Prompt: {(prop.get('p1_direcao') or {}).get('nota')}% · "
-        f"P2 Coesão da entrega: {p2 if p2 is not None else 'n/d'}%"
-    )
+    prop = det.get('propriedade') or {}
+    for linha in linhas_propriedade(prop):
+        print(linha)
     leit = det.get('leitura')
     if leit and leit.get('texto') and leit.get('modelo'):
         print(

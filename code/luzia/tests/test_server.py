@@ -253,3 +253,14 @@ def test_pedido_api_sem_modelo_propoe_e_aceita(api, monkeypatch):
     assert r['pedido']['leitura'] is None and 'leitura indisponível' in r['pedido']['proposta']['leitura_indisponivel']
     c, r = api('POST', '/api/pedido', {'acao': 'aceitar', 'id': r['pedido']['id']})
     assert c == 200 and r['pedido']['estado'] == 'aceito'
+
+
+def test_estado_sem_entrega_git_nao_usa_tarefas_da_ia(api):
+    code, st = api('GET', '/api/estado')
+    assert code == 200 and st['entregas'] == []
+    diag = st['entregas_diagnostico']
+    assert diag['repo_configurado'] is True and diag['identidades'] == ['Pessoa Teste']
+    c, r = api('POST', '/api/identidade', {'identidade': 'outra@exemplo.test'})
+    assert c == 200 and r['identidades'] == ['Pessoa Teste', 'o***@***']
+    c, r = api('POST', '/api/identidade', {'identidade': ''})
+    assert c == 400 and r['erro']

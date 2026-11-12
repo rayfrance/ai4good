@@ -1,7 +1,8 @@
 """CLI da Luzia (agnóstica de harness; no Claude Code é chamada pelos comandos /luzia:*).
 
 O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de cada prisma (skill); os níveis formam a trajetória até a meta.
-- `hoje`, `triage`, `trajetoria` (`next-level`/`rota`), `entregas` (`feedback-progress`), `entrega <id>`, `feedback-skills-opportunities`
+- `hoje`, `triage`, `trajetoria` (`next-level`/`rota`), `entregas` (`feedback-progress`), `entrega <id>`, `identidade`,
+  `feedback-skills-opportunities`
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
 - `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
 """
@@ -59,17 +60,6 @@ def make_redactor(cfg: dict) -> Redactor:
     return Redactor.from_file(pipeline.PRIVATE / 'termos.txt', extra_colleagues=colleagues)
 
 
-def recent_commits(cfg: dict, redactor: Redactor, limit: int = 15) -> list[dict]:
-    out = []
-    if cfg.get('repo') and cfg.get('author') and Path(cfg['repo']).exists():
-        for c in triage.my_commits(Path(cfg['repo']), cfg['author'], limit):
-            out.append({
-                'data': c.date, 'mensagem': redactor.redact(c.subject), 'arquivos': c.files,
-                'linhas': f'+{c.insertions}/-{c.deletions}', 'areas': c.areas,
-            })
-    return out
-
-
 def skills_summary(plan: dict) -> list[dict]:
     autoaval = jogo.autoavaliacao()
     return [
@@ -77,11 +67,6 @@ def skills_summary(plan: dict) -> list[dict]:
          'alvo': s.get('alvo')}
         for s in plan.get('skills', [])
     ]
-
-
-def state_commits(state: dict) -> list[dict]:
-    plan = state.get('plano', {})
-    return (plan.get('_commits_dia') or []) + ((state.get('payload_anonimizado') or {}).get('commits_recentes') or [])
 
 
 # ------------------------------------------------------------------ chamadas ao modelo
@@ -114,7 +99,9 @@ def execute_triage(entrada_path: Path, rotulo: str = 'plugin-triage', save_state
 
 
 def daily_call(kind: str, entrada_path: Path, rotulo: str) -> tuple[dict, dict, dict]:
-    """Chamada leve do dia a dia: plano salvo + memória viva (commits, sessão e evidências)."""
+    """Chamada leve do dia a dia (oportunidades da sessão): plano salvo + eventos mascarados e evidências.
+
+    As entregas não passam mais pelo modelo: vêm só do git (`entregas.py`)."""
     pipeline.load_env()
     plan = pipeline.load_state().get('plano', {})
     cfg = load_cfg(entrada_path)
@@ -129,20 +116,12 @@ def daily_call(kind: str, entrada_path: Path, rotulo: str) -> tuple[dict, dict, 
         ],
         'feixes_descartados_pela_pessoa': jogo.motivos_descartados(),
     }
-    if kind == 'progress':
-        payload['commits_recentes'] = recent_commits(cfg, redactor)
-        schema, intro = planner.PROGRESS_SCHEMA, 'Plano salvo + commits recentes da pessoa (anonimizados por LGPD):'
-    else:
-        schema, intro = planner.OPPORTUNITIES_SCHEMA, 'Plano salvo + eventos mascarados da sessão atual no agente:'
+    schema, intro = planner.OPPORTUNITIES_SCHEMA, 'Plano salvo + eventos mascarados da sessão atual no agente:'
     result, record = pipeline.run_plan(
         payload, prep_seconds=time.perf_counter() - t0, label=rotulo, hits=dict(redactor.hits),
         schema=schema, intro=intro,
     )
-    if kind == 'progress':
-        pipeline.update_state({'tarefas_recentes': result.plan.get('tarefas_recentes', []),
-                               '_commits_dia': payload['commits_recentes']}, record)
-    else:
-        pipeline.update_state({'oportunidades_tarefa_atual': result.plan.get('oportunidades_tarefa_atual', [])}, record)
+    pipeline.update_state({'oportunidades_tarefa_atual': result.plan.get('oportunidades_tarefa_atual', [])}, record)
     return result.plan, record, dict(redactor.hits)
 
 
@@ -286,22 +265,6 @@ def rota_texto(plan: dict, state: dict | None = None) -> None:
         print(f"   {rotulo_p} · `{esp}` nível {s['nivel']} → meta {s['meta']}  `{bar(min(s['lm'], s['limiar']), s['limiar'], 10)}` "
               f"{s['lm']}/{s['limiar']} lm · luz própria {s['luz_propria']}%{pronto}")
         print('      ' + leitura_txt(leit_map.get(s['nome'])))
-
-
-def propriedade_entregas(state: dict) -> list[dict]:
-    plan = state.get('plano', {})
-    commits = state_commits(state)
-    evs = acoes.evidencias()
-    return [{**t, **propriedade.entrega(t, commits, plan.get('p1_direcao_prompt'), evs)} for t in plan.get('tarefas_recentes', [])]
-
-
-def print_entrega(e: dict, todas: list[dict]) -> None:
-    idx = e['indice']
-    print(f"\n▸ **{e['tarefa']}** · propriedade **{idx if idx is not None else '—'}%** · medida em {e['base']}")
-    print('   ' + ' · '.join(f"{k} {d['nota']} ({d['tipo']})" if d else f'{k} sem base' for k, d in e['dimensoes'].items()))
-    for a in todas:
-        if a.get('origem') == 'entrega' and a.get('entrega') == e['tarefa']:
-            print(f'   {feixe_linha(a)}' + (f" → acende {a['dimensao']}" if a.get('dimensao') else ''))
 
 
 def base_resumo(alvo_tipo: str | None, base: dict | None) -> str:
@@ -544,50 +507,81 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
     botoes(bts or [BT_TRAJETORIA, BT_PAINEL])
 
 
-def cmd_entregas(args, state: dict, entrada_path: Path, rotulo: str) -> None:
-    dias = args.ampliar if args.ampliar > 0 else 90
-    plan = state.get('plano', {})
-    jogo.sincronizar(plan)
-    with trajetoria.abrir() as con:
-        entregas.atualizar(con, dias=dias)
-        lista = entregas.listar(con)
-        leit_map = {str(e['id']): leituras.obter(con, 'entrega', str(e['id'])) for e in lista}
+BT_IDENTIDADE = {'rotulo': 'Conferir identidade do git', 'descricao': 'nomes e e-mails que a Luzia usa para achar seus commits',
+                 'rodar': 'identidade'}
 
-    if not lista and args.rotulo == 'feedback-progress':
-        _, rec, hits = daily_call('progress', entrada_path, rotulo)
-        state = pipeline.load_state()
-        todas = acoes.todas(state.get('plano', {}))
-        print('## ✦ Luzia · propriedade nas suas entregas')
-        for e in propriedade_entregas(state):
-            print_entrega(e, todas)
-        print('\n_P1 inferido dos seus prompts (geral) · P2 calculado da entrega · P3/P4 só com evidência registrada._')
-        footer(rec, hits)
-        oferecer([a for a in todas if a['origem'] == 'entrega'], 'Qual lacuna você quer fechar agora?')
-        return
+
+def linhas_diagnostico(diag: dict, aviso: str = '') -> list[str]:
+    """Por que não apareceu entrega: só fatos (repositório, identidades, janela), sem leitura de IA."""
+    ids = diag.get('identidades') or []
+    janela = (f"desde {diag['janela_desde']} · última leitura {diag['ultima_leitura']} · "
+              f"{diag.get('commits_seus', 0)} commit(s) seu(s) encontrado(s)") if diag.get('janela_desde') else 'ainda não lida'
+    return [
+        f"- **Repositório autorizado:** {'configurado' if diag.get('repo_configurado') else 'não configurado (campo `repo` em private/entrada.json)'}"
+        + (f' · {aviso}' if aviso else ''),
+        f"- **Identidades do git:** {', '.join(ids) if ids else 'nenhuma (campo `author` em private/entrada.json, ou `identidade adicionar`)'}",
+        f'- **Janela:** {janela}',
+    ]
+
+
+def cmd_entregas(args, state: dict) -> None:
+    """Entregas detectadas no git (só fatos); sem entrega, um diagnóstico curto. Nunca as tarefas montadas pela IA."""
+    dias = args.ampliar if args.ampliar > 0 else 90
+    jogo.sincronizar(state.get('plano', {}))
+    with trajetoria.abrir() as con:
+        res = entregas.atualizar(con, dias=dias)
+        lista = entregas.listar(con)
+        leit_map = {str(e['id']): leituras.obter(con, 'entrega', str(e['id'])) for e in lista[:10]}
+        diag = None if lista else entregas.diagnostico(con)
 
     print('## ✦ Luzia · suas entregas e propriedade sobre o código')
     bts: list[dict] = []
-    if lista:
-        for e in lista[:10]:
-            fatos = e.get('fatos', {})
-            prismas_nomes = ', '.join(f"Prisma {p['prisma']}" for p in e.get('prismas', [])) or 'nenhum prisma mapeado'
-            print(
-                f"\n▸ **Entrega `#{e['id']}` · {e['titulo']}** ({e['fonte']})\n"
-                f"   Fatos: {fatos.get('inicio', '')[:10]} a {fatos.get('fim', '')[:10]} "
-                f"({fatos.get('duracao_dias', 1)}d) · {fatos.get('commits', 0)} commit(s) · "
-                f"{fatos.get('arquivos', 0)} arquivo(s) · {fatos.get('linhas', 0)} linhas\n"
-                f"   Prismas atravessados: {prismas_nomes}"
-            )
-            print('   ' + leitura_txt(leit_map.get(str(e['id']))))
-            if len(bts) < 2:
-                bts.append({'rotulo': f"Ver entrega #{e['id']}", 'descricao': curto(e['titulo'], 40), 'rodar': f"entrega {e['id']}"})
-    else:
-        todas = acoes.todas(plan)
-        for e in propriedade_entregas(state):
-            print_entrega(e, todas)
-    bts.append({'rotulo': 'Ampliar janela (180 dias)', 'descricao': 'buscar entregas mais antigas no git', 'rodar': 'entregas --ampliar 180'})
+    ampliar = {'rotulo': f'Ampliar janela ({max(180, dias * 2)} dias)', 'descricao': 'buscar entregas mais antigas no git',
+               'rodar': f'entregas --ampliar {max(180, dias * 2)}'}
+    if not lista:
+        print('Nenhuma entrega detectada no git.')
+        for linha in linhas_diagnostico(diag, res.get('aviso', '')):
+            print(linha)
+        botoes([ampliar, BT_IDENTIDADE, BT_PAINEL], 'Quer ampliar a janela ou conferir sua identidade do git?')
+        return
+    for e in lista[:10]:
+        fatos = e.get('fatos', {})
+        prismas_nomes = ', '.join(f"Prisma {p['prisma']}" for p in e.get('prismas', [])) or 'nenhum prisma mapeado'
+        print(
+            f"\n▸ **Entrega `#{e['id']}` · {e['titulo']}** ({e['fonte']})\n"
+            f"   Fatos: {fatos.get('inicio', '')[:10]} a {fatos.get('fim', '')[:10]} "
+            f"({fatos.get('duracao_dias', 1)}d) · {fatos.get('commits', 0)} commit(s) · "
+            f"{fatos.get('arquivos', 0)} arquivo(s) · {fatos.get('linhas', 0)} linhas\n"
+            f"   Prismas atravessados: {prismas_nomes}"
+        )
+        print('   ' + leitura_txt(leit_map.get(str(e['id']))))
+        if len(bts) < 2:
+            bts.append({'rotulo': f"Ver entrega #{e['id']}", 'descricao': curto(e['titulo'], 40), 'rodar': f"entrega {e['id']}"})
+    bts.append(ampliar)
     bts.append(BT_PAINEL)
     botoes(bts, 'Qual entrega você quer inspecionar?')
+
+
+def cmd_identidade(args, restantes: list[str]) -> None:
+    """Confere (e acrescenta) os nomes e e-mails do git que a Luzia usa para achar os commits da pessoa."""
+    sub = (args.valor or '').strip().lower()
+    with trajetoria.abrir() as con:
+        if sub == 'adicionar':
+            try:
+                entregas.acrescentar_identidade(con, ' '.join(restantes))
+            except ValueError as e:
+                print(f'Não foi possível acrescentar: {e}.')
+                botoes([BT_IDENTIDADE, BT_PAINEL], 'Quer tentar de novo?')
+                return
+            print('✦ Identidade acrescentada. A próxima leitura das entregas refaz a janela inteira.')
+        diag = entregas.diagnostico(con)
+    print('## ✦ Luzia · identidade do git')
+    for linha in linhas_diagnostico(diag):
+        print(linha)
+    print('\nPara acrescentar um nome ou e-mail que você usa nos commits: '
+          '`identidade adicionar "<nome ou e-mail>"` (e-mails nunca aparecem inteiros na tela).')
+    botoes([{'rotulo': 'Ler entregas de novo', 'descricao': 'detectar entregas com estas identidades', 'rodar': 'entregas'},
+            BT_PAINEL], 'Quer ler suas entregas de novo?')
 
 
 def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
@@ -634,7 +628,7 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
 # ------------------------------------------------------------------ main
 COMANDOS = [
     'hoje', 'triage', 'trajetoria', 'next-level', 'rota',
-    'entregas', 'entrega', 'feedback-progress', 'feedback-skills-opportunities',
+    'entregas', 'entrega', 'feedback-progress', 'feedback-skills-opportunities', 'identidade',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido',
     'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo',
@@ -761,7 +755,11 @@ def main() -> None:
         return
 
     if args.comando in ('entregas', 'feedback-progress'):
-        cmd_entregas(args, state, entrada_path, rotulo)
+        cmd_entregas(args, state)
+        return
+
+    if args.comando == 'identidade':
+        cmd_identidade(args, restantes)
         return
 
     if args.comando == 'entrega':
@@ -956,10 +954,13 @@ def main() -> None:
         s = next((x for x in r['skills'] if x['nome'] == (a.get('skill_plano') or a.get('skill'))), None)
         print(f"✦ Avanço conquistado · `#{a['id']}` · nota {args.nota}/4 · **+{res['ganho']} lm**"
               + (f" · Prisma {curto(s['nome'])} {s['lm']}/{s['limiar']} lm" if s else '') + f" · trajetória {r['niveis_feitos']}/{r['niveis_total']} níveis")
-        if a.get('entrega'):
-            for e in propriedade_entregas(pipeline.load_state()):
-                if e['tarefa'] == a['entrega']:
-                    print(f"▸ {e['tarefa']}: propriedade agora **{e['indice']}%** · medida em {e['base']}")
+        if a.get('entrega_id'):
+            with trajetoria.abrir() as con:
+                det = entregas.detalhe(con, a['entrega_id'], incluir_leitura=False)
+            if det:
+                idx = det['propriedade'].get('indice')
+                print(f"▸ Entrega `#{det['id']}` · {det['titulo']}: propriedade agora "
+                      f"**{f'{idx}%' if idx is not None else '—'}** · medida em {det['propriedade'].get('base')}")
         avisar_degraus(plan)
         revisita = [{'rotulo': 'Revisitar agora', 'descricao': f"buscar o restante: {res['feixe']['lm_ganho']} de {res['feixe']['valor_lm']} lm",
                      'rodar': f"fazer {a['id']}"}] if res.get('pode_revisitar') else []

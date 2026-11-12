@@ -399,6 +399,20 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
     return resultado
 
 
+def diagnostico(con: sqlite3.Connection) -> dict:
+    """Por que não há entregas: repositório autorizado, identidades (e-mails mascarados) e a janela já lida."""
+    repo = _repo_configurado()
+    janela = trajetoria.perfil_ler(con, 'entregas_desde') or {}
+    janela = janela if isinstance(janela, dict) else {}
+    return {
+        'repo_configurado': repo is not None,
+        'identidades': [mascarar_identidade(i) for i in identidades(con, repo)],
+        'janela_desde': str(janela.get('desde') or '')[:10],
+        'ultima_leitura': str(janela.get('ultima') or '')[:10],
+        'commits_seus': int(janela.get('meus') or 0),
+    }
+
+
 def _recalcular(con: sqlite3.Connection, eid: int, destino: int | None = None) -> bool:
     """Totais da entrega a partir dos commits gravados; entrega sem commits some (reapontando avanços)."""
     linhas = con.execute('SELECT data, arquivos, linhas, areas_json FROM commit_ WHERE entrega_id = ?', (eid,)).fetchall()

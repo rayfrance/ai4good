@@ -715,7 +715,30 @@ function telaEntregas() {
       </div>
     </div>
     <details class="medida bloco"><summary>${ic('info')}Como isso é medido</summary><ul>${(E.como_e_medido || []).map((l) => `<li>${esc(l)}</li>`).join('')}</ul></details>
-    ${entregas || '<div class="bloco vazio">Rode /luzia:entregas para a Luzia ler suas entregas recentes no repositório.</div>'}`;
+    ${entregas || semEntregas()}`;
+}
+
+// Sem entrega no git: só fatos (repositório, identidades, janela) e o que a pessoa pode fazer. Nunca as tarefas da IA.
+function semEntregas() {
+  const d = E.entregas_diagnostico || {};
+  const ids = (d.identidades || []).map(esc).join(', ') || 'nenhuma';
+  const janela = d.janela_desde
+    ? `desde ${esc(d.janela_desde)} · última leitura ${esc(d.ultima_leitura)} · ${d.commits_seus ?? 0} commit(s) seu(s) encontrado(s)`
+    : 'ainda não lida (rode /luzia:entregas no seu agente)';
+  return `<div class="bloco vazio entregas-diagnostico">
+    <h3>Nenhuma entrega detectada no git</h3>
+    <ul class="lacuna" style="padding-left:18px">
+      <li><b>Repositório autorizado:</b> ${d.repo_configurado ? 'configurado' : 'não configurado (campo repo em private/entrada.json)'}</li>
+      <li><b>Identidades do git:</b> ${ids}</li>
+      <li><b>Janela:</b> ${janela}</li>
+    </ul>
+    <div class="pedido-ajuste">
+      <button class="btn sec mini" data-ampliar-entregas="180">${ic('relogio', 'p')}Ampliar janela (180 dias)</button>
+      <label>Nome ou e-mail do git <input type="text" id="ent-identidade" maxlength="120" autocomplete="off"></label>
+      <button class="btn prim mini" id="ent-identidade-salvar">${ic('check', 'p')}Acrescentar identidade</button>
+    </div>
+    <p class="dica">No chat: <b>identidade</b> confere e <b>identidade adicionar "&lt;nome ou e-mail&gt;"</b> acrescenta.</p>
+  </div>`;
 }
 
 let provEscolhido = null;
@@ -806,11 +829,31 @@ document.addEventListener('click', async (ev) => {
     '[data-filtro-tipo]', '#salvar-niveis', '[data-abrir-pedido-form]', '#ped-enviar',
     '[data-pedido-aceitar]', '[data-pedido-ajustar]', '[data-pedido-recusar]',
     '[data-reativar-prisma]', '[data-gerar-leituras]', '[data-ampliar-entregas]',
-    '[data-entrega-detalhe]',
+    '[data-entrega-detalhe]', '#ent-identidade-salvar',
   ].join(',');
   const t = ev.target.closest(seletor);
   if (!t) return;
   const ds = t.dataset;
+
+  if (t.id === 'ent-identidade-salvar') {
+    const identidade = ($('#ent-identidade')?.value || '').trim();
+    if (!identidade) {
+      toast('Informe um nome ou e-mail que você usa nos commits.');
+      return;
+    }
+    t.disabled = true;
+    const r = await api('/api/identidade', { identidade });
+    if (r.erro) {
+      toast(`Não acrescentou: ${r.erro}`);
+      t.disabled = false;
+      return;
+    }
+    toast('Identidade acrescentada. Lendo as entregas da janela inteira de novo…');
+    const amp = await api('/api/entregas/ampliar', { dias: 90 });
+    toast(amp.erro ? `Falhou: ${amp.erro}` : `${amp.atualizacao?.novas ?? 0} entrega(s) nova(s) encontrada(s).`);
+    await carregar();
+    return;
+  }
 
   if (ds.acender) {
     ev.stopPropagation();

@@ -81,6 +81,7 @@ def estado() -> dict:
         lista_pedidos = pedidos.listar(con)
         entregas_git = entregas.listar(con)
         detalhes_git = [entregas.detalhe(con, e['id']) for e in entregas_git[:15]]
+        diag_entregas = None if entregas_git else entregas.diagnostico(con)
 
     diag = plan.get('diagnostico_fontes', {})
     plan_skills_map = {s['nome']: s for s in plan.get('skills', []) if isinstance(s, dict) and s.get('nome')}
@@ -121,8 +122,6 @@ def estado() -> dict:
     skills_ativas = [p for p in prismas_out if p['estado'] == 'ativo']
     cfg = pipeline.read_json(pipeline.PRIVATE / 'entrada.json', {})
 
-    commits = (plan.get('_commits_dia') or []) + ((state.get('payload_anonimizado') or {}).get('commits_recentes') or [])
-    evs = acoes.evidencias()
     entregas_out = []
     for det in detalhes_git:
         if not det:
@@ -130,14 +129,12 @@ def estado() -> dict:
         prop = det.get('propriedade', {})
         entregas_out.append({
             'id': det['id'],
-            'chave': det.get('chave', ''),
             'titulo': det['titulo'],
             'tarefa': det['titulo'],
             'fonte': det.get('fonte', 'git'),
             'fatos': det['fatos'],
             'prismas': det['prismas'],
             'skills': [x['prisma'] for x in det['prismas']],
-            'risco': '',
             'indice': prop.get('indice'),
             'base': prop.get('base', ''),
             'dimensoes': prop.get('dimensoes', {}),
@@ -148,23 +145,6 @@ def estado() -> dict:
             'acoes': [a['id'] for a in det.get('avancos_uteis', [])],
             'lumens_ligados': det.get('lumens_ligados', []),
         })
-    if not entregas_out:
-        for idx_t, t in enumerate(plan.get('tarefas_recentes', []), 1):
-            p = propriedade.entrega(t, commits, plan.get('p1_direcao_prompt'), evs)
-            entregas_out.append({
-                'id': idx_t,
-                'titulo': t.get('tarefa', ''),
-                'tarefa': t.get('tarefa', ''),
-                'fonte': 'triagem',
-                'fatos': {'inicio': '', 'fim': '', 'duracao_dias': 1, 'commits': 1, 'arquivos': 0, 'linhas': 0, 'areas': []},
-                'prismas': [{'prisma': sk, 'termos': []} for sk in t.get('skills', [])],
-                'skills': t.get('skills', []),
-                'risco': t.get('risco_debito_tecnico', ''),
-                **p,
-                'propriedade': p,
-                'leitura': None,
-                'acoes': [a['id'] for a in lista if a.get('entrega') == t.get('tarefa')],
-            })
     indices = [e['indice'] for e in entregas_out if e.get('indice') is not None]
 
     lm_recentes = list(reversed(jogo.livro(limite=12)))
@@ -209,6 +189,7 @@ def estado() -> dict:
         'acoes': lista,
         'proxima': proxima(lista),
         'entregas': entregas_out,
+        'entregas_diagnostico': diag_entregas,
         'lumens': lm_recentes,
         'pedidos': lista_pedidos,
         'como_e_medido': propriedade.COMO_E_MEDIDO,
@@ -427,6 +408,14 @@ class Handler(BaseHTTPRequestHandler):
             with trajetoria.abrir() as con:
                 geradas = leituras.gerar(con, alvos=alvos)
             return self._json({'ok': True, 'geradas': geradas})
+
+        if path == '/api/identidade':
+            with trajetoria.abrir() as con:
+                try:
+                    entregas.acrescentar_identidade(con, str(dados.get('identidade') or ''))
+                except ValueError as e:
+                    return self._json({'erro': str(e)}, 400)
+                return self._json({'ok': True, 'identidades': entregas.diagnostico(con)['identidades']})
 
         if path == '/api/entregas/ampliar':
             dias = max(1, min(3650, int(dados.get('dias', 180) or 180)))

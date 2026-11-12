@@ -56,16 +56,6 @@ ACAO_SCHEMA = """{
         "duracao_min": int
       }"""
 
-TAREFA_SCHEMA = f"""{{
-      "tarefa": str,
-      "commit": str,
-      "skills": [str],
-      "risco_debito_tecnico": str,
-      "acoes": [
-        {ACAO_SCHEMA}
-      ]
-    }}"""
-
 OPORTUNIDADE_SCHEMA = f"""{{
       "skill_alvo": str,
       "gatilho": str,
@@ -118,17 +108,6 @@ restrições e critérios ao agente (vs. só delegar); "base" cita o padrão obs
 Plano com exatamente 3 trechos, por PROGRESSO e não por datas: "trecho 1" (próximos degraus das maiores
 lacunas), "trecho 2" (consolidar), "trecho 3" (o que falta para a meta); 2 a 3 ações cada. "sinal_de_progresso"
 descreve uma evidência observável, nunca um prazo. Não proponha de novo feixes parecidos com os descartados.
-{REGRAS_ACOES}"""
-
-PROGRESS_SCHEMA = f"""Devolva exatamente este JSON:
-{{
-  "resumo_progresso": str,
-  "tarefas_recentes": [
-    {TAREFA_SCHEMA}
-  ]
-}}
-4 tarefas_recentes escolhidas entre os commits recebidos; "commit" copia EXATAMENTE a mensagem do commit;
-2 ações por tarefa. Considere as evidências já registradas para não repetir o que a pessoa já demonstrou.
 {REGRAS_ACOES}"""
 
 TRECHO_SCHEMA = f"""Devolva exatamente este JSON:

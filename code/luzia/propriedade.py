@@ -5,7 +5,7 @@ dos seus lúmens que veio de você e não do agente.
 
 - P1 · direção no prompt: inferida pelo modelo a partir dos prompts recentes no projeto (com justificativa);
   é geral (a mesma em todas as entregas), porque os prompts não são ligados a um commit específico.
-- P2 · coesão do commit: regra fixa sobre os metadados do git (conta visível).
+- P2 · coesão da entrega: regra fixa sobre arquivos, linhas e áreas somados da entrega no git (conta visível).
 - P3 · aplicação conceitual: só existe com evidência registrada (ações "explicar/praticar" concluídas).
 - P4 · domínio arquitetural: só existe com evidência registrada (ações de defesa da decisão).
 
@@ -24,7 +24,7 @@ RUBRICA = {
 
 COMO_E_MEDIDO = [
     'P1 · direção no prompt: o modelo lê seus prompts recentes no projeto e avalia se você deu direção, restrições e critérios ao agente (inferido, geral: vale para todas as entregas).',
-    'P2 · coesão do commit: regra fixa sobre arquivos, linhas e áreas do commit; quanto mais focado, maior (calculado).',
+    'P2 · coesão da entrega: regra fixa sobre arquivos, linhas e áreas somados da entrega; quanto mais focada, maior (calculado).',
     'P3 · aplicação conceitual: sobe só quando você explica o conceito naquela entrega numa ação da Luzia (evidência).',
     'P4 · domínio arquitetural: sobe só quando você defende a decisão e as alternativas numa ação (evidência).',
     'Rubrica das evidências (0–4, ×25): ' + ' · '.join(f'{k} {v}' for k, v in RUBRICA.items()) + '.',
@@ -78,41 +78,3 @@ def p2_entrega(commits: list[dict] | None) -> dict | None:
     linhas = sum(_linhas(c.get('linhas', 0)) for c in commits)
     areas = list(dict.fromkeys(a for c in commits for a in _areas(c)))
     return p2_coesao({'arquivos': arquivos, 'linhas': linhas, 'areas': areas})
-
-
-def find_commit(tarefa: dict, commits: list[dict]) -> dict | None:
-    alvo = (tarefa.get('commit') or tarefa.get('tarefa') or '').strip().lower()
-    if not alvo:
-        return None
-    for c in commits:
-        if (c.get('mensagem') or '').strip().lower() == alvo:
-            return c
-    for c in commits:
-        msg = (c.get('mensagem') or '').strip().lower()
-        if msg and (msg[:40] in alvo or alvo[:40] in msg):
-            return c
-    return None
-
-
-def entrega(tarefa: dict, commits: list[dict], p1: dict | None, evidencias: list[dict]) -> dict:
-    """Dimensões, índice e base de uma entrega."""
-    dims: dict[str, dict | None] = {}
-    if p1 and p1.get('nota') is not None:
-        dims['P1'] = {'nota': int(p1['nota']), 'tipo': 'inferido · geral', 'base': p1.get('base', '')}
-    else:
-        dims['P1'] = None
-    dims['P2'] = p2_coesao(find_commit(tarefa, commits))
-    for dim in ('P3', 'P4'):
-        evs = [e for e in evidencias if e.get('entrega') == tarefa.get('tarefa') and e.get('dimensao') == dim]
-        if evs:
-            melhor = max(evs, key=lambda e: int(e.get('nota', 0)))
-            n = int(melhor.get('nota', 0))
-            dims[dim] = {
-                'nota': n * 25, 'tipo': 'evidência',
-                'base': f"{RUBRICA.get(n, '')} — “{melhor.get('resumo', '')}” ({melhor.get('quando', '')[:10]})",
-            }
-        else:
-            dims[dim] = None
-    com_base = [d['nota'] for d in dims.values() if d]
-    indice = round(sum(com_base) / len(com_base)) if com_base else None
-    return {'dimensoes': dims, 'indice': indice, 'base': f'{len(com_base)} de 4 dimensões'}

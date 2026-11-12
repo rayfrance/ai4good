@@ -359,3 +359,28 @@ def test_toda_leitura_impressa_tem_base_modelo_e_data(privado, monkeypatch):
         assert 'gemini/teste · 2026-11-11' in linha, linha
     v = visivel(rodar(monkeypatch, 'trajetoria'))  # prisma sem leitura: diz por quê, nunca fica vazio
     assert 'leitura indisponível: configure o modelo' in v
+
+
+# ------------------------------------------------------------------ entregas: sem atalho para as tarefas da IA (A2)
+def test_sem_entrega_git_mostra_diagnostico_e_nunca_tarefas_da_ia(privado, monkeypatch):
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(AssertionError('sem modelo aqui')))
+    for argv in (('entregas',), ('feedback-progress',), ('feedback-progress', '--rotulo', 'feedback-progress')):
+        s = rodar(monkeypatch, *argv)
+        v = visivel(s)
+        assert 'Nenhuma entrega detectada' in v, v
+        assert 'cadastro de exemplo' not in v and 'cobertura do relatório' not in v  # tarefas_recentes (IA) fora
+        assert 'Repositório autorizado' in v and 'não consegui ler o histórico git' in v
+        assert 'Identidades do git:** Pessoa Teste' in v and 'Janela:** ainda não lida' in v
+        rodar_bts = [b['rodar'] for b in botoes_de(s)]
+        assert 'entregas --ampliar 180' in rodar_bts and 'identidade' in rodar_bts, rodar_bts
+
+
+def test_identidade_confere_e_acrescenta_sem_mostrar_email(privado, monkeypatch):
+    s = rodar(monkeypatch, 'identidade')
+    assert 'Pessoa Teste' in visivel(s) and tem_rodape_botoes(s)
+    s = rodar(monkeypatch, 'identidade', 'adicionar', 'pessoa.segunda@exemplo.test')
+    v = visivel(s)
+    assert 'pessoa.segunda' not in v and 'exemplo.test' not in v and 'p***@***' in v
+    assert tem_rodape_botoes(s) and any(b['rodar'] == 'entregas' for b in botoes_de(s))
+    with trajetoria.abrir() as con:
+        assert 'pessoa.segunda@exemplo.test' in entregas.identidades(con)

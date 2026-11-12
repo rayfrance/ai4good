@@ -22,7 +22,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import arquivos, banco, trajetoria, triage
+from . import arquivos, banco, jogo, propriedade, trajetoria, triage
 from .privacy import Redactor
 
 SEP_REG, SEP_CAMPO = '\x1e', '\x1f'
@@ -277,7 +277,7 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
 
     with banco.transacao(con):
         tocadas: set[int] = set()
-        antigas: set[int] = set()
+        antigas: dict[int, int] = {}
         for e in achadas:
             linha = con.execute('SELECT id FROM entrega WHERE chave = ?', (e['chave'],)).fetchone()
             novos = 0
@@ -292,7 +292,7 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
                 if antes is None or antes['entrega_id'] != eid:
                     novos += 1
                     if antes is not None and antes['entrega_id'] not in (None, eid):
-                        antigas.add(antes['entrega_id'])  # saiu de outra entrega (ex.: o PR chegou depois)
+                        antigas[antes['entrega_id']] = eid  # saiu de outra entrega (ex.: o PR chegou depois)
                 msg = redator.redact(_limpar(c['mensagem']))[:MAX_MENSAGEM]
                 con.execute(
                     'INSERT INTO commit_ (hash, entrega_id, data, mensagem, arquivos, linhas, areas_json) '
@@ -313,18 +313,19 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
                 resultado['novas'] += 1
             elif novos:
                 tocadas.add(eid)
-        for velha in antigas:  # só depois de todos os commits terem mudado de lugar
-            if _recalcular(con, velha):
+        for velha, destino in antigas.items():  # só depois de todos os commits terem mudado de lugar
+            if _recalcular(con, velha, destino=destino):
                 tocadas.add(velha)
         resultado['atualizadas'] = len(tocadas)
         trajetoria.perfil_gravar(con, 'entregas_desde', {'desde': desde_gravado, 'ultima': agora.isoformat()})
     return resultado
 
 
-def _recalcular(con: sqlite3.Connection, eid: int) -> bool:
-    """Totais da entrega a partir dos commits gravados; entrega sem commits some."""
+def _recalcular(con: sqlite3.Connection, eid: int, destino: int | None = None) -> bool:
+    """Totais da entrega a partir dos commits gravados; entrega sem commits some (reapontando avanços)."""
     linhas = con.execute('SELECT data, arquivos, linhas, areas_json FROM commit_ WHERE entrega_id = ?', (eid,)).fetchall()
     if not linhas:
+        con.execute('UPDATE avanco SET entrega_id = ? WHERE entrega_id = ?', (destino, eid))
         con.execute('DELETE FROM entrega_prisma WHERE entrega_id = ?', (eid,))
         con.execute('DELETE FROM entrega WHERE id = ?', (eid,))
         return False
@@ -337,3 +338,197 @@ def _recalcular(con: sqlite3.Connection, eid: int) -> bool:
                 (datas[0], datas[-1], len(linhas), sum(r['arquivos'] for r in linhas), sum(r['linhas'] for r in linhas),
                  json.dumps([a for a, _ in areas.most_common(4)], ensure_ascii=False), eid))
     return True
+
+
+# ------------------------------------------------------------------ ligação com o jogo (Tarefa 9)
+def _duracao_dias(inicio: str | None, fim: str | None) -> int:
+    if not inicio or not fim:
+        return 0
+    try:
+        d_ini = datetime.fromisoformat(inicio[:19]).date()
+        d_fim = datetime.fromisoformat(fim[:19]).date()
+        return max(0, (d_fim - d_ini).days)
+    except ValueError:
+        return 0
+
+
+def _fatos(r: sqlite3.Row) -> dict:
+    try:
+        areas = json.loads(r['areas_json'] or '[]')
+    except ValueError:
+        areas = []
+    return {
+        'inicio': r['inicio'] or '',
+        'fim': r['fim'] or '',
+        'duracao_dias': _duracao_dias(r['inicio'], r['fim']),
+        'commits': int(r['commits'] or 0),
+        'arquivos': int(r['arquivos'] or 0),
+        'linhas': int(r['linhas'] or 0),
+        'areas': areas,
+    }
+
+
+def _prismas_entrega(con: sqlite3.Connection, eid: int) -> list[dict]:
+    out = []
+    for r in con.execute('SELECT prisma, termos_json FROM entrega_prisma WHERE entrega_id = ? ORDER BY rowid', (eid,)):
+        try:
+            termos = json.loads(r['termos_json'] or '[]')
+        except ValueError:
+            termos = []
+        out.append({'nome': r['prisma'], 'prisma': r['prisma'], 'termos': termos})
+    return out
+
+
+def _propriedade_entrega(con: sqlite3.Connection, r: sqlite3.Row, commits: list[dict], avancos_feitos: list[dict]) -> dict:
+    plano = trajetoria.perfil_ler(con, 'plano') or {}
+    p1 = plano.get('p1_direcao_prompt')
+    dims: dict[str, dict | None] = {}
+    if isinstance(p1, dict) and p1.get('nota') is not None:
+        dims['P1'] = {'nota': int(p1['nota']), 'tipo': 'inferido · geral', 'base': p1.get('base', '')}
+    else:
+        dims['P1'] = None
+    dims['P2'] = propriedade.p2_entrega(commits)
+
+    por_id = {a['id']: a for a in avancos_feitos}
+    alvos_legado = {x for x in (r['titulo'], str(r['id']), r['chave']) if x}
+    for dim in ('P3', 'P4'):
+        candidatos: list[dict] = []
+        for a in avancos_feitos:
+            if a.get('estado') == 'conquistado' and a.get('dimensao') == dim and a.get('nota') is not None:
+                hist = a.get('historico') or []
+                resumo = a.get('resumo') or next((h.get('resumo') for h in reversed(hist) if h.get('resumo')), '')
+                quando = next((h.get('quando') for h in reversed(hist) if h.get('quando')), a.get('criado_em') or '')
+                candidatos.append({'nota': int(a['nota']), 'resumo': resumo, 'quando': quando})
+        for ev in con.execute("SELECT avanco_id, quando, nota, resumo, extra_json FROM avanco_evento "
+                              "WHERE evento IN ('concluida', 'conquistado', 'revisitado') AND nota IS NOT NULL"):
+            try:
+                extra = json.loads(ev['extra_json'] or '{}')
+            except ValueError:
+                extra = {}
+            extra = extra if isinstance(extra, dict) else {}
+            av = por_id.get(ev['avanco_id'])
+            dim_ev = extra.get('dimensao') or (av.get('dimensao') if av else None)
+            if dim_ev != dim:
+                continue
+            if av is not None or extra.get('entrega') in alvos_legado:
+                candidatos.append({'nota': int(ev['nota']), 'resumo': ev['resumo'] or '', 'quando': ev['quando'] or ''})
+        if candidatos:
+            melhor = max(candidatos, key=lambda c: int(c.get('nota', 0)))
+            n = int(melhor.get('nota', 0))
+            dims[dim] = {
+                'nota': n * 25,
+                'tipo': 'evidência',
+                'base': f"{propriedade.RUBRICA.get(n, '')} — “{melhor.get('resumo', '')}” ({(melhor.get('quando') or '')[:10]})",
+            }
+        else:
+            dims[dim] = None
+
+    com_base = [d['nota'] for d in dims.values() if d]
+    indice = round(sum(com_base) / len(com_base)) if com_base else None
+    return {'dimensoes': dims, 'indice': indice, 'base': f'{len(com_base)} de 4 dimensões'}
+
+
+def _lumens_ligados(con: sqlite3.Connection, r: sqlite3.Row, prismas_nomes: set[str], ids_avancos: set[str]) -> list[dict]:
+    refs = {str(r['id']), r['chave'], *ids_avancos} | ({r['titulo']} if r['titulo'] else set())
+    janela_ini = janela_fim = ''
+    if r['inicio'] and r['fim']:
+        try:
+            janela_ini = (datetime.fromisoformat(r['inicio'][:19]).date() - timedelta(days=1)).isoformat()
+            janela_fim = (datetime.fromisoformat(r['fim'][:19]).date() + timedelta(days=1)).isoformat() + 'T23:59:59'
+        except ValueError:
+            pass
+    out = []
+    for row in con.execute('SELECT id, quando, prisma, lm, luz, fonte, ref FROM lumen ORDER BY quando, id'):
+        ref = row['ref'] or ''
+        fonte = str(row['fonte'] or '')
+        por_ref = bool(ref and ref in refs)
+        por_janela = bool(
+            row['prisma'] in prismas_nomes
+            and (fonte.startswith('passivo') or fonte == 'conversao')
+            and janela_ini and janela_ini <= (row['quando'] or '') <= janela_fim
+        )
+        if por_ref or por_janela:
+            out.append({
+                'id': row['id'], 'quando': row['quando'], 'prisma': row['prisma'], 'skill': row['prisma'],
+                'lm': int(row['lm']), 'luz': row['luz'], 'fonte': fonte, 'ref': ref,
+            })
+    return out
+
+
+def detalhe(con: sqlite3.Connection, entrega_id: int) -> dict | None:
+    """Detalhe completo de uma entrega ligada ao jogo (sem hashes nem ids privados)."""
+    r = con.execute('SELECT * FROM entrega WHERE id = ?', (int(entrega_id),)).fetchone()
+    if r is None:
+        return None
+    eid = int(r['id'])
+    fatos = _fatos(r)
+    prismas_lista = _prismas_entrega(con, eid)
+    prismas_nomes = {p['nome'] for p in prismas_lista}
+
+    commits = []
+    for c in con.execute('SELECT data, mensagem, arquivos, linhas, areas_json FROM commit_ WHERE entrega_id = ? ORDER BY data, rowid', (eid,)):
+        try:
+            areas = json.loads(c['areas_json'] or '[]')
+        except ValueError:
+            areas = []
+        commits.append({
+            'data': c['data'], 'mensagem': c['mensagem'],
+            'arquivos': int(c['arquivos'] or 0), 'linhas': int(c['linhas'] or 0), 'areas': areas,
+        })
+
+    todos_avancos = jogo.avancos(con)
+    avancos_feitos = [
+        a for a in todos_avancos
+        if a.get('entrega_id') == eid or (a.get('entrega_id') is None and r['titulo'] and a.get('entrega') == r['titulo'])
+    ]
+    ids_feitos = {a['id'] for a in avancos_feitos}
+    avancos_uteis = [
+        a for a in todos_avancos
+        if a['id'] not in ids_feitos
+        and a.get('estado') in ('em_andamento', 'na_fila', 'sugerido')
+        and (a.get('skill_plano') or a.get('skill')) in prismas_nomes
+    ][:3]
+
+    lumens = _lumens_ligados(con, r, prismas_nomes, ids_feitos)
+    prop = _propriedade_entrega(con, r, commits, avancos_feitos)
+
+    leitura_obj = None
+    try:
+        from . import leituras
+        leitura_obj = leituras.obter(con, 'entrega', str(eid))
+    except ImportError:
+        pass
+
+    return {
+        'id': eid,
+        'titulo': r['titulo'] or 'Entrega',
+        'fonte': r['fonte'],
+        'inicio': fatos['inicio'],
+        'fim': fatos['fim'],
+        'fatos': fatos,
+        'commits': commits,
+        'prismas': prismas_lista,
+        'avancos_feitos': avancos_feitos,
+        'avancos_uteis': avancos_uteis,
+        'lumens_ligados': lumens,
+        'propriedade': prop,
+        'leitura': leitura_obj,
+    }
+
+
+def listar(con: sqlite3.Connection) -> list[dict]:
+    """Entregas mais recentes primeiro, com resumo dos fatos e prismas atravessados."""
+    out = []
+    for r in con.execute('SELECT * FROM entrega ORDER BY fim DESC, inicio DESC, id DESC'):
+        eid = int(r['id'])
+        fatos = _fatos(r)
+        out.append({
+            'id': eid,
+            'titulo': r['titulo'] or 'Entrega',
+            'fonte': r['fonte'],
+            'inicio': fatos['inicio'],
+            'fim': fatos['fim'],
+            'fatos': fatos,
+            'prismas': _prismas_entrega(con, eid),
+        })
+    return out

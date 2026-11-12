@@ -35,7 +35,7 @@ ORIGEM_COLUNA = {'rota': 'triagem', 'entrega': 'entrega', 'sessão': 'sessao', '
                  'trecho': 'acender', 'guardada': 'lampejo'}
 # O que o avanço guarda em colunas de estado; todo o resto do feixe vai inteiro em `conteudo_json`.
 CAMPOS_ESTADO = {'id', 'status', 'estado', 'historico', 'nota', 'lm_ganho', 'tentativas', 'revisitas',
-                 'revisita_aberta', 'valor_lm', 'conta', 'criado_em', 'skill_plano'}
+                 'revisita_aberta', 'valor_lm', 'conta', 'criado_em', 'skill_plano', 'entrega_id'}
 COLUNAS_ESTADO = ('nota', 'lm_ganho', 'tentativas', 'revisitas', 'revisita_aberta')
 COLUNAS_EVENTO = ('onde', 'nota', 'resumo', 'motivo')
 ESTADO_ANTIGO = {'conquistado': 'feita', 'em_andamento': 'em andamento', 'na_fila': 'pendente',
@@ -175,6 +175,7 @@ def _feixe(r: sqlite3.Row, historico: list[dict]) -> dict:
         f['origem'] = r['origem']
     f.update(estado=r['estado'], valor_lm=r['valor_lm'], nota=r['nota'], lm_ganho=r['lm_ganho'],
              tentativas=r['tentativas'], revisitas=r['revisitas'], criado_em=r['criado_em'], skill_plano=r['prisma'],
+             entrega_id=r['entrega_id'],
              conta=json.loads(r['conta_json']) if r['conta_json'] else None, historico=historico)
     if r['revisita_aberta']:
         f['revisita_aberta'] = True
@@ -223,11 +224,12 @@ def _inserir_avanco(con: sqlite3.Connection, f: dict) -> None:
     dur = f.get('duracao_min')
     con.execute(
         'INSERT OR IGNORE INTO avanco (id, prisma, tipo, titulo, conteudo_json, duracao_min, valor_lm, conta_json, origem,'
-        ' dimensao, estado, nota, lm_ganho, tentativas, revisitas, revisita_aberta, criado_em)'
-        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ' entrega_id, dimensao, estado, nota, lm_ganho, tentativas, revisitas, revisita_aberta, criado_em)'
+        ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (f['id'], f.get('skill_plano'), f.get('tipo'), f.get('titulo'), _json(_conteudo(f)),
          dur if isinstance(dur, int) and not isinstance(dur, bool) else None, f.get('valor_lm'),
-         _json(f['conta']) if f.get('conta') is not None else None, _origem_coluna(f.get('origem')), f.get('dimensao'),
+         _json(f['conta']) if f.get('conta') is not None else None, _origem_coluna(f.get('origem')), f.get('entrega_id'),
+         f.get('dimensao'),
          f.get('estado') or 'sugerido', f.get('nota'), int(f.get('lm_ganho') or 0), int(f.get('tentativas') or 0),
          int(f.get('revisitas') or 0), 1 if f.get('revisita_aberta') else 0, f.get('criado_em') or agora()))
 

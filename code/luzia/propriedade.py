@@ -31,17 +31,34 @@ COMO_E_MEDIDO = [
 ]
 
 
+def _linhas(valor) -> int:
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        return int(valor)
+    linhas_txt = str(valor if valor is not None else '+0/-0').replace('+', '').split('/-')
+    try:
+        return sum(int(p) for p in linhas_txt if p.strip())
+    except ValueError:
+        return 0
+
+
+def _areas(commit: dict) -> list[str]:
+    bruto = commit.get('areas')
+    if bruto is None and commit.get('areas_json'):
+        import json
+        try:
+            bruto = json.loads(commit['areas_json'])
+        except ValueError:
+            bruto = []
+    return [str(a) for a in (bruto or []) if a]
+
+
 def p2_coesao(commit: dict | None) -> dict | None:
     """Nota 0-100 de coesão de um commit, com a conta mostrada."""
     if not commit:
         return None
-    linhas_txt = str(commit.get('linhas', '+0/-0')).replace('+', '').split('/-')
-    try:
-        linhas = int(linhas_txt[0]) + int(linhas_txt[1])
-    except (ValueError, IndexError):
-        linhas = 0
+    linhas = _linhas(commit.get('linhas', '+0/-0'))
     arquivos = int(commit.get('arquivos', 0) or 0)
-    areas = len(commit.get('areas') or [])
+    areas = len(_areas(commit))
     pen_arq = min(40, max(0, arquivos - 5) * 4)
     pen_lin = min(30, max(0, linhas - 150) // 50 * 5)
     pen_area = 10 * max(0, areas - 2)
@@ -51,6 +68,16 @@ def p2_coesao(commit: dict | None) -> dict | None:
         f'− {pen_area} ({areas} áreas) = {nota}'
     )
     return {'nota': nota, 'tipo': 'calculado', 'base': conta}
+
+
+def p2_entrega(commits: list[dict] | None) -> dict | None:
+    """Nota 0-100 de coesão aplicada à soma de arquivos e linhas e à união de áreas da entrega (conta visível)."""
+    if not commits:
+        return None
+    arquivos = sum(int(c.get('arquivos', 0) or 0) for c in commits)
+    linhas = sum(_linhas(c.get('linhas', 0)) for c in commits)
+    areas = list(dict.fromkeys(a for c in commits for a in _areas(c)))
+    return p2_coesao({'arquivos': arquivos, 'linhas': linhas, 'areas': areas})
 
 
 def find_commit(tarefa: dict, commits: list[dict]) -> dict | None:

@@ -244,8 +244,8 @@ def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
 
 
 def main() -> None:
-    try:
-        event = json.load(sys.stdin)
+    try:  # o Claude Code envia UTF-8; o pipe do Windows usaria a página de código local e estragaria os acentos
+        event = json.loads(sys.stdin.buffer.read().decode('utf-8', errors='replace'))
     except Exception:
         return
     cfg = read_json(CFG, {'modo': 'ativo', 'autorizados': []})

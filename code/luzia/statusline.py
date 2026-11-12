@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
-from . import acoes, banco, jogo, observer, trajetoria
+# O Claude Code executa `python statusline.py` (sem pacote): o import absoluto funciona como script e como módulo.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from luzia import acoes, arquivos, banco, jogo, observer, trajetoria  # noqa: E402
 
 
 def linha(dados: dict) -> str:
@@ -20,7 +24,10 @@ def linha(dados: dict) -> str:
         return '✦ Luzia · fora de foco (/luzia:hoje)'
     if cwd and not observer.autorizado(cwd, cfg):
         return ''
-    plan = trajetoria.plano(banco.ESPERA_CURTA_MS)
+    try:
+        plan = trajetoria.plano(banco.ESPERA_CURTA_MS)
+    except Exception:  # banco ocupado ou plano ilegível: a linha de status nunca quebra
+        return '✦ Luzia · em foco (/luzia:hoje)'
     if not plan:
         return '✦ Luzia · rode /luzia:triage'
     try:
@@ -45,12 +52,18 @@ def linha(dados: dict) -> str:
 
 
 def main() -> None:
+    if hasattr(sys.stdout, 'reconfigure'):  # no Windows o pipe usa a página de código local, que não tem ✦
+        sys.stdout.reconfigure(encoding='utf-8')
     try:
-        cru = sys.stdin.read()
+        cru = sys.stdin.buffer.read().decode('utf-8', errors='replace')
         dados = json.loads(cru) if cru.strip() else {}
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, AttributeError):
         dados = {}
-    out = linha(dados)
+    try:
+        out = linha(dados)
+    except Exception as e:
+        arquivos.registrar_erro('statusline', e)
+        out = ''
     if out:
         print(out)
 

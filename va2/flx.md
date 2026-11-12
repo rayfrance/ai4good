@@ -8,7 +8,7 @@
 
 ```mermaid
 flowchart LR
-    DEV["Pessoa Desenvolvedora<br/>no Claude Code / Codex /<br/>Cursor / Antigravity"] --> CMD["Comandos do Plugin<br/>/LuzIA:triage<br/>/LuzIA:feedback-skills-opportunities<br/>/LuzIA:feedback-progress<br/>/LuzIA:next-level"]
+    DEV["Pessoa Desenvolvedora<br/>no Claude Code / Codex /<br/>Cursor / Antigravity"] --> CMD["Comandos do Plugin<br/>/luzia:triage<br/>/luzia:feedback-skills-opportunities<br/>/luzia:feedback-progress<br/>/luzia:next-level"]
     CMD --> COL["Coleta Local Multi-Fonte<br/>1. Declaração (Jr 3 → Pleno)<br/>2. Currículo + GitHub (rayfrance)<br/>3. Histórico compartilhado entre IAs<br/>(Vault Obsidian + Claude + Codex)<br/>4. Metadados de commits (git log --numstat)"]
     COL --> LGPD["Filtro Local LGPD (privacy.py)<br/>Mascara empresa, produto interno,<br/>clientes, 171 colegas, e-mail, telefone,<br/>PRs, tickets e hashes (código nunca sai)"]
     LGPD --> LLM["Motor LLM (google-genai)<br/>gemini-3.5-flash-lite<br/>Avalia uso educado de IA e<br/>propriedade intelectual"]
@@ -18,7 +18,7 @@ flowchart LR
 ```
 
 **Peças da implementação:**
-- **Plugin multi-agente:** manifestos `.claude-plugin/plugin.json` (e equivalentes para Cursor, Codex e Antigravity), comandos slash em `.claude/commands/LuzIA/` e skill `leadroid-mentor/SKILL.md`.
+- **Plugin multi-agente:** manifestos `.claude-plugin/plugin.json` (e equivalentes para Cursor, Codex e Antigravity), comandos slash em `.claude/commands/luzia/` e skill `leadroid-mentor/SKILL.md`.
 - **Motor Python (`code/leadroid/`):** Python 3.14.3 · `google-genai` (`gemini-3.5-flash-lite`) · `pypdf` · `psutil` (instrumentação de memória RSS/Peak Working Set) · `streamlit` + `altair` (visualizador `@career-map`).
 - **Por que API remota e não Ollama local nesta máquina:** o cliente Ollama 0.40.2 instalado falhou ao iniciar na máquina com GPU integrada Intel UHD (`Failed to start: Unable to init instance: Unspecified error`).
 

@@ -1,0 +1,284 @@
+{
+  "plano": {
+    "onde_esta": {
+      "resumo": "Desenvolvedora .NET júnior com forte atuação em plataforma hospitalar."
+    },
+    "aonde_quer_chegar": {
+      "resumo": "Evoluir para Desenvolvedora Plena em 12 meses usando IA.",
+      "lacuna_principal": "Consolidar autonomia arquitetural e domínio conceitual avançado."
+    },
+    "diagnostico_fontes": {
+      "conflito_curriculo_vs_realidade": "Sem conflito relevante, currículo alinhado com commits recentes.",
+      "padrao_uso_ia_observado": "Uso intenso para entregas rápidas via agentes."
+    },
+    "skills": [
+      {
+        "nome": "Domain-Driven Design (DDD)",
+        "autoavaliacao": null,
+        "luzia_sugere": 2,
+        "alvo": 4,
+        "evidencia": "Commits mostram foco em serviços e models, sem camadas de domínio explicitadas.",
+        "palavras_chave": [
+          "Domain",
+          "Aggregate",
+          "ValueObject",
+          "Entity",
+          "Repository",
+          "BoundedContext",
+          "Factory"
+        ]
+      },
+      {
+        "nome": "Programação Agêntica e Fluxo com IA",
+        "autoavaliacao": null,
+        "luzia_sugere": 4,
+        "alvo": 5,
+        "evidencia": "Uso ativo de múltiplos agentes evidenciado em branches e snapshots.",
+        "palavras_chave": [
+          "Prompt",
+          "Agent",
+          "Context",
+          "Snapshot",
+          "Worktree",
+          "Model",
+          "Tool"
+        ]
+      },
+      {
+        "nome": "Arquitetura .NET / Clean Architecture",
+        "autoavaliacao": null,
+        "luzia_sugere": 3,
+        "alvo": 4,
+        "evidencia": "Refatorações contínuas em controllers e serviços legados.",
+        "palavras_chave": [
+          "Controller",
+          "Service",
+          "DependencyInjection",
+          "Interface",
+          "Middleware",
+          "Pipeline",
+          "Startup"
+        ]
+      },
+      {
+        "nome": "Back-end C# / .NET e Integrações",
+        "autoavaliacao": null,
+        "luzia_sugere": 3,
+        "alvo": 4,
+        "evidencia": "Grande volume de commits em C# envolvendo APIs e fluxos hospitalares.",
+        "palavras_chave": [
+          "DbContext",
+          "Migration",
+          "Async",
+          "Task",
+          "LINQ",
+          "Exception",
+          "DTO"
+        ]
+      },
+      {
+        "nome": "Front-end (JS / Razor / React)",
+        "autoavaliacao": null,
+        "luzia_sugere": 3,
+        "alvo": 4,
+        "evidencia": "Ajustes frequentes em Razor, JavaScript e layouts HTML.",
+        "palavras_chave": [
+          "Razor",
+          "View",
+          "Script",
+          "DOM",
+          "Event",
+          "Modal",
+          "Bootstrap"
+        ]
+      },
+      {
+        "nome": "Testes e Qualidade / SQL",
+        "autoavaliacao": null,
+        "luzia_sugere": 2,
+        "alvo": 4,
+        "evidencia": "Pouca evidência de testes automatizados nos commits recentes.",
+        "palavras_chave": [
+          "XUnit",
+          "Test",
+          "Mock",
+          "Assert",
+          "Query",
+          "Index",
+          "Transaction"
+        ]
+      }
+    ],
+    "tarefas_recentes": [
+      {
+        "tarefa": "feat: adiciona Jev como alternativa para classificação de anexos",
+        "skills": [
+          "Back-end C# / .NET e Integrações",
+          "Programação Agêntica e Fluxo com IA"
+        ],
+        "indice_propriedade": 70,
+        "p1_direcao_prompt": 80,
+        "p2_coesao_commit": 75,
+        "p3_aplicacao_conceitual": 70,
+        "p4_dominio_arquitetural": 55,
+        "risco_debito_tecnico": "Baixo acoplamento dependente de validações externas.",
+        "passos_para_100": [
+          {
+            "passo": "Explique o padrão de integração adotado para a IA.",
+            "ganho": 15
+          },
+          {
+            "passo": "Escreva um teste unitário cobrindo falhas do serviço externo.",
+            "ganho": 15
+          }
+        ]
+      },
+      {
+        "tarefa": "feat(pedido-simplificado): envia e-mail para clínica de agulhamento",
+        "skills": [
+          "Back-end C# / .NET e Integrações"
+        ],
+        "indice_propriedade": 65,
+        "p1_direcao_prompt": 75,
+        "p2_coesao_commit": 70,
+        "p3_aplicacao_conceitual": 65,
+        "p4_dominio_arquitetural": 50,
+        "risco_debito_tecnico": "Serviço de e-mail acoplado diretamente ao fluxo principal.",
+        "passos_para_100": [
+          {
+            "passo": "Desacople o envio via interface e fila.",
+            "ganho": 20
+          },
+          {
+            "passo": "Defina os templates usando Clean Code.",
+            "ganho": 15
+          }
+        ]
+      },
+      {
+        "tarefa": "refactor(bate-mapa): extrai css para arquivo externo e alinha com bootstrap",
+        "skills": [
+          "Front-end (JS / Razor / React)"
+        ],
+        "indice_propriedade": 75,
+        "p1_direcao_prompt": 80,
+        "p2_coesao_commit": 80,
+        "p3_aplicacao_conceitual": 75,
+        "p4_dominio_arquitetural": 65,
+        "risco_debito_tecnico": "Estilos legados misturados com classes utilitárias.",
+        "passos_para_100": [
+          {
+            "passo": "Justifique a escolha das classes utilitárias aplicadas.",
+            "ganho": 15
+          },
+          {
+            "passo": "Valide a responsividade em diferentes viewports.",
+            "ganho": 10
+          }
+        ]
+      },
+      {
+        "tarefa": "refactor(agendamento): desacopla e antecipa notificação de agulhamento",
+        "skills": [
+          "Arquitetura .NET / Clean Architecture"
+        ],
+        "indice_propriedade": 60,
+        "p1_direcao_prompt": 70,
+        "p2_coesao_commit": 65,
+        "p3_aplicacao_conceitual": 60,
+        "p4_dominio_arquitetural": 45,
+        "risco_debito_tecnico": "Lógica de notificação vazando para a camada de serviço.",
+        "passos_para_100": [
+          {
+            "passo": "Mapeie os eventos de domínio envolvidos na notificação.",
+            "ganho": 20
+          },
+          {
+            "passo": "Defina o contrato de mensageria com o agente.",
+            "ganho": 20
+          }
+        ]
+      }
+    ],
+    "oportunidades_tarefa_atual": [
+      {
+        "skill_alvo": "Testes e Qualidade / SQL",
+        "gatilho": "Implementação de nova regra sem testes automatizados.",
+        "alerta": "Código gerado por IA sem testes gera débito oculto.",
+        "teoria_na_pratica": "Use TDD orientando a IA a criar testes antes.",
+        "como_praticar_com_agente": "Peça para a IA gerar o XUnit antes da implementação."
+      },
+      {
+        "skill_alvo": "Domain-Driven Design (DDD)",
+        "gatilho": "Criação de novos modelos de dados hospitalares.",
+        "alerta": "Entidades anemias sem regras de negócio encapsuladas.",
+        "teoria_na_pratica": "Mantenha invariantes dentro das entidades de domínio.",
+        "como_praticar_com_agente": "Instrua o agente a aplicar domain models ricos."
+      },
+      {
+        "skill_alvo": "Arquitetura .NET / Clean Architecture",
+        "gatilho": "Acoplamento de serviços externos em controllers.",
+        "alerta": "Violação de dependências entre camadas.",
+        "teoria_na_pratica": "Inverta dependências usando interfaces genéricas.",
+        "como_praticar_com_agente": "Exija que a IA crie interfaces antes dos serviços."
+      }
+    ],
+    "plano": [
+      {
+        "horizonte": "90 dias",
+        "titulo": "Consolidação de Testes e Clean Architecture",
+        "passos": [
+          "Escrever testes para todo código gerado.",
+          "Aplicar interfaces em integrações."
+        ],
+        "como_a_luzia_age": "Cobrando justificativas e testes em cada PR.",
+        "sinal_de_progresso": "Aumento na cobertura de testes."
+      },
+      {
+        "horizonte": "6 meses",
+        "titulo": "Domínio de Padrões Avançados .NET",
+        "passos": [
+          "Estudar Domain-Driven Design prático.",
+          "Refatorar módulos legados críticos."
+        ],
+        "como_a_luzia_age": "Sugerindo refatorações orientadas a DDD.",
+        "sinal_de_progresso": "Redução de acoplamento nos serviços."
+      },
+      {
+        "horizonte": "12 meses",
+        "titulo": "Autonomia Plena e Liderança Técnica",
+        "passos": [
+          "Conduzir code reviews complexos.",
+          "Defender arquiteturas em reuniões."
+        ],
+        "como_a_luzia_age": "Simulando defesas de código robustas.",
+        "sinal_de_progresso": "Independência total nas decisões de design."
+      }
+    ],
+    "proximo_passo": "Crie um teste unitário para o último commit de envio de e-mail."
+  },
+  "custo": {
+    "quando": "2026-11-11T20:56:09",
+    "rotulo": "sem2-falha-fontes-estaticas",
+    "versao": "9727f6e",
+    "maquina": "Intel64 Family 6 Model 186 Stepping 3, GenuineIntel · Windows 11 · 12 CPUs · 16 GiB RAM · Python 3.14.3",
+    "modelo": "gemini-3.5-flash-lite",
+    "tempo_preparo_s": 1.98,
+    "tempo_total_s": 11.88,
+    "tempo_modelo_s": 6.66,
+    "pico_memoria_mib": 76.6,
+    "tokens_entrada": 6111,
+    "tokens_saida": 2603,
+    "prompt_chars": 15151,
+    "commits": 39,
+    "notas_vault": 0,
+    "sessoes_ia": 0,
+    "eventos_sessao": 0
+  },
+  "hits": {
+    "[EMAIL]": 1,
+    "[TELEFONE]": 1,
+    "[EMPRESA/PRODUTO]": 3,
+    "[COLEGA]": 1
+  }
+}

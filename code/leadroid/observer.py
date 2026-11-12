@@ -108,7 +108,7 @@ def main() -> None:
         for s in found:
             f.write(json.dumps({
                 'quando': now, 'sessao': sid, 'skill': s, 'extensao': ext, 'ferramenta': tool,
-                'modo': modo, 'interveio': intervir and s in novas,
+                'modo': modo, 'interveio': intervir and s == novas[0],
             }, ensure_ascii=False) + '\n')
     seen[sid] = sorted(already | set(found))
     SEEN.write_text(json.dumps(seen, ensure_ascii=False), encoding='utf-8')
@@ -126,7 +126,7 @@ def main() -> None:
                     'aplica a esta mudança e ofereça /luzia:feedback-skills-opportunities. Não interrompa a tarefa.'
                 ),
             },
-        }, ensure_ascii=False))
+        }, ensure_ascii=True))
 
 
 if __name__ == '__main__':

@@ -83,10 +83,10 @@ def build() -> None:
 
     # ----------------------------------------------------------- Slide 0: Capa
     s0 = new_slide(prs)
-    text(s0, 'LuzIA', Inches(0.8), Inches(2.0), Inches(11.7), Inches(1.4), 72, ACCENT, bold=True)
+    text(s0, '✨ Luzia', Inches(0.8), Inches(2.0), Inches(11.7), Inches(1.4), 72, ACCENT, bold=True)
     text(
         s0,
-        'iteração 2 · demonstração ponta a ponta no agente',
+        'sua líder técnica dentro do agente · demonstração ao vivo',
         Inches(0.8), Inches(3.5), Inches(11.7), Inches(0.9), 30, FG,
     )
     text(
@@ -100,29 +100,28 @@ def build() -> None:
     text(s1, '1 · PONTA A PONTA (AO VIVO)', Inches(0.6), Inches(0.4), Inches(12), Inches(0.5), 16, ACCENT, bold=True)
     text(
         s1,
-        'Ao vivo no Claude Desktop + painel @career-map',
+        'Um dia de trabalho no Claude Code, com a Luzia junto',
         Inches(0.6), Inches(1.0), Inches(12), Inches(0.8), 32, FG, bold=True,
     )
     card(
         s1,
-        'Entrada real (com filtro local LGPD)',
+        '👀 Passiva: observa a sessão (hook)',
         [
-            '• Declaração: Dev Fullstack Jr 3 → Pleno em 12 meses (DDD + IA)',
-            '• Currículo + GitHub (rayfrance)',
-            '• Histórico entre IAs: Obsidian (ddd-cap-01) + Claude Code + Codex',
-            '• 39 commits meus no repo de trabalho (31 itens mascarados)',
+            '• A cada edição ou commit, compara com as lacunas do plano',
+            '• Ativa: avisa em 1 linha no chat · Passiva: só registra',
+            '• Local, sem código salvo, sem nome de arquivo (LGPD)',
+            '• Triagem já feita: currículo, GitHub, histórico entre IAs, commits',
         ],
         Inches(0.6), Inches(2.2), Inches(5.8), Inches(4.3),
     )
     card(
         s1,
-        'Comandos rodando agora na máquina',
+        '💬 Ativa: quando eu chamo',
         [
-            '• /LuzIA:triage',
-            '• /LuzIA:feedback-skills-opportunities',
-            '• /LuzIA:feedback-progress',
-            '• /LuzIA:next-level',
-            '• /LuzIA:career-map  →  streamlit run code/leadroid/app.py',
+            '• /luzia:feedback-skills-opportunities',
+            '• /luzia:feedback-progress',
+            '• /luzia:next-level',
+            '• /luzia:career-map  →  painel visual',
         ],
         Inches(6.9), Inches(2.2), Inches(5.8), Inches(4.3),
     )
@@ -132,17 +131,18 @@ def build() -> None:
     text(s2, '2 · QUANTO CUSTA (MEDIDO VS. FLX)', Inches(0.6), Inches(0.4), Inches(12), Inches(0.5), 16, ACCENT, bold=True)
     text(
         s2,
-        '9,85 s e 80,4 MiB (CLI) / 186 MiB (Streamlit)',
+        'Triagem: 13,1 s e 76,7 MiB · dia a dia: 7–8 s',
         Inches(0.6), Inches(1.0), Inches(12), Inches(0.8), 34, FG, bold=True,
     )
     card(
         s2,
-        'Medido (3 execuções · exp.md)',
+        'Medido (3 triagens · versão 9727f6e · exp.md)',
         [
-            '• Tempo total: 10,88 s · 9,27 s · 9,39 s (média 9,85 s)',
-            '  – Preparo + LGPD local: 1,28 s | Modelo: 7,59 s',
-            '• Pico de RAM: 80,4 MiB (CLI) · 186,0 MiB (Streamlit)',
-            '• Tokens: 10.171 entrada → 2.489 saída (~325 tok/s)',
+            '• Tempo total: 13,47 s · 13,01 s · 12,95 s (média 13,14 s)',
+            '  – local + LGPD 2,36 s · modelo 7,44 s · SDK/rede ~3,3 s',
+            '• Pico de RAM: 76,6 – 76,8 MiB',
+            '• Tokens: 10.277 entrada → ~2.720 saída',
+            '• 1 tentativa falhou: timeout da API (504)',
         ],
         Inches(0.6), Inches(2.2), Inches(5.9), Inches(4.1),
         fill=CARD_OK, border=ACCENT,
@@ -154,13 +154,13 @@ def build() -> None:
             '• Tempo total estimado: ~13,0 s (2,5 s local + 10,0 s LLM)',
             '• Pico de RAM estimado: ~300,0 MiB',
             '• Tokens estimados: ~5.000 entrada → ~1.500 saída',
-            '• Diferença: prefill rápido na API + pesos fora da RAM local',
+            '• Tempo bateu; RAM ficou 4× menor: os pesos ficam na API',
         ],
         Inches(6.8), Inches(2.2), Inches(5.9), Inches(4.1),
     )
     text(
         s2,
-        'Máquina: Windows 11 · Intel 12 CPUs · 16 GiB RAM · Python 3.14.3 · gemini-3.5-flash-lite · versão tag sem2',
+        'Máquina: Windows 11 · Intel 12 CPUs · 16 GiB RAM · Python 3.14.3 · gemini-3.5-flash-lite · versão 9727f6e',
         Inches(0.6), Inches(6.65), Inches(12), Inches(0.4), 13, MUTED,
     )
 
@@ -169,36 +169,34 @@ def build() -> None:
     text(s3, '3 · ONDE ERRA (A FALHA MOSTRADA)', Inches(0.6), Inches(0.4), Inches(12), Inches(0.5), 16, WARN, bold=True)
     text(
         s3,
-        'Arquivos estáticos (currículo ou Obsidian desatualizado) ≠ domínio real',
+        'Mesmo com a regra no prompt, a Luzia confiou na nota parada',
         Inches(0.6), Inches(1.0), Inches(12), Inches(0.8), 28, FG, bold=True,
     )
     card(
         s3,
-        '❌ Como saiu (confiando cegamente nos arquivos)',
+        '❌ Como saiu (execuções medidas, versão 9727f6e)',
         [
-            '• Pelo currículo de vaga: infla Back-end para 4/5 ("sem conflito")',
-            '• Pela nota antiga do Obsidian (Cap. 1): rebaixa meu DDD para 1/5',
-            '  (mesmo eu aplicando DDD na prática e só não atualizando a nota)',
-            '• Pelos commits (+384 linhas Jev): assume autoria sem checar o agente',
+            '• Com histórico: DDD sugerido 1/5 por "notas do capítulo 1"',
+            '• Sem histórico: "sem conflito" entre currículo e commits',
+            '  e programação agêntica inflada para 4/5',
         ],
         Inches(0.6), Inches(2.2), Inches(5.9), Inches(4.1),
         fill=CARD_ERR, border=WARN, title_color=WARN,
     )
     card(
         s3,
-        '✅ O certo (Autoavaliação + Sessões no Harness)',
+        '✅ O certo',
         [
-            '• Nunca tratar currículo ou nota parada como verdade absoluta',
-            '• Partir da autoavaliação declarada pela usuária (sliders 0 a 5)',
-            '• Cruzar com a memória viva do harness (Claude Code / Codex)',
-            '• Medir domínio real pela Propriedade Intelectual (P1–P4) na tarefa',
+            '• Nota parada só mapeia o tópico; não define nível',
+            '• O nível parte da minha autoavaliação (painel)',
+            '• A memória viva (sessões, commits) ajusta, com evidência',
         ],
         Inches(6.8), Inches(2.2), Inches(5.9), Inches(4.1),
         fill=CARD_OK, border=ACCENT, title_color=ACCENT,
     )
     text(
         s3,
-        'Quem sofre: a desenvolvedora (subestimada em DDD por nota antiga ou superestimada por currículo) · Medida do sem3',
+        'Quem sofre: a desenvolvedora, com um mapa de carreira errado · regra só no prompt não basta → medida do sem3',
         Inches(0.6), Inches(6.65), Inches(12), Inches(0.4), 14, MUTED,
     )
 
@@ -225,9 +223,9 @@ def build() -> None:
         s4,
         'Agora no sem2 (11/11)',
         [
-            '• Mudou: /LuzIA:triage puxa currículo, GitHub, commits',
-            '  e histórico compartilhado entre IAs logo na largada',
-            '• Mudou: premissa explícita de uso educado da IA + LGPD',
+            '• Mudou: a triagem (currículo, GitHub, commits, histórico',
+            '  entre IAs) virou a largada, feita uma vez',
+            '• Mudou: a Luzia observa a sessão de verdade (hook)',
             '• Mantido de propósito: nível (Jr 3) e alvo (Pleno) declarados',
             '  (evita a falha de confiar só no currículo ou no git log)',
         ],

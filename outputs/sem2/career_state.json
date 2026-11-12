@@ -1,24 +1,25 @@
 {
-  "atualizado_em": "2026-11-11T18:57:50",
+  "atualizado_em": "2026-11-11T20:57:57",
   "custo_ultima_execucao": {
-    "quando": "2026-11-11T18:57:50",
-    "rotulo": "exp-3-completo",
-    "versao": "[HASH]+dirty",
+    "quando": "2026-11-11T20:57:57",
+    "rotulo": "sem2-dia-a-dia-feedback-skills-opportunities",
+    "versao": "9727f6e",
     "maquina": "Intel64 Family 6 Model 186 Stepping 3, GenuineIntel · Windows 11 · 12 CPUs · 16 GiB RAM · Python 3.14.3",
     "modelo": "gemini-3.5-flash-lite",
-    "tempo_preparo_s": 1.24,
-    "tempo_total_s": 9.39,
-    "tempo_modelo_s": 7.65,
-    "pico_memoria_mib": 82.1,
-    "tokens_entrada": 10171,
-    "tokens_saida": 2426,
-    "prompt_chars": 28889,
-    "commits": 39,
-    "notas_vault": 6,
-    "sessoes_ia": 30
+    "tempo_preparo_s": 1.14,
+    "tempo_total_s": 6.98,
+    "tempo_modelo_s": 1.72,
+    "pico_memoria_mib": 75.7,
+    "tokens_entrada": 853,
+    "tokens_saida": 361,
+    "prompt_chars": 1203,
+    "commits": 0,
+    "notas_vault": 0,
+    "sessoes_ia": 0,
+    "eventos_sessao": 0
   },
   "anonimizacao_hits": {
-    "[URL]": 1,
+    "[URL]": 4,
     "[EMPRESA/PRODUTO]": 27,
     "[EMAIL]": 1,
     "[TELEFONE]": 1,
@@ -33,279 +34,260 @@
   },
   "plano": {
     "onde_esta": {
-      "resumo": "Desenvolvedora Fullstack Júnior nível 3 atuando em .NET, ASP.NET MVC, JavaScript, SQL e integrações hospitalares (Tasy/MV/Jev), utilizando ativamente ferramentas de IA como Claude Code e Codex.",
-      "evidencias": [
-        "Declaração de nível atual: Fullstack Júnior nível 3",
-        "Histórico de commits consistentes em C#/.NET, JavaScript e ASP.NET MVC/Razor",
-        "Uso de agentes de IA (Claude Code, Codex) e plugins oficiais"
-      ]
+      "resumo": "Júnior 3 atuando com C#, .NET e integrações hospitalares."
     },
     "aonde_quer_chegar": {
-      "resumo": "Evoluir para Desenvolvedora Plena em 12 meses, dominando Domain-Driven Design (DDD), arquitetura de software limpa e boas práticas de engenharia auxiliada por IA.",
-      "lacuna_principal": "Transição do conhecimento teórica inicial de DDD para a modelagem prática em sistemas legados corporativos com forte uso de agentes de IA mantendo a propriedade intelectual."
+      "resumo": "Desenvolvedora Plena em 12 meses, focada em DDD e IA.",
+      "lacuna_principal": "Consolidar DDD e propriedade intelectual em fluxos com agentes."
     },
     "diagnostico_fontes": {
-      "conflito_curriculo_vs_realidade": "Nem o currículo (ajustado para vagas) nem notas estáticas do Obsidian (pouco atualizadas) são tratados como verdade absoluta. O nível parte da autoavaliação da pessoa e é validado nas sessões reais do harness.",
-      "padrao_uso_ia_observado": "Uso diário de Claude Code, Codex e Antigravity; a evolução é medida pela propriedade intelectual (P1-P4) nas tarefas."
+      "conflito_curriculo_vs_realidade": "Currículo cita Clean Architecture e DDD, mas a prática atual foca em legado MVC 5.",
+      "padrao_uso_ia_observado": "Uso intenso do Claude Code em planejamento e refatorações."
     },
     "skills": [
       {
         "nome": "Domain-Driven Design (DDD)",
-        "atual": 3,
+        "autoavaliacao": null,
+        "luzia_sugere": 1,
         "alvo": 4,
-        "evidencia": "Autoavaliação da desenvolvedora (diferencial prático aplicado no dia a dia); notas do Obsidian (Cap. 1) não são tratadas como teto por não serem atualizadas com frequência.",
-        "fonte": "autoavaliacao + pratica"
+        "evidencia": "Início do estudo formal no clube de leitura e notas do capítulo 1.",
+        "palavras_chave": [
+          "Domain",
+          "Subdomain",
+          "Aggregate",
+          "ValueObject",
+          "Entity",
+          "BoundedContext"
+        ]
       },
       {
         "nome": "Programação Agêntica e Fluxo com IA",
-        "atual": 3,
-        "alvo": 4,
-        "evidencia": "Uso frequente de Claude Code, Codex, plugins oficiais e automação de planos no terminal.",
-        "fonte": "historico_ia"
+        "autoavaliacao": null,
+        "luzia_sugere": 3,
+        "alvo": 5,
+        "evidencia": "Uso diário de Claude Code, Codex e comandos de planejamento.",
+        "palavras_chave": [
+          "Agent",
+          "Prompt",
+          "Workflow",
+          "Context",
+          "Plan",
+          "Execution"
+        ]
       },
       {
         "nome": "Arquitetura .NET / Clean Architecture",
-        "atual": 3,
+        "autoavaliacao": null,
+        "luzia_sugere": 2,
         "alvo": 4,
-        "evidencia": "Projetos de estudo em C# (ex.: medi-flow) e refatorações no trabalho com ASP.NET MVC.",
-        "fonte": "github"
+        "evidencia": "Projetos em ASP.NET MVC 5 com migração gradual para padrões limpos.",
+        "palavras_chave": [
+          "Controllers",
+          "Services",
+          "Repositories",
+          "Abstractions",
+          "DependencyInjection",
+          "Middleware"
+        ]
       },
       {
         "nome": "Back-end C# / .NET e Integrações",
-        "atual": 3,
-        "alvo": 4,
-        "evidencia": "Commits frequentes implementando e-mails, filtros e integrações com ERPs hospitalares (Jev/Tasy/MV).",
-        "fonte": "commits"
+        "autoavaliacao": null,
+        "luzia_sugere": 3,
+        "alvo": 5,
+        "evidencia": "Commits frequentes em integrações hospitalares Tasy, MV e Jev.",
+        "palavras_chave": [
+          "DbContext",
+          "Entity",
+          "Migration",
+          "Integration",
+          "Endpoint",
+          "Service"
+        ]
       },
       {
         "nome": "Front-end (JS / Razor / React)",
-        "atual": 3,
+        "autoavaliacao": null,
+        "luzia_sugere": 3,
         "alvo": 4,
-        "evidencia": "Correções e melhorias em JavaScript, modais Razor e visual de componentes no ASP.NET MVC.",
-        "fonte": "commits"
+        "evidencia": "Ajustes de UI em Razor Pages, modais e componentes JavaScript.",
+        "palavras_chave": [
+          "Razor",
+          "JavaScript",
+          "Modal",
+          "Bootstrap",
+          "DOM",
+          "Component"
+        ]
       },
       {
         "nome": "Testes e Qualidade / SQL",
-        "atual": 2,
+        "autoavaliacao": null,
+        "luzia_sugere": 2,
         "alvo": 4,
-        "evidencia": "Experiência prévia com XUnit em estágio e consultas SQL em ambientes corporativos de saúde.",
-        "fonte": "curriculo"
+        "evidencia": "Correções e otimizações de consultas SQL em ambiente corporativo.",
+        "palavras_chave": [
+          "Query",
+          "StoreProcedure",
+          "Index",
+          "Validation",
+          "Exception",
+          "Log"
+        ]
       }
     ],
     "tarefas_recentes": [
       {
-        "tarefa": "refactor: reutiliza padrão de descrição dos enums Jev (3 arquivos, +18/-5)",
+        "tarefa": "Adiciona Jev como alternativa para classificação de anexos",
         "skills": [
           "Back-end C# / .NET e Integrações",
-          "Arquitetura .NET / Clean Architecture"
+          "Programação Agêntica e Fluxo com IA"
         ],
-        "propriedade": "alta",
-        "indice_propriedade": 84,
-        "risco_debito_tecnico": "Baixo (eliminou duplicação deixada na entrega anterior)",
-        "parametros": {
-          "p1_rastro_prompt": {
-            "nome": "P1 · Direção no Prompt vs. Delegação",
-            "nota": 85,
-            "detalhe": "Ação conduzida de forma direcionada após revisão para unificar o padrão de leitura de enums."
+        "indice_propriedade": 65,
+        "p1_direcao_prompt": 70,
+        "p2_coesao_commit": 75,
+        "p3_aplicacao_conceitual": 60,
+        "p4_dominio_arquitetural": 55,
+        "risco_debito_tecnico": "Baixo",
+        "passos_para_100": [
+          {
+            "passo": "Explicar a escolha dos contratos da integração Jev.",
+            "ganho": 20
           },
-          "p2_granularidade_commit": {
-            "nome": "P2 · Granularidade e Coesão do Commit",
-            "nota": 92,
-            "detalhe": "Commit atômico e cirúrgico (+18/-5 em 3 arquivos), com escopo único e sem ruído."
-          },
-          "p3_conexao_estudo": {
-            "nome": "P3 · Conexão com Estudo / Vault Autoral",
-            "nota": 78,
-            "detalhe": "Converge com boas práticas de Clean Code e consistência do modelo."
-          },
-          "p4_defesa_tecnica": {
-            "nome": "P4 · Defesa de Decisão e Trade-offs",
-            "nota": 80,
-            "detalhe": "Escolha consciente de reutilizar o helper do projeto em vez de manter lógica paralela."
+          {
+            "passo": "Documentar a modelagem do domínio aplicada no commit.",
+            "ganho": 15
           }
-        },
-        "por_que": "Commit focado e intencional atendendo code review, mostrando controle sobre como os enumeradores são expostos e mantendo baixo débito técnico.",
-        "pergunta_do_lider": "Por que centralizar a leitura de DescriptionAttribute dos enums evita divergência quando novas classificações da Jev forem adicionadas?"
+        ]
       },
       {
-        "tarefa": "fix(bate-mapa): corrige alerta, status e filtro de regime (8 arquivos, +167/-49)",
+        "tarefa": "Permitir pesquisa de aviso alfanumérico com espaços",
         "skills": [
           "Back-end C# / .NET e Integrações",
           "Front-end (JS / Razor / React)"
         ],
-        "propriedade": "media",
-        "indice_propriedade": 62,
-        "risco_debito_tecnico": "Médio (regra de status distribuída entre C# e JavaScript)",
-        "parametros": {
-          "p1_rastro_prompt": {
-            "nome": "P1 · Direção no Prompt vs. Delegação",
-            "nota": 72,
-            "detalhe": "Investigação guiada pela desenvolvedora em cima de defeito real do fluxo cirúrgico."
+        "indice_propriedade": 70,
+        "p1_direcao_prompt": 75,
+        "p2_coesao_commit": 80,
+        "p3_aplicacao_conceitual": 65,
+        "p4_dominio_arquitetural": 60,
+        "risco_debito_tecnico": "Baixo",
+        "passos_para_100": [
+          {
+            "passo": "Detalhar a validação dos filtros implementados via IA.",
+            "ganho": 18
           },
-          "p2_granularidade_commit": {
-            "nome": "P2 · Granularidade e Coesão do Commit",
-            "nota": 58,
-            "detalhe": "Agrupou três ajustes distintos (alerta, status e filtro de regime) no mesmo commit."
-          },
-          "p3_conexao_estudo": {
-            "nome": "P3 · Conexão com Estudo / Vault Autoral",
-            "nota": 65,
-            "detalhe": "Toca regras de um subdomínio operacional importante sem separar ainda a lógica de UI."
-          },
-          "p4_defesa_tecnica": {
-            "nome": "P4 · Defesa de Decisão e Trade-offs",
-            "nota": 52,
-            "detalhe": "Falta explicitar a fronteira entre o cálculo no back-end C# e a manipulação no JS."
+          {
+            "passo": "Validar os testes de regressão do front-end.",
+            "ganho": 12
           }
-        },
-        "por_que": "Você diagnosticou o problema de negócio, mas o commit misturou três correções em 8 arquivos C#/JS/Razor sem teste automatizado para blindar regressões.",
-        "pergunta_do_lider": "Se a regra de cálculo de status mudar amanhã, você precisará alterar apenas o back-end C# ou também o JavaScript da tela do bate-mapa?"
+        ]
       },
       {
-        "tarefa": "feat: adiciona Jev como alternativa para classificação de anexos (12 arquivos, +384/-15)",
+        "tarefa": "Preserva flags e dados no modal de edição",
         "skills": [
-          "Back-end C# / .NET e Integrações",
-          "Domain-Driven Design (DDD)"
+          "Front-end (JS / Razor / React)"
         ],
-        "propriedade": "baixa",
-        "indice_propriedade": 35,
-        "risco_debito_tecnico": "Alto (+384 linhas em 12 arquivos seguidas de 3 commits corretivos no mesmo dia)",
-        "parametros": {
-          "p1_rastro_prompt": {
-            "nome": "P1 · Direção no Prompt vs. Delegação",
-            "nota": 45,
-            "detalhe": "Histórico mostra geração de plano e implementação extensa em bloco pelo agente."
+        "indice_propriedade": 60,
+        "p1_direcao_prompt": 65,
+        "p2_coesao_commit": 70,
+        "p3_aplicacao_conceitual": 55,
+        "p4_dominio_arquitetural": 50,
+        "risco_debito_tecnico": "Médio",
+        "passos_para_100": [
+          {
+            "passo": "Explicar o fluxo de estado gerenciado no modal.",
+            "ganho": 25
           },
-          "p2_granularidade_commit": {
-            "nome": "P2 · Granularidade e Coesão do Commit",
-            "nota": 25,
-            "detalhe": "Despejo grande (+384/-15 em 12 arquivos) que exigiu 3 fixes seguidos (respostas inválidas, revisão e enums)."
-          },
-          "p3_conexao_estudo": {
-            "nome": "P3 · Conexão com Estudo / Vault Autoral",
-            "nota": 40,
-            "detalhe": "Oportunidade direta do Cap. 1 de DDD (fronteira com serviço externo) ainda não registrada no vault."
-          },
-          "p4_defesa_tecnica": {
-            "nome": "P4 · Defesa de Decisão e Trade-offs",
-            "nota": 30,
-            "detalhe": "Pendente responder à Pergunta da LuzIA para comprovar domínio sobre o contrato e tratamento de erros."
+          {
+            "passo": "Defender a estrutura de eventos escolhida.",
+            "ganho": 15
           }
-        },
-        "por_que": "O volume de código gerado de uma só vez (+384 linhas) seguido de correções imediatas para tratar respostas inválidas sinaliza que o agente codou antes de todas as invariantes estarem sob seu domínio.",
-        "pergunta_do_lider": "Como você estruturou o contrato entre o domínio principal e a API da Jev, e o que acontece se a Jev devolver um payload inválido ou ficar indisponível?"
+        ]
       },
       {
-        "tarefa": "feat(pedido-simplificado): envia e-mail para clínica de agulhamento (+476/-16)",
+        "tarefa": "Reutiliza padrão de descrição dos enums Jev",
         "skills": [
-          "Back-end C# / .NET e Integrações",
-          "Arquitetura .NET / Clean Architecture"
+          "Arquitetura .NET / Clean Architecture",
+          "Back-end C# / .NET e Integrações"
         ],
-        "propriedade": "baixa",
-        "indice_propriedade": 38,
-        "risco_debito_tecnico": "Alto (acoplamento de template HTML e envio de e-mail em múltiplos projetos)",
-        "parametros": {
-          "p1_rastro_prompt": {
-            "nome": "P1 · Direção no Prompt vs. Delegação",
-            "nota": 50,
-            "detalhe": "Delegação da criação de rotina completa e templates HTML ao agente."
+        "indice_propriedade": 75,
+        "p1_direcao_prompt": 80,
+        "p2_coesao_commit": 85,
+        "p3_aplicacao_conceitual": 70,
+        "p4_dominio_arquitetural": 65,
+        "risco_debito_tecnico": "Baixo",
+        "passos_para_100": [
+          {
+            "passo": "Descrever o padrão de enums adotado no domínio.",
+            "ganho": 15
           },
-          "p2_granularidade_commit": {
-            "nome": "P2 · Granularidade e Coesão do Commit",
-            "nota": 30,
-            "detalhe": "+476 linhas seguidas de commits extras para incluir template na API/Web e corrigir logo cortada."
-          },
-          "p3_conexao_estudo": {
-            "nome": "P3 · Conexão com Estudo / Vault Autoral",
-            "nota": 42,
-            "detalhe": "Caso clássico de separação entre subdomínio de suporte e infraestrutura de notificação."
-          },
-          "p4_defesa_tecnica": {
-            "nome": "P4 · Defesa de Decisão e Trade-offs",
-            "nota": 30,
-            "detalhe": "Pendente explicar por que o template precisou ser adicionado em projetos separados."
+          {
+            "passo": "Garantir cobertura de testes para os novos enums.",
+            "ganho": 10
           }
-        },
-        "por_que": "A funcionalidade foi entregue rápido com IA, mas os commits seguintes corrigindo inclusão de template em diferentes .csproj mostram acoplamento estrutural.",
-        "pergunta_do_lider": "Por que o template HTML de agulhamento precisou ser incluído tanto no projeto Web quanto no projeto da API, e como você desacoplaria esse envio?"
+        ]
       }
     ],
     "oportunidades_tarefa_atual": [
       {
-        "gatilho_detectado": "Atividade no repositório: Integração Jev para classificação de anexos (12 arquivos C#/.NET)",
-        "skill_alvo": "Domain-Driven Design (DDD) · Subdomínios Principal, de Suporte e Genérico (Cap. 1)",
-        "alerta_do_observador": "Olha, aqui nesta atividade entrou exatamente a sua dúvida do Capítulo 1 de DDD registrada no Obsidian: classificar anexos via Jev é um Subdomínio de Suporte ou Genérico?",
-        "teoria_na_pratica": "Pelo critério de Khononov/Evans que você anotou no vault: como a classificação via Jev usa um serviço externo para apoiar a operação hospitalar sem ser o diferencial competitivo central do agendamento cirúrgico, ela deve ficar isolada atrás de uma Anti-Corruption Layer (ACL), sem vazar enums/DTOs da Jev para as entidades do domínio principal.",
-        "como_praticar_com_agente": "Peça ao Claude Code para extrair uma interface de domínio limpa (ex.: IClassificadorAnexo) antes de chamar o cliente HTTP da Jev, mantendo a regra de negócio desacoplada do fornecedor.",
-        "evitar_delegacao_cega": "Não aceite que o agente espalhe tipos específicos da API externa dentro das classes de domínio ou controllers legados (isso gera débito técnico imediato de acoplamento)."
+        "skill_alvo": "Domain-Driven Design (DDD)",
+        "gatilho": "Modelagem de novos agregados e entidades.",
+        "alerta": "Evite anemic models gerados pela IA.",
+        "teoria_na_pratica": "Encapsule regras de negócio no domínio.",
+        "como_praticar_com_agente": "Peça para o agente refatorar validando invariantes."
       },
       {
-        "gatilho_detectado": "Atividade no repositório: Notificação de e-mail para clínica de agulhamento (+476/-16 linhas)",
-        "skill_alvo": "Arquitetura .NET / Clean Architecture · Desacoplamento e Responsabilidade Única (SOLID)",
-        "alerta_do_observador": "Oportunidade detectada na sessão: o disparo de e-mail dentro do fluxo de salvamento do pedido exercita desacoplamento arquitetural e prevenção de débito técnico rumo a Pleno.",
-        "teoria_na_pratica": "Misturar montagem de template HTML e chamada SMTP (Brevo) diretamente no fluxo de persistência do pedido viola o Single Responsibility Principle e arrisca derrubar a gravação do pedido se o servidor de e-mail falhar.",
-        "como_praticar_com_agente": "Oriente o agente a separar a persistência do pedido do serviço de notificação e a centralizar o template HTML em um único ponto reutilizável entre Web e API.",
-        "evitar_delegacao_cega": "Revise onde o agente posicionou o tratamento de exceções do envio de e-mail para garantir que falhas de rede não afetem a transação principal."
+        "skill_alvo": "Programação Agêntica e Fluxo com IA",
+        "gatilho": "Geração de código em lote pelo agente.",
+        "alerta": "Você precisa saber explicar cada linha gerada.",
+        "teoria_na_pratica": "Mantenha 100% de propriedade intelectual do código.",
+        "como_praticar_com_agente": "Questione o agente sobre o design escolhido."
       },
       {
-        "gatilho_detectado": "Atividade no repositório: Refatoração do bate-mapa (+551/-1071 linhas em C#, JS e Razor)",
-        "skill_alvo": "Testes e Qualidade / Redução de Débito Técnico em Sistemas Legados",
-        "alerta_do_observador": "Você está removendo mais de 1.000 linhas de fluxo legado no bate-mapa com ajuda da IA — momento ideal para praticar testes de caracterização e proteção de regras de negócio.",
-        "teoria_na_pratica": "Em legados ASP.NET MVC 5 com lógica mista em C# e JavaScript, grandes remoções feitas por agentes podem apagar regras silenciosas (como cálculo de risco de atraso ou visibilidade do acionamento da diretoria).",
-        "como_praticar_com_agente": "Antes de aplicar a refatoração do agente, peça para ele listar todas as invariantes de negócio do módulo e gerar testes unitários XUnit cobrindo o cálculo de atraso.",
-        "evitar_delegacao_cega": "Não valide refatorações extensas apenas pelo layout visual; confira cada condicional de negócio removida no diff."
+        "skill_alvo": "Arquitetura .NET / Clean Architecture",
+        "gatilho": "Organização de camadas da aplicação.",
+        "alerta": "Não misture regras de negócio na API.",
+        "teoria_na_pratica": " isole o domínio de detalhes de infraestrutura.",
+        "como_praticar_com_agente": "Valide dependências entre camadas com o agente."
       }
     ],
     "plano": [
       {
         "horizonte": "90 dias",
-        "titulo": "Fundação Conceitual aplicada ao Legado: Domínios, Subdomínios e Fim dos Commits Monolíticos",
-        "acao": "Conectar a leitura de Aprenda DDD (Vlad Khononov) diretamente aos módulos em que você atua (Agendamentos, Bate-Mapa, Integrações Jev/Tasy) e assumir o controle arquitetural antes de o agente gerar código.",
-        "passos_detalhados": [
-          "1. Mapear no Obsidian 3 fluxos reais do seu trabalho (Filtro de Aviso Alfanumérico, Bate-Mapa e Classificação Jev) classificando cada parte em Subdomínio Principal, de Suporte ou Genérico.",
-          "2. Antes de pedir código ao Claude Code/Codex em tarefas > 50 linhas, exigir que o agente gere apenas as assinaturas de interfaces/DTOs e validar você mesma onde ficará cada regra.",
-          "3. Fracionar entregas assistidas por IA em commits pequenos e explicáveis: (a) domínio/contratos, (b) infraestrutura/integração, (c) view Razor/JS, (d) testes.",
-          "4. Responder às perguntas técnicas do LuzIA nas entregas com propriedade baixa ou média até elevar seu Índice de Propriedade médio acima de 70%."
+        "titulo": "Fundamentos de DDD e Governança de IA",
+        "passos": [
+          "Concluir a leitura dos capítulos iniciais de DDD no clube.",
+          "Adotar o modo de planejamento em 100% das tarefas com agente.",
+          "Documentar decisões arquiteturais no vault."
         ],
-        "intervencao_LuzIA_no_harness": "Sempre que você iniciar uma tarefa que toque em múltiplos projetos (.Domain, .App, .Api), o LuzIA intervém na sessão perguntando qual parte da mudança é regra de negócio e qual parte é detalhe de infraestrutura.",
-        "uso_educado_da_ia": "Fluxo em 2 etapas no agente: 1º pedir análise de impacto e 2 alternativas de design; 2º escolher a alternativa, justificar em uma frase e só então autorizar a geração de código.",
-        "sinal_de_progresso": "Redução visível de commits corretivos pós-entrega, mapa de subdomínios do sistema registrado no Obsidian e Índice de Propriedade Intelectual >= 70% nas tarefas do trimestre."
+        "como_a_luzia_age": "Cobrando justificativas técnicas e explicações dos commits gerados.",
+        "sinal_de_progresso": "Capacidade de explicar qualquer código gerado pela IA."
       },
       {
         "horizonte": "6 meses",
-        "titulo": "Modelagem Tática de DDD, Desacoplamento de Integrações e Testes de Caracterização",
-        "acao": "Atuar com repertório de Pleno na evolução de integrações críticas (Tasy, MV, Jev, Brevo), isolando serviços externos com Anti-Corruption Layer (ACL) e protegendo regras de negócio com testes XUnit.",
-        "passos_detalhados": [
-          "1. Encapsular pelo menos uma integração externa atrás de uma camada anticorrupção (ACL), garantindo que mudanças na API terceira não quebrem o domínio.",
-          "2. Escrever testes automatizados com XUnit para toda regra de negócio nova ou refatorada (ex.: cálculo de atraso no bate-mapa, validação de guias e normalização hospitalar) antes de abrir o PR.",
-          "3. Registrar no vault compartilhado pequenas decisões arquiteturais (problema -> opções sugeridas pela IA -> decisão tomada e débito técnico evitado).",
-          "4. Usar o agente como revisor adversarial antes do PR para caçar acoplamento, queries SQL sem índice e vazamento de responsabilidade entre Controller e View."
+        "titulo": "Desacoplamento e Clean Architecture",
+        "passos": [
+          "Aplicar bounded contexts em módulos de integração.",
+          "Reduzir dependências diretas de infraestrutura no domínio.",
+          "Escrever testes unitários para regras críticas."
         ],
-        "intervencao_LuzIA_no_harness": "Quando detectar alterações em serviços de negócio ou consultas SQL sem cobertura de teste no mesmo branch, o LuzIA aponta na sessão quais cenários de borda precisam ser exercitados em XUnit.",
-        "uso_educado_da_ia": "Você define os cenários de negócio e invariantes que não podem quebrar; o agente gera o esqueleto dos testes XUnit e mocks, e você audita cada asserção.",
-        "sinal_de_progresso": "Pull requests complexos aprovados sem retrabalho arquitetural, suíte de testes unitários cobrindo as regras que você mantém e domínio prático de Entities, Value Objects e ACL."
+        "como_a_luzia_age": "Apontando acoplamentos e sugerindo refatorações limpas.",
+        "sinal_de_progresso": "Código legado refatorado com testes automatizados."
       },
       {
         "horizonte": "12 meses",
-        "titulo": "Consolidação como Desenvolvedora Plena: Autonomia Arquitetural e Liderança com Agentes",
-        "acao": "Conduzir demandas complexas ponta a ponta — do refinamento técnico à entrega em produção — unindo arquitetura .NET/DDD sólida, baixo débito técnico e alta alavancagem com programação agêntica.",
-        "passos_detalhados": [
-          "1. Liderar o desenho técnico de uma funcionalidade ou refatoração estrutural completa, defendendo os trade-offs em reuniões técnicas e code reviews.",
-          "2. Criar e evoluir skills, hooks e guardrails de agentes para o próprio fluxo do time (como validação pré-PR, leitura segura de banco e padrões de especificação).",
-          "3. Atacar proativamente pontos de débito técnico em módulos legados ASP.NET MVC 5 / SQL, entregando ganhos medidos de manutenção e confiabilidade.",
-          "4. Consolidar seu dossiê de evolução técnica no LuzIA (skills em 4/5 e histórico de propriedade alta) para embasar a promoção formal de Júnior 3 para Plena."
+        "titulo": "Consolidação Plena e Liderança Técnica",
+        "passos": [
+          "Assumir autonomia em arquiteturas de microsserviços ou módulos complexos.",
+          "Mentorias cruzadas sobre uso ético e eficiente de IA.",
+          "Definição de padrões técnicos para o time."
         ],
-        "intervencao_LuzIA_no_harness": "Modo par sênior (Design Review): o LuzIA reduz alertas básicos e passa a desafiar suas escolhas sob a ótica de escalabilidade, resiliência em produção e manutenibilidade de longo prazo.",
-        "uso_educado_da_ia": "Orquestração madura de múltiplos agentes (Claude Code, Codex, Antigravity) sob sua direção intelectual, com 100% de propriedade sobre cada linha que sobe para produção.",
-        "sinal_de_progresso": "Atuação reconhecida como referência técnica no time, níveis 4/5 atingidos no mapa de skills (DDD, Arquitetura .NET, Back-end, Front-end e Testes) e transição consolidada para Desenvolvedora Plena."
+        "como_a_luzia_age": "Validando postura de liderança em code reviews e design system.",
+        "sinal_de_progresso": "Promoção a Desenvolvedora Plena com domínio intelectual total."
       }
     ],
-    "proximo_passo": "Abra sua nota do Capítulo 1 de DDD no Obsidian, responda às suas próprias dúvidas sobre subdomínios de suporte vs. genéricos com base no seu projeto atual na empresa, e use o Claude Code para revisar sua explicação técnica.",
-    "preferencias_intervencao": {
-      "intervencao_ativa_no_harness": true,
-      "nivel_intervencao": "Proativo ao detectar conceitos do plano (DDD, Arquitetura, Débito Técnico)",
-      "bloquear_commit_sem_defesa_critica": false
-    }
+    "proximo_passo": "Explique o commit da integração Jev para consolidar sua propriedade intelectual."
   },
   "payload_anonimizado": {
     "triagem": {
@@ -315,6 +297,7 @@
       "como_usa_ia_hoje": "Desenvolvo diariamente com Claude Code (no Claude Desktop), Codex e Antigravity/Gemini, mantendo um vault compartilhado de conhecimento (Obsidian) onde registro minhas impressões, leituras de DDD e aprendizados do trabalho.",
       "observacao_curriculo": "O currículo anexado foi adaptado para concorrer a uma vaga de Back-end Pleno (incluindo termos como Clean Architecture e DDD como já praticados), mas meu cargo real hoje é Desenvolvedora Fullstack Júnior 3 e estou no início do estudo formal de DDD."
     },
+    "autoavaliacao_0_a_5": null,
     "curriculo": "RAYANE THAÍS [COLEGA] DE LIMA FRANCE\nDesenvolvedora Back-end .NET | C# · ASP.NET Core · Entity Framework · SQL · APIs\nRecife/PE | [EMAIL] | [TELEFONE] | GitHub: rayfrance | LinkedIn\n\nPERFIL PROFISSIONAL\nDesenvolvedora de Software com mais de 4 anos de experiência combinada em C# e .NET, atuando no desenvolvimento, evolução e integração de aplicações corporativas. Experiência com ASP.NET Core, Entity Framework, APIs REST, SQL Server, PostgreSQL, testes automatizados com XUnit, Git, CI/CD e Docker. Vivência em sistemas legados, integrações entre plataformas, refatoração e otimização de consultas SQL, aplicando Clean Architecture, SOLID e boas práticas de qualidade. Inglês C1 e perfil colaborativo, com participação em revisão de código e trabalho junto a times multidisciplinares.\n\nEXPERIÊNCIA PROFISSIONAL\n[EMPRESA/PRODUTO]\nDesenvolvedora Fullstack Jr - atuação predominante em back-end e integrações ([EMPRESA/PRODUTO]) | Jan/2026 - Atual\n• Desenvolvimento e evolução da plataforma [EMPRESA/PRODUTO], integrada aos ERPs Tasy e MV, utilizando C#, .NET, ASP.NET MVC 5, Razor Pages, Entity Framework, SQL Server e PostgreSQL.\n• Implementação de integrações e rotinas de importação, normalização e validação de dados hospitalares, com atenção à consistência, rastreabilidade e desempenho das consultas.\n• Refatoração de módulos legados e otimização de consultas SQL, aplicando Clean Code e SOLID para melhorar manutenibilidade e confiabilidade.\n• Participação em revisão de código, análise de requisitos, correção de defeitos e evolução incremental de funcionalidades em ambiente corporativo.\n\nSAMSUNG INSTITUTE (SIDI)\nEstagiária de Engenharia de Software | Dez/2023 - Dez/2025\n• Desenvolvimento de aplicações desktop com C#, .NET, WinUI, UWP e WPF, aplicando orientação a objetos e padrões de arquitetura.\n• Criação e manutenção de testes unitários com XUnit, colaboração em code reviews e versionamento com Git em fluxo corporativo.\n• Atuação com CI/CD em Bitbucket e GitHub, acompanhando tarefas e qualidade das entregas com Jira e Confluence.\n• Trabalho conjunto com design e produto na implementação e evolução de funcionalidades, participando da análise técnica e solução de problemas.\n\nAVANADE\nEstagiária de Engenharia de Software | Abr/2022 - Nov/2023\n• Desenvolvimento front-end com React, TypeScript, Styled Components e Redux Toolkit, integrado a APIs REST.\n• Criação de testes end-to-end com Cypress e atuação colaborativa com Git, revisão de código e práticas ágeis.\n\nHABILIDADES TÉCNICAS\nBack-end: C# · .NET (MVC 5, .NET 8) · ASP.NET Core · Entity Framework · APIs REST\nBancos de dados: SQL Server · PostgreSQL · modelagem e otimização de consultas\nArquitetura: Clean Architecture · SOLID · DDD · Clean Code · orientação a objetos\nDevOps e qualidade: Git · CI/CD · Docker · Azure DevOps · Bitbucket · XUnit · Cypress\nCloud e IA aplicada: Azure · Azure OpenAI · RAG · agentes de IA · desenvolvimento assistido por IA\nIdiomas: Inglês C1 · Francês B1\n\nEDUCAÇÃO E CERTIFICAÇÕES\nUFRPE - Licenciatura em Computação (2022 - Atual) | Senac EAD - Tecnólogo em Análise e Desenvolvimento de Sistemas (concluído em 2026)\nCertificações: Microsoft AZ-900 · Microsoft PL-900 · Microsoft PL-100 · Scrum Foundation (SFPC)",
     "linkedin": "",
     "github": {

@@ -1,13 +1,13 @@
 ---
-description: Luzia · rota para o próximo nível (90 dias, 6 meses, 12 meses)
-allowed-tools: Bash(cd:*), Bash(python:*)
+description: Luzia · rota até o próximo nível (90 dias, 6 meses, 12 meses) feita de ações executáveis
+allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 
-Rode a Luzia (plugin de carreira) e mostre a saída **exatamente como veio**, sem resumir nem reescrever:
+Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
 
 ```bash
-cd /c/Repositorio/ai4good-sem2/code && python -m leadroid.cli next-level
+cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli next-level
 ```
 
-
-Não leia, abra nem mostre arquivos ou código do repositório atual: a Luzia já entrega tudo mascarado (LGPD).
+Mostre a saída **como veio** (é markdown visual), sem resumir.
+Depois, se a saída tiver a linha `LUZIA_ACOES=[...]`, não a mostre: use a ferramenta AskUserQuestion com uma pergunta curta ("Qual ação você quer fazer agora?"), uma opção por ação (rótulo = título curto, descrição = tipo e tempo) e mais a opção "Agora não". Se a pessoa escolher uma ação, rode `cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli fazer <id>` e siga o ROTEIRO PARA O AGENTE que ele imprime.

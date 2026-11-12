@@ -1,13 +1,13 @@
 ---
-description: Luzia · abre o painel visual @career-map
-allowed-tools: Bash(cd:*), Bash(python:*)
+description: Luzia · abre o painel visual
+allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 
-Rode a Luzia (plugin de carreira) e mostre a saída **exatamente como veio**, sem resumir nem reescrever:
+Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
 
 ```bash
-cd /c/Repositorio/ai4good-sem2/code && python -m leadroid.cli career-map
+cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli career-map
 ```
 
+Mostre a saída **como veio** (é markdown visual), sem resumir.
 
-Não leia, abra nem mostre arquivos ou código do repositório atual: a Luzia já entrega tudo mascarado (LGPD).

@@ -26,9 +26,9 @@ Fonte: [brw.md, §§ 5 e 6b](brw.md).
 | peça | central ou apoio | o que faz na ideia | link oficial | licença | por que esta, e não as alternativas |
 |:--|:--|:--|:--|:--|:--|
 | [`google-genai`](https://github.com/googleapis/python-genai) + `gemini-3.5-flash-lite` | central | interpreta e cruza declaração de carreira, currículo, GitHub, histórico compartilhado entre IAs e metadados de commits anonimizados para devolver o mapa de skills, auditoria de propriedade intelectual e plano estruturado em JSON | [github.com/googleapis/python-genai](https://github.com/googleapis/python-genai) | [Apache 2.0](https://github.com/googleapis/python-genai/blob/main/LICENSE) (SDK); API Gemini sob termos do Google AI Studio | já homologado e funcional na máquina (`code/scripts/llm_clients.py`), com suporte nativo a `response_mime_type="application/json"` e latência medida de ~7,6 s para ~10 mil tokens de entrada, enquanto o Ollama local exigido pelo exemplo do Agno não iniciou na Intel UHD integrada e frameworks adicionais (smolagents/PydanticAI) adicionariam camada intermediária sem ganho para o plugin |
-| Plugin Multi-Agente (`.claude-plugin` / `commands/` / `skills/`) | apoio | integra os comandos `/luzia:triage`, `/luzia:feedback-skills-opportunities`, `/luzia:feedback-progress`, `/luzia:next-level` e `/luzia:career-map` ao fluxo do Claude Code, com o observador passivo via hook (Codex, Cursor e Antigravity: só manifestos, sem observador) | [code/leadroid/.claude-plugin/plugin.json](../code/leadroid/.claude-plugin/plugin.json) | MIT / próprio | permite que a Luzia rode dentro do próprio agente de código onde a pessoa desenvolve, em vez de ser apenas um analisador externo |
-| [`streamlit`](https://github.com/streamlit/streamlit) + [`altair`](https://github.com/vega/altair) | apoio | renderiza o painel visual `@career-map` (`code/leadroid/app.py`) com gráfico de skills (atual × alvo), propriedade nas tarefas, comparativo da falha e telemetria de custo | [github.com/streamlit/streamlit](https://github.com/streamlit/streamlit) | [Apache 2.0](https://github.com/streamlit/streamlit/blob/develop/LICENSE) | já instalado no ambiente (v1.63/1.64) e entrega o dashboard interativo do `@career-map` |
-| [`pypdf`](https://github.com/py-pdf/pypdf) + [`psutil`](https://github.com/giampaolo/psutil) | apoio | extração local de texto de PDFs (currículo/LinkedIn) e medição de pico de memória RSS/Working Set por execução | [github.com/py-pdf/pypdf](https://github.com/py-pdf/pypdf) · [github.com/giampaolo/psutil](https://github.com/giampaolo/psutil) | [BSD-3-Clause](https://github.com/py-pdf/pypdf/blob/main/LICENSE) · [BSD-3-Clause](https://github.com/giampaolo/psutil/blob/master/LICENSE) | leves, executam 100% localmente antes do filtro LGPD (`code/leadroid/privacy.py`) |
+| Plugin Multi-Agente (`.claude-plugin` / `commands/` / `skills/`) | apoio | integra os comandos `/luzia:triage`, `/luzia:feedback-skills-opportunities`, `/luzia:feedback-progress`, `/luzia:next-level` e `/luzia:career-map` ao fluxo do Claude Code, com o observador passivo via hook (Codex, Cursor e Antigravity: só manifestos, sem observador) | [code/luzia/.claude-plugin/plugin.json](../code/luzia/.claude-plugin/plugin.json) | MIT / próprio | permite que a Luzia rode dentro do próprio agente de código onde a pessoa desenvolve, em vez de ser apenas um analisador externo |
+| Painel próprio (`code/luzia/server.py` + `code/luzia/painel/`) | apoio | página local da Luzia (127.0.0.1:8501): próxima ação, mapa de skills, propriedade por entrega com a base de cada dimensão, rota 90d/6m/12m e ajustes; cada ação vira um prompt copiável para qualquer agente | — | próprio | substituiu o Streamlit (usado no sem2) para ter identidade visual e layout livres; usa só a biblioteca padrão do Python e HTML/CSS/JS, sem dependência nem CDN |
+| [`pypdf`](https://github.com/py-pdf/pypdf) + [`psutil`](https://github.com/giampaolo/psutil) | apoio | extração local de texto de PDFs (currículo/LinkedIn) e medição de pico de memória RSS/Working Set por execução | [github.com/py-pdf/pypdf](https://github.com/py-pdf/pypdf) · [github.com/giampaolo/psutil](https://github.com/giampaolo/psutil) | [BSD-3-Clause](https://github.com/py-pdf/pypdf/blob/main/LICENSE) · [BSD-3-Clause](https://github.com/giampaolo/psutil/blob/master/LICENSE) | leves, executam 100% localmente antes do filtro LGPD (`code/luzia/privacy.py`) |
 
 ## 2 · o exemplo oficial, rodando
 
@@ -45,7 +45,7 @@ ok 1.39 7
 
 ## 3 · a alteração mínima (protótipo Luzia ponta a ponta)
 
-**o commit:** `9727f6e` na branch `feature/va2-sem2` ([`code/leadroid/`](../code/leadroid/)).
+**o commit:** `9727f6e` na branch `feature/va2-sem2` ([`code/luzia/`](../code/luzia/)).
 
 **a entrada:** antes, um prompt estático de teste (`"responda so: ok"`); agora, a triagem real da autora (Desenvolvedora Fullstack Jr 3 → Pleno em 12 meses, currículo, GitHub `rayfrance`, 6 notas de estudo no Obsidian incluindo `ddd-cap-01.md`, 30 sessões do Claude Code e Codex e 39 commits do repositório de trabalho anonimizados localmente por LGPD).
 
@@ -54,7 +54,7 @@ ok 1.39 7
 **o comando e a saída, colados como vieram:**
 
 ```text
-$ cd code && python -m leadroid.cli triage --rotulo sem2-completo-3
+$ cd code && python -m luzia.cli triage --rotulo sem2-completo-3
 (…diagnóstico e mapa de skills…)
 `⏱ 12.95 s · 🧠 76.8 MiB · 🔤 10277→2721 tokens · 🔒 34 itens mascarados · versão 9727f6e`
 ```

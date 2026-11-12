@@ -14,12 +14,12 @@ flowchart LR
     LGPD --> LLM["Motor LLM (google-genai)<br/>gemini-3.5-flash-lite<br/>Avalia uso educado de IA e<br/>propriedade intelectual"]
     LLM --> STATE["Estado e Telemetria<br/>career_state.json + runs.jsonl<br/>(tempo_total_s, pico_memoria_mib, tokens)"]
     STATE --> OUT1["Resposta no Agente<br/>Diagnóstico + Pergunta da LuzIA"]
-    STATE --> OUT2["Painel Visual @career-map<br/>(Streamlit: code/leadroid/app.py)"]
+    STATE --> OUT2["Painel Visual @career-map<br/>(no sem2: Streamlit; hoje: code/luzia/server.py)"]
 ```
 
 **Peças da implementação:**
-- **Plugin multi-agente:** manifestos `.claude-plugin/plugin.json` (e equivalentes para Cursor, Codex e Antigravity), comandos slash em `.claude/commands/luzia/` e skill `leadroid-mentor/SKILL.md`.
-- **Motor Python (`code/leadroid/`):** Python 3.14.3 · `google-genai` (`gemini-3.5-flash-lite`) · `pypdf` · `psutil` (instrumentação de memória RSS/Peak Working Set) · `streamlit` + `altair` (visualizador `@career-map`).
+- **Plugin multi-agente:** manifestos `.claude-plugin/plugin.json` (e equivalentes para Cursor, Codex e Antigravity), comandos slash em `.claude/commands/luzia/` e skill `luzia-mentor/SKILL.md`.
+- **Motor Python (`code/luzia/`):** Python 3.14.3 · `google-genai` (`gemini-3.5-flash-lite`) · `pypdf` · `psutil` (instrumentação de memória RSS/Peak Working Set) · `streamlit` + `altair` (visualizador `@career-map`).
 - **Por que API remota e não Ollama local nesta máquina:** o cliente Ollama 0.40.2 instalado falhou ao iniciar na máquina com GPU integrada Intel UHD (`Failed to start: Unable to init instance: Unspecified error`).
 
 ## 2 · Estimativa de custo (antes de medir)

@@ -1,13 +1,14 @@
 ---
-description: Luzia · triagem de carreira (currículo, GitHub, histórico entre IAs e commits, com LGPD local)
-allowed-tools: Bash(cd:*), Bash(python:*)
+description: Luzia · triagem de carreira e primeiras ações (currículo, GitHub, histórico entre IAs e commits, com LGPD local)
+allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 
-Rode a Luzia (plugin de carreira) e mostre a saída **exatamente como veio**, sem resumir nem reescrever:
+Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:
 
 ```bash
-cd /c/Repositorio/ai4good-sem2/code && python -m leadroid.cli triage --rotulo triage
+cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli triage --rotulo triage
 ```
 
-Depois, em uma linha, pergunte se a pessoa quer ajustar a autoavaliação no painel (/luzia:career-map).
-Não leia, abra nem mostre arquivos ou código do repositório atual: a Luzia já entrega tudo mascarado (LGPD).
+Mostre a saída **como veio** (é markdown visual), sem resumir.
+Depois, se a saída tiver a linha `LUZIA_ACOES=[...]`, não a mostre: use a ferramenta AskUserQuestion com uma pergunta curta ("Qual ação você quer fazer agora?"), uma opção por ação (rótulo = título curto, descrição = tipo e tempo) e mais a opção "Agora não". Se a pessoa escolher uma ação, rode `cd /c/Repositorio/ai4good-sem2/code && python -m luzia.cli fazer <id>` e siga o ROTEIRO PARA O AGENTE que ele imprime.
+Antes das opções, diga em uma linha que a pessoa pode ajustar a autoavaliação no painel (/luzia:career-map).

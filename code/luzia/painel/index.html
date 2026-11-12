@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Luzia</title>
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="luzia.css">
+</head>
+<body>
+  <aside class="rail">
+    <div class="marca">
+      <img src="logo.svg" alt="">
+      <div><b>Luzia</b><small>sua líder técnica</small></div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="rodape">
+      <div class="selo" id="selo"></div>
+      <div class="telemetria" id="telemetria"></div>
+    </div>
+  </aside>
+
+  <main>
+    <header class="jornada" id="jornada"></header>
+    <section id="hoje" class="tela ativa"></section>
+    <section id="rota" class="tela"></section>
+    <section id="feixes" class="tela"></section>
+    <section id="propria" class="tela"></section>
+    <section id="ajustes" class="tela"></section>
+  </main>
+
+  <div class="gaveta" id="gaveta" hidden>
+    <div class="gaveta-fundo" data-fechar></div>
+    <article class="gaveta-corpo" id="gaveta-corpo" role="dialog" aria-modal="true"></article>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="luzia.js"></script>
+</body>
+</html>

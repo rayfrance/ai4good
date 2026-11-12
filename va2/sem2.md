@@ -5,7 +5,7 @@
 
 **link dos slides:** [abrir a apresentação (PowerPoint online)](https://view.officeapps.live.com/op/view.aspx?src=https%3A%2F%2Fraw.githubusercontent.com%2Frayfrance%2Fai4good%2Ffeature%2Fva2-sem2%2Foutputs%2Fsem2_demonstracao.pptx) · [baixar o .pptx](https://github.com/rayfrance/ai4good/raw/feature/va2-sem2/outputs/sem2_demonstracao.pptx) · gerados por `tools/build_sem2_pptx.py`
 
-**a versão que roda:** commit `9727f6e` na branch `feature/va2-sem2` em [github.com/rayfrance/ai4good](https://github.com/rayfrance/ai4good/tree/feature/va2-sem2) (código da Luzia em [`code/leadroid/`](../code/leadroid/))
+**a versão que roda:** commit `9727f6e` na branch `feature/va2-sem2` em [github.com/rayfrance/ai4good](https://github.com/rayfrance/ai4good/tree/feature/va2-sem2) (código da Luzia em [`code/luzia/`](../code/luzia/))
 
 **a máquina:** o meu notebook (`Intel64 Family 6 Model 186 Stepping 3 · Windows 11 · 12 CPUs · 16 GiB RAM · Python 3.14.3`), espelhado no projetor. Ao vivo: uma sessão do Claude Code no meu repositório de trabalho, com os comandos `/luzia:*` e o painel `http://localhost:8501`, usando a internet da sala para a API do Gemini (`gemini-3.5-flash-lite`).
 

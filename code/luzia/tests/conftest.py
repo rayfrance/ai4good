@@ -108,6 +108,10 @@ def privado(tmp_path, monkeypatch) -> Path:
     _escrever(pasta / 'career_state.json', estado_sintetico())
 
     monkeypatch.setenv('LUZIA_PRIVATE', str(pasta))
+    # O git dos testes não lê a configuração global nem a do sistema (nome e e-mail reais da máquina).
+    (tmp_path / 'gitconfig-vazio').write_text('', encoding='utf-8')
+    monkeypatch.setenv('GIT_CONFIG_GLOBAL', str(tmp_path / 'gitconfig-vazio'))
+    monkeypatch.setenv('GIT_CONFIG_NOSYSTEM', '1')
     for nome in MODULOS_COM_CAMINHOS:
         importlib.reload(importlib.import_module(f'luzia.{nome}'))
     fora = {n: c for n, c in caminhos_privados().items() if not Path(c).is_relative_to(pasta)}

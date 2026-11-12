@@ -212,3 +212,49 @@ def test_ticket_nao_confunde_csharp_e_lock_nao_conta_termo(repo):
     assert len(e) == 1 and e[0]['ids_privados'] == ['42']
     assert entregas.prismas_de({'commits': [{'mensagem': 'x', 'caminhos': ['node_modules/aggregate/a.js']}]},
                                [{'nome': 'P', 'palavras': ['aggregate']}]) == {}
+
+
+# ------------------------------------------------------------------ identidades (A1)
+def test_identidade_parcial_e_com_acento_casa_como_o_git(repo):
+    h1 = repo.commit('feat: um', 'src/Um.cs', nome='Pessoa Teste da Silva', mail='outro@exemplo.test', quando=_dias(5))
+    h2 = repo.commit('feat: dois', 'src/Dois.cs', nome='Joana Simões', mail='joana@exemplo.test', quando=_dias(4))
+    h3 = repo.commit('feat: tres', 'src/Tres.cs', nome='Mariana Souza', mail='mariana@exemplo.test', quando=_dias(3))
+    achados = lambda ids: {c['hash'] for e in entregas.detectar(repo.pasta, ids, _desde()) for c in e['commits']}
+    assert h1 in achados(['pessoa teste'])          # nome parcial: todas as palavras aparecem no nome do autor
+    assert h2 in achados(['JOANA SIMOES'])          # sem acento e sem diferenciar maiúsculas
+    assert h2 in achados(['Simões'])
+    assert h3 not in achados(['Ana'])               # palavra inteira: 'Ana' não casa com 'Mariana'
+    assert h1 not in achados(['Pessoa Outra'])      # toda palavra precisa aparecer
+    assert achados(['OUTRO@exemplo.test']) == {h1}  # e-mail: igualdade exata, sem diferenciar maiúsculas
+    assert not achados(['exemplo.test@'])
+
+
+def test_identidades_incluem_git_config_do_repositorio(con, repo, privado):
+    (privado / 'entrada.json').write_text(json.dumps({'repo': str(repo.pasta), 'author': 'Apelido Diferente'}),
+                                          encoding='utf-8')
+    repo.git('config', 'user.email', EU_MAIL)
+    repo.git('config', 'user.name', 'Pessoa Teste')
+    ids = entregas.identidades(con)
+    assert ids[0] == 'Apelido Diferente' and 'Pessoa Teste' in ids and EU_MAIL in ids
+    repo.commit('feat: minha', 'src/Minha.cs', quando=_dias(2))
+    assert entregas.atualizar(con)['novas'] == 2  # 'inicio' + 'minha', achados pelo e-mail do git config
+
+
+def test_janela_refaz_a_busca_quando_nada_casou_ou_identidade_mudou(con, repo, privado):
+    repo.commit('feat: antiga', 'src/Antiga.cs', quando=_dias(40))
+    (privado / 'entrada.json').write_text(json.dumps({'repo': str(repo.pasta), 'author': 'Ninguem Daqui'}),
+                                          encoding='utf-8')
+    assert entregas.atualizar(con) == {'novas': 0, 'atualizadas': 0}
+    janela = trajetoria.perfil_ler(con, 'entregas_desde')
+    assert janela['meus'] == 0 and janela['identidades']
+    # A mesma identidade de novo: como nada casou, refaz os 90 dias (não só desde a última leitura)
+    with banco.transacao(con):
+        trajetoria.perfil_gravar(con, 'identidades', ['Ninguem Daqui', EU])  # identidade acrescentada depois
+    assert entregas.atualizar(con)['novas'] == 2  # 'inicio' (30 d) e 'antiga' (40 d), mesmo com 'ultima' = agora
+    assert trajetoria.perfil_ler(con, 'entregas_desde')['meus'] == 2
+    # Outra identidade (segundo e-mail) com commits antigos: o hash muda e a janela inteira é lida de novo
+    repo.commit('feat: do outro email', 'src/Outro.cs', nome='Apelido', mail='segundo@exemplo.test', quando=_dias(50))
+    assert entregas.atualizar(con) == {'novas': 0, 'atualizadas': 0}  # ainda não é identidade dela
+    with banco.transacao(con):
+        trajetoria.perfil_gravar(con, 'identidades', ['Ninguem Daqui', EU, 'segundo@exemplo.test'])
+    assert entregas.atualizar(con)['novas'] == 1

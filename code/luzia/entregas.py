@@ -6,7 +6,7 @@ Uma entrega é um bloco semântico fechado de commits da pessoa:
 2. sem merge (squash, commits direto na principal): commits com o mesmo id de ticket (`AB#123` ou `#123`);
 3. senão, 1 commit = 1 entrega.
 
-Só entram commits cujo autor (nome ou e-mail) está nas identidades do perfil; a data é a data de autor.
+Só entram commits cujo autor casa com uma identidade da pessoa (`casa_identidade`); a data é a data de autor.
 LGPD: título e mensagem passam pelo `Redactor` antes de ir ao banco e nunca carregam número de PR/ticket nem hash;
 esses ids ficam só em `entrega.ids_privados_json` e `commit_.hash` (banco privado).
 """
@@ -18,6 +18,7 @@ import json
 import re
 import sqlite3
 import subprocess
+import unicodedata
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -39,23 +40,89 @@ SOBREPOSICAO = timedelta(days=2)  # a busca incremental volta um pouco: datas de
 
 
 # ------------------------------------------------------------------ identidades
-def identidades(con: sqlite3.Connection) -> list[str]:
-    """Nomes e e-mails que a pessoa usa no git (`perfil('identidades')`); a primeira carga vem de `entrada.json`."""
-    guardadas = trajetoria.perfil_ler(con, 'identidades')
-    if guardadas is not None:
-        return [str(i) for i in guardadas]
-    autor: list[str] = []
+def _sem_acento(texto: str) -> str:
+    return ''.join(c for c in unicodedata.normalize('NFKD', texto) if not unicodedata.combining(c)).casefold()
+
+
+def _palavras(texto: str) -> list[str]:
+    return re.findall(r'\w+', _sem_acento(texto or ''))
+
+
+def casa_identidade(identidade: str, nome: str, mail: str) -> bool:
+    """Uma identidade casa com o autor "Nome <email>" como no `git log --author`, mas sem falso positivo:
+    com '@' é o e-mail exato (sem diferenciar maiúsculas); sem '@', toda palavra dela aparece no nome do autor
+    (sem acento e sem diferenciar maiúsculas; palavra inteira, então 'Ana' não casa com 'Mariana')."""
+    ident = (identidade or '').strip()
+    if not ident:
+        return False
+    if '@' in ident:
+        return ident.casefold() == (mail or '').strip().casefold()
+    pal = _palavras(ident)
+    return bool(pal) and set(pal) <= set(_palavras(nome))
+
+
+def _git_config(repo: Path | None, chave: str) -> str:
+    if repo is None:
+        return ''
+    try:
+        return _git(repo, 'config', '--get', chave).strip()
+    except (subprocess.CalledProcessError, OSError):
+        return ''
+
+
+def _entrada_autor() -> list[str]:
     try:
         cfg = json.loads((arquivos.PRIVATE / 'entrada.json').read_text(encoding='utf-8'))
-        bruto = cfg.get('author')
-        autor = [bruto] if isinstance(bruto, str) else list(bruto or [])
     except (OSError, ValueError):
-        pass
-    autor = [a.strip() for a in autor if isinstance(a, str) and a.strip()]
-    if autor:
+        return []
+    bruto = cfg.get('author') if isinstance(cfg, dict) else None
+    return [bruto] if isinstance(bruto, str) else [a for a in (bruto or []) if isinstance(a, str)]
+
+
+def identidades(con: sqlite3.Connection, repo: Path | None = None) -> list[str]:
+    """Nomes e e-mails que a pessoa usa no git: `author` de `entrada.json`, `user.name` e `user.email` do git
+    no repositório autorizado e as acrescentadas depois (`perfil('identidades')`). A união fica no perfil."""
+    repo = repo if repo is not None else _repo_configurado()
+    guardadas = trajetoria.perfil_ler(con, 'identidades')
+    guardadas = [str(i) for i in guardadas] if isinstance(guardadas, list) else []
+    candidatas = [*_entrada_autor(), _git_config(repo, 'user.name'), _git_config(repo, 'user.email'), *guardadas]
+    out: list[str] = []
+    vistas: set[str] = set()
+    for i in candidatas:
+        i = (i or '').strip()
+        if i and i.casefold() not in vistas:
+            vistas.add(i.casefold())
+            out.append(i)
+    if out and {i.casefold() for i in out} != {i.casefold() for i in guardadas}:
         with banco.transacao(con):
-            trajetoria.perfil_gravar(con, 'identidades', autor)
-    return autor
+            trajetoria.perfil_gravar(con, 'identidades', out)
+    return out
+
+
+def acrescentar_identidade(con: sqlite3.Connection, identidade: str) -> list[str]:
+    """Acrescenta um nome ou e-mail às identidades; a próxima leitura das entregas refaz a janela inteira."""
+    ident = (identidade or '').strip()
+    if not ident or len(ident) > 120:
+        raise ValueError('informe um nome ou e-mail do git (até 120 caracteres)')
+    atuais = identidades(con)
+    if ident.casefold() not in {i.casefold() for i in atuais}:
+        with banco.transacao(con):
+            trajetoria.perfil_gravar(con, 'identidades', [*atuais, ident])
+    return identidades(con)
+
+
+def mascarar_identidade(identidade: str) -> str:
+    """Para a tela: e-mail nunca aparece inteiro (nem o domínio, que pode ser o da empresa)."""
+    ident = (identidade or '').strip()
+    if '@' in ident:
+        return (ident[:1] or '?') + '***@***'
+    return ident
+
+
+def _assinatura(repo: Path, ids: list[str]) -> str:
+    """Hash do repositório e das identidades usadas numa leitura: se mudar, a janela inteira é lida de novo."""
+    base = json.dumps([str(Path(repo).resolve()).casefold(), sorted({i.casefold() for i in ids})], ensure_ascii=False)
+    return hashlib.sha1(base.encode('utf-8')).hexdigest()[:16]
 
 
 # ------------------------------------------------------------------ leitura do git
@@ -110,8 +177,8 @@ def _principal(repo: Path) -> str:
     return 'HEAD'
 
 
-def _meu(reg: dict, ids: set[str]) -> bool:
-    return reg['nome'].strip().casefold() in ids or reg['mail'].strip().casefold() in ids
+def _meu(reg: dict, ids: list[str]) -> bool:
+    return any(casa_identidade(i, reg['nome'], reg['mail']) for i in ids)
 
 
 def _areas(caminhos: list[str]) -> list[str]:
@@ -165,7 +232,7 @@ def detectar(repo: Path, identidades: list[str], desde: str) -> list[dict]:
     Cada entrega: chave, titulo, inicio, fim, commits [{hash, data, mensagem, arquivos, linhas, areas, caminhos}],
     fonte ('merge-pr' | 'ticket' | 'commit') e ids_privados (números de PR/ticket, só para o banco privado).
     """
-    meus = {i.strip().casefold() for i in identidades if i and i.strip()}
+    meus = [i.strip() for i in identidades if i and i.strip()]
     if not meus:
         return []
     repo = Path(repo)
@@ -251,22 +318,31 @@ def _repo_configurado() -> Path | None:
 def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
     """Detecta e grava as entregas. Primeira execução: últimos `dias`; depois só o que é novo.
 
-    Pedir mais `dias` que a janela guardada (`perfil('entregas_desde')`) alarga a janela para trás.
+    Pedir mais `dias` que a janela guardada (`perfil('entregas_desde')`) alarga a janela para trás. A janela guarda o
+    hash do repositório e das identidades e quantos commits da pessoa o banco tem: se o hash mudar ou nada tiver
+    casado, a próxima leitura refaz a janela inteira (não só o que veio depois da última).
     Retorna {'novas': entregas criadas, 'atualizadas': entregas que ganharam commits}.
     """
     resultado = {'novas': 0, 'atualizadas': 0}
     repo = _repo_configurado()
-    minhas = identidades(con)
-    if repo is None or not minhas:
+    if repo is None:
+        return resultado
+    minhas = identidades(con, repo)
+    if not minhas:
         return resultado
     agora = datetime.now().replace(microsecond=0)
     alvo = agora - timedelta(days=dias)
-    janela = trajetoria.perfil_ler(con, 'entregas_desde')
-    if janela and janela.get('desde') and janela.get('ultima') and alvo.isoformat() >= janela['desde']:
+    assinatura = _assinatura(repo, minhas)
+    janela = trajetoria.perfil_ler(con, 'entregas_desde') or {}
+    janela = janela if isinstance(janela, dict) else {}
+    incremental = bool(janela.get('desde') and janela.get('ultima') and alvo.isoformat() >= janela['desde']
+                       and janela.get('identidades') == assinatura and int(janela.get('meus') or 0) > 0)
+    if incremental:
         busca = datetime.fromisoformat(janela['ultima']) - SOBREPOSICAO
         desde_gravado = janela['desde']
-    else:
-        busca, desde_gravado = alvo, alvo.isoformat()
+    else:  # primeira leitura, janela maior, outra identidade ou nada casou da última vez: a janela inteira
+        desde_gravado = min(alvo.isoformat(), janela['desde']) if janela.get('desde') else alvo.isoformat()
+        busca = datetime.fromisoformat(desde_gravado)
     try:
         achadas = detectar(repo, minhas, busca.isoformat(timespec='seconds'))
     except (subprocess.CalledProcessError, OSError) as erro:  # não é repositório git, ou git ausente
@@ -317,7 +393,9 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
             if _recalcular(con, velha, destino=destino):
                 tocadas.add(velha)
         resultado['atualizadas'] = len(tocadas)
-        trajetoria.perfil_gravar(con, 'entregas_desde', {'desde': desde_gravado, 'ultima': agora.isoformat()})
+        meus = int(con.execute('SELECT COUNT(*) FROM commit_').fetchone()[0])  # só há commits da pessoa
+        trajetoria.perfil_gravar(con, 'entregas_desde', {'desde': desde_gravado, 'ultima': agora.isoformat(),
+                                                         'identidades': assinatura, 'meus': meus})
     return resultado
 
 

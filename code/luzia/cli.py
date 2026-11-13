@@ -50,6 +50,12 @@ def make_redactor(cfg: dict) -> Redactor:
     return Redactor.from_file(pipeline.PRIVATE / 'termos.txt', extra_colleagues=colleagues)
 
 
+def base_triagem(mascarado: bool) -> str:
+    """Rótulo da base da triagem: diz se o envio ao modelo saiu mascarado (interruptor `mascarar_modelo`) ou real."""
+    return ('sua entrada, currículo, commits e histórico autorizados'
+            + (' (mascarados antes do envio ao modelo)' if mascarado else ''))
+
+
 def skills_summary(plan: dict) -> list[dict]:
     autoaval = jogo.autoavaliacao()
     return [
@@ -1027,7 +1033,7 @@ def main() -> None:
         state = pipeline.load_state()
         plan = state.get('plano', {})
         print('## ✦ Luzia · triagem')
-        base_tri = 'sua entrada, currículo, commits e histórico autorizados (anonimizados)'
+        base_tri = base_triagem(rec.get('mascarar_modelo', False))
         for rotulo_tri, campo in (('Onde você está', 'onde_esta'), ('Aonde quer chegar', 'aonde_quer_chegar')):
             texto = (plan.get(campo) or {}).get('resumo', '')
             leit = {'texto': texto, 'modelo': rec.get('modelo'), 'criado_em': rec.get('quando')}

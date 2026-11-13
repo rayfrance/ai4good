@@ -103,8 +103,17 @@ def estado() -> dict:
         avancos_todos = jogo.avancos(con)  # uma só lista de avanços para todas as entregas
         detalhes_git = [entregas.detalhe(con, e['id'], todos_avancos=avancos_todos) for e in entregas_git[:ENTREGAS_NA_TELA]]
         diag_entregas = None if entregas_git else entregas.diagnostico(con)
-        tri = con.execute("SELECT modelo, quando FROM chamada_modelo WHERE rotulo LIKE '%triage%' ORDER BY id DESC LIMIT 1").fetchone()
-        triagem_modelo = {'modelo': tri['modelo'], 'quando': tri['quando']} if tri and tri['modelo'] else None
+        tri = con.execute("SELECT modelo, quando, registro_json FROM chamada_modelo WHERE rotulo LIKE '%triage%' "
+                          "ORDER BY id DESC LIMIT 1").fetchone()
+        triagem_modelo = None
+        if tri and tri['modelo']:
+            try:
+                reg = json.loads(tri['registro_json'] or '{}')
+            except ValueError:
+                reg = {}
+            # Registro sem a marca veio de uma versão que sempre mascarava o envio.
+            mascarado = reg.get('mascarar_modelo', True) if isinstance(reg, dict) else True
+            triagem_modelo = {'modelo': tri['modelo'], 'quando': tri['quando'], 'mascarado': mascarado is not False}
 
     diag = plan.get('diagnostico_fontes', {})
     plan_skills_map = {s['nome']: s for s in plan.get('skills', []) if isinstance(s, dict) and s.get('nome')}

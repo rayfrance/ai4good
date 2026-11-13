@@ -322,7 +322,7 @@ function abrirPrisma(nome) {
     <h4>Progresso até o próximo nível</h4>${barraNivel(s)}
     <h4>Leitura personalizada deste prisma</h4>
     ${blocoLeitura(s.leitura, fatosPrisma, false)}
-    ${s.evidencia ? `<h4>Evidência inicial da triagem</h4>${blocoLeitura({ texto: s.evidencia, alvo_tipo: 'triagem', modelo: E.triagem_modelo?.modelo || 'modelo desconhecido', criado_em: E.triagem_modelo?.quando || '' }, 'triagem: currículo, commits e histórico autorizados (anonimizados)', true)}` : ''}
+    ${s.evidencia ? `<h4>Evidência inicial da triagem</h4>${blocoLeitura({ texto: s.evidencia, alvo_tipo: 'triagem', modelo: E.triagem_modelo?.modelo || 'modelo desconhecido', criado_em: E.triagem_modelo?.quando || '' }, `triagem: currículo, commits e histórico autorizados${E.triagem_modelo?.mascarado ? ' (mascarados antes do envio ao modelo)' : ''}`, true)}` : ''}
     ${subidas ? `<h4>Níveis conquistados</h4><ul class="lacuna" style="padding-left:18px">${subidas}</ul>` : ''}
     <h4>Avanços deste prisma</h4><div class="acoes">${doPrisma.map(cartaoAvanco).join('') || '<span class="vazio">Nenhum avanço aberto ainda.</span>'}</div>
     ${s.na_meta || s.estado === 'arquivado' ? '' : `<p style="margin-top:var(--e4)">${botaoAcender(s)}</p>`}`;

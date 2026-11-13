@@ -3,6 +3,7 @@
 import io
 import sys
 from contextlib import redirect_stdout
+from pathlib import Path
 
 from luzia import banco, cli, jogo, modelo, pipeline, server
 
@@ -46,7 +47,23 @@ def test_estado_traz_modelo_e_data_da_triagem(privado):
                         "VALUES ('2026-11-05T10:00:00', 'cmd-leituras', 'outro/y', 1, 1, 1, '{}')")
     finally:
         con.close()
-    assert server.estado()['triagem_modelo'] == {'modelo': 'gemini/x', 'quando': '2026-11-01T10:00:00'}
+    # registro sem a marca = versão antiga, que sempre mascarava o envio
+    assert server.estado()['triagem_modelo'] == {'modelo': 'gemini/x', 'quando': '2026-11-01T10:00:00', 'mascarado': True}
+
+
+def test_rotulo_da_base_da_triagem_segue_o_que_foi_enviado(privado):
+    con = banco.conectar()
+    try:
+        with banco.transacao(con):
+            con.execute("INSERT INTO chamada_modelo (quando, rotulo, modelo, segundos, tokens_in, tokens_out, registro_json) "
+                        "VALUES ('2026-11-13T10:00:00', 'cmd-triage', 'gemini/x', 1, 1, 1, '{\"mascarar_modelo\": false}')")
+    finally:
+        con.close()
+    assert server.estado()['triagem_modelo']['mascarado'] is False
+    assert 'anonimizados' not in cli.base_triagem(False) and 'mascarad' not in cli.base_triagem(False)
+    assert 'mascarados' in cli.base_triagem(True)
+    js = (Path(server.PAINEL) / 'luzia.js').read_text(encoding='utf-8')
+    assert '(anonimizados)' not in js and 'E.triagem_modelo?.mascarado' in js
 
 
 def test_estado_sem_registro_da_triagem_nao_inventa_modelo(privado):

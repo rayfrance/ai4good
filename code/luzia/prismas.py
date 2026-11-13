@@ -82,6 +82,29 @@ def partes(nome: str) -> list[str]:
     return out or [nome]
 
 
+_SIGLA = re.compile(r'^[\w.#+-]{2,10}$')
+
+
+def nome_curto(nome: str) -> str:
+    """Rótulo curto do prisma (painel e chat usam o mesmo; o nome completo fica no title ou no detalhe).
+
+    Sigla entre parênteses ("Domain-Driven Design (DDD)" → "DDD"); senão o nome sem os parênteses, se couber em 20
+    caracteres; senão o trecho após o último " / "; senão os 18 primeiros caracteres com "…".
+    O painel (`nomeCurto` em painel/luzia.js) só repete esta regra para nomes que não vieram no estado.
+    """
+    n = _limpo(nome)
+    m = _PARENTESES.match(n)
+    if m and _SIGLA.match(m['dentro'].strip()):
+        return m['dentro'].strip()
+    base = (m['base'] if m else n).strip()
+    if len(base) <= 20:
+        return base
+    ultimo = _BARRA.split(base)[-1].strip()
+    if ultimo != base and 2 <= len(ultimo) <= 20:
+        return ultimo
+    return base[:18].strip() + '…'
+
+
 def composto(nome: str) -> bool:
     """True quando o nome junta habilidades (ou tem um nome isolado revisado no mapa)."""
     return partes(nome) != [_limpo(nome)]

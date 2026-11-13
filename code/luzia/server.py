@@ -183,6 +183,7 @@ def estado() -> dict:
         subidas = [h for h in d.get('historico', []) if h['skill'] == nome]
         prismas_out.append({
             'nome': nome,
+            'nome_curto': prismas.nome_curto(nome),  # rótulo do painel e do chat; o nome completo vai no title
             'estado': p['estado'],
             'origem': p['origem'],
             'palavras': p.get('palavras', []),
@@ -578,7 +579,7 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('partes: envie a lista de nomes das habilidades')
                 if mover is not None and not (isinstance(mover, dict)
                                               and all(isinstance(v, str) for v in mover.values())):
-                    raise ValueError('mover: envie {avanço: habilidade}')
+                    raise ValueError('mover: envie {centelha: habilidade}')
                 return pedidos.propor(con, pid, nivel=numero('nivel', 'nível'), meta=numero('meta', 'meta'),
                                       partes=partes, mover=mover)
             if acao == 'aceitar':
@@ -694,9 +695,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/enviar':
             a = acoes.find(pipeline.load_state().get('plano', {}), str(dados.get('id', '')))
             if not a:
-                return self._json({'erro': 'avanço não encontrado'}, 404)
+                return self._json({'erro': 'centelha não encontrada'}, 404)
             if not jogo.enfileirar(a['id']):
-                return self._json({'erro': 'este avanço já foi conquistado (e revisitado) ou está descartado'}, 400)
+                return self._json({'erro': 'esta centelha já foi acesa (e revisitada) ou está descartada'}, 400)
             acoes.enfileirar(a['id'], a.get('titulo', ''))
             return self._json({'ok': True})
 
@@ -740,7 +741,7 @@ class Handler(BaseHTTPRequestHandler):
                 res = cli.gerar_trecho(alvo, 'painel-acender')
             except Exception as e:  # sem modelo, sem chave ou sem internet: mensagem clara, nada gravado
                 arquivos.registrar_erro('server acender', e)
-                return self._json({'erro': f'não deu para acender avanços sem o modelo ({modelo.resumo_erro(e)})'}, 400)
+                return self._json({'erro': f'não deu para acender centelhas sem o modelo ({modelo.resumo_erro(e)})'}, 400)
             if res.get('erro'):
                 return self._json({'erro': res['erro']}, 400)
             ids = [f['id'] for f in res['feixes']]
@@ -749,7 +750,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/iniciar':
             a = acoes.find(pipeline.load_state().get('plano', {}), str(dados.get('id', '')))
             if not a or not jogo.iniciar(a['id'], 'prompt copiado do painel'):
-                return self._json({'erro': 'este avanço não pode ser iniciado agora'}, 400)
+                return self._json({'erro': 'esta centelha não pode ser iniciada agora'}, 400)
             acoes.registrar_evento(a['id'], 'iniciada', skill=a.get('skill'), origem='painel')
             return self._json({'ok': True})
 

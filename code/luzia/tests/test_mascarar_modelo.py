@@ -155,7 +155,7 @@ def test_aviso_quando_termos_txt_falta_e_alcance_do_interruptor(servidor, privad
     from luzia import server
     from pathlib import Path
     js = (Path(server.PAINEL) / 'luzia.js').read_text(encoding='utf-8')
-    assert 'E.privacidade?.termos' in js and 'termos.txt' in js and 'agente do chat' in js
+    assert 'E.privacidade?.termos' in js and 'termos.txt' in js and 'Seu agente vê os dados reais' in js
 
 
 # ------------------------------------------------------------------ nomes reais fora do código versionado

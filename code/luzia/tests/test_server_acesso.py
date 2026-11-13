@@ -226,7 +226,7 @@ def test_painel_entra_pelo_fragmento_e_nao_guarda_sessao_no_navegador():
         assert proibido not in js, proibido
     assert '<body class="fora">' in html  # trilho e telas escondidos até entrar
     assert '#entrar=' in js and 'history.replaceState' in js and "'/api/acesso/link'" in js
-    assert 'Abra o painel pelo seu agente' in js and '/luzia:career-map' in js
+    assert 'Abra pelo seu agente' in js and '/luzia:career-map' in js
     linhas = [ln for ln in js.splitlines() if ln and not ln.startswith((' ', '}', '//', ')'))]
     chamadas_no_topo = [ln for ln in linhas if re.match(r'^[a-zA-Z_$][\w$]*\(.*\);$', ln)
                         and 'addEventListener' not in ln]

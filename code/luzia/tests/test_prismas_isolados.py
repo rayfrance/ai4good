@@ -311,3 +311,39 @@ def test_painel_sem_prefixo_prisma_nos_rotulos():
     from pathlib import Path
     js = (Path(prismas.__file__).parent / 'painel' / 'luzia.js').read_text(encoding='utf-8')
     assert not re.findall(r'Prisma \$\{', js)
+
+
+# ------------------------------------------------------------------ nome curto (painel e chat usam o mesmo)
+@pytest.mark.parametrize('nome, curto', [
+    ('Domain-Driven Design (DDD)', 'DDD'),
+    ('SQL', 'SQL'),
+    ('Front-end (JS / Razor / React)', 'Front-end'),
+    ('Arquitetura .NET / Clean Architecture', 'Clean Architecture'),
+    ('Programação Agêntica e Fluxo com IA', 'Programação Agênti…'),
+    ('  Testes e Qualidade  ', 'Testes e Qualidade'),
+])
+def test_nome_curto_do_prisma(nome, curto):
+    assert prismas.nome_curto(nome) == curto
+
+
+def test_estado_expoe_nome_curto_e_o_chat_usa_o_mesmo(api, monkeypatch):
+    from luzia import cli
+    c, est = api('GET', '/api/estado')
+    assert c == 200
+    por_nome = {p['nome']: p['nome_curto'] for p in est['prismas']}
+    assert por_nome[DDD] == 'DDD' and all(v == prismas.nome_curto(k) for k, v in por_nome.items())
+    assert cli.nome_prisma(DDD) == 'DDD'
+    texto, _ = _rodar(monkeypatch, 'centelhas')  # apelido de `avancos`
+    assert texto.startswith('## Luzia · Centelhas') and 'Domain-Driven Design' not in texto
+
+
+def test_painel_mostra_base_modelo_e_data_atras_de_um_icone_focavel_e_guarda_o_detalhe_aberto():
+    from pathlib import Path
+    js = (Path(prismas.__file__).parent / 'painel' / 'luzia.js').read_text(encoding='utf-8')
+    # a assinatura curta continua levando base, modelo e data (popover acessível pelo teclado)
+    assert 'class="info-base" tabindex="0" role="img" aria-label="${esc(dica)}"' in js
+    assert 'Base: ${base} · Modelo: ${leitura.modelo}' in js
+    # o detalhe aberto de uma entrega sobrevive ao render() do polling; descartar oferece Desfazer
+    assert 'const entregasAbertas = new Set()' in js and "entregasAbertas.has(String(e.id))" in js
+    assert "{ rotulo: 'Desfazer', dados: { restaurar: id } }" in js
+    assert 'nome_curto' in js and 'Leitura da Luzia' not in js and 'Lampejo' not in js

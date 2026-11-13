@@ -24,9 +24,9 @@ RUBRICA = {
 
 COMO_E_MEDIDO = [
     'P1 · direção no prompt: o modelo lê seus prompts recentes no projeto e avalia se você deu direção, restrições e critérios ao agente (inferido, geral: vale para todas as entregas).',
-    'P2 · coesão da entrega: regra fixa sobre arquivos, linhas e áreas somados da entrega; quanto mais focada, maior (calculado).',
-    'P3 · aplicação conceitual: sobe só quando você explica o conceito naquela entrega numa ação da Luzia (evidência).',
-    'P4 · domínio arquitetural: sobe só quando você defende a decisão e as alternativas numa ação (evidência).',
+    'P2 · coesão: regra fixa sobre arquivos, linhas e áreas somados da entrega; quanto mais focada, maior (calculado).',
+    'P3 · aplicação de conceito: sobe só quando você explica o conceito daquela entrega numa centelha da Luzia (evidência).',
+    'P4 · decisão de arquitetura: sobe só quando você defende a decisão e as alternativas numa centelha (evidência).',
     'Rubrica das evidências (0–4, ×25): ' + ' · '.join(f'{k} {v}' for k, v in RUBRICA.items()) + '.',
 ]
 

@@ -52,7 +52,7 @@ def test_estado_forma_completa(api):
     ):
         assert chave in st, f'Chave ausente em /api/estado: {chave}'
 
-    assert st['modo_nome'] == 'em foco, com lampejos'
+    assert st['modo_nome'] == 'em foco'
     assert st['trajetoria']['versao_atual'] >= 1
     assert isinstance(st['trajetoria']['versoes'], list)
     assert len(st['prismas']) >= 2
@@ -259,7 +259,7 @@ def test_pedido_api_sem_modelo_propoe_e_aceita(api, monkeypatch):
     monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem internet')))
     c, r = api('POST', '/api/pedido', {'acao': 'abrir', 'tipo': 'incluir', 'prisma': 'Mensageria', 'nivel': 1, 'meta': 3})
     assert c == 200 and r['pedido']['estado'] == 'proposto'
-    assert r['pedido']['leitura'] is None and 'leitura indisponível' in r['pedido']['proposta']['leitura_indisponivel']
+    assert r['pedido']['leitura'] is None and 'análise indisponível' in r['pedido']['proposta']['leitura_indisponivel']
     c, r = api('POST', '/api/pedido', {'acao': 'aceitar', 'id': r['pedido']['id']})
     assert c == 200 and r['pedido']['estado'] == 'aceito'
 
@@ -365,8 +365,8 @@ def test_validacoes_de_cada_acao_devolvem_400_ou_404_sem_gravar(api, privado):
         ('/api/nivel', {'prisma': DDD, 'nivel': 'alto'}, 400, 'nível inválido'),
         ('/api/nivel', {'prisma': 'Prisma que não existe', 'nivel': 2}, 400, 'prisma desconhecido'),
         ('/api/descartar', {'id': 'abcd', 'motivo': 'qualquer'}, 400, 'motivo inválido'),
-        ('/api/enviar', {'id': 'zzzz'}, 404, 'não encontrado'),
-        ('/api/iniciar', {'id': 'zzzz'}, 400, 'não pode ser iniciado'),
+        ('/api/enviar', {'id': 'zzzz'}, 404, 'não encontrada'),
+        ('/api/iniciar', {'id': 'zzzz'}, 400, 'não pode ser iniciada'),
         ('/api/modelo', {'provedor': 'inventado', 'modelo': 'x'}, 400, 'provedor inválido'),
         ('/api/modelo', {'provedor': 'gemini', 'modelo': 'nome com espaço'}, 400, 'nome de modelo inválido'),
         ('/api/entrega/acender', {'id': 'abc'}, 400, 'id de entrega inválido'),

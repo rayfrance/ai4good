@@ -32,6 +32,8 @@ TABELAS = {
     'fila': {'avanco_id', 'titulo', 'quando', 'oferecida_json'},
     'sessao_evento': {'id', 'quando', 'sessao', 'prisma', 'extensao', 'ferramenta', 'modo', 'lm', 'luz', 'interveio'},
     'chamada_modelo': {'id', 'quando', 'rotulo', 'modelo', 'segundos', 'tokens_in', 'tokens_out', 'registro_json'},
+    'acesso_sessao': {'hash', 'criada_em', 'ultimo_uso'},
+    'acesso_link': {'hash', 'expira'},
 }
 LIVROS = ('lumen', 'avanco_evento', 'nivel_registro', 'trajetoria_versao', 'chamada_modelo')
 # Reescrever um livro: UPDATE, DELETE ou INSERT OR REPLACE / REPLACE INTO (que apaga a linha antiga).
@@ -79,7 +81,7 @@ def test_esquema_criado(privado):
         achadas = {r['name'] for r in con.execute(f'PRAGMA table_info({tabela})')}
         assert colunas <= achadas, (tabela, colunas - achadas)
     meta = dict(con.execute('SELECT chave, valor FROM meta').fetchall())
-    assert meta['esquema'] == str(banco.ESQUEMA_VERSAO) == '1'
+    assert meta['esquema'] == str(banco.ESQUEMA_VERSAO) == '2'
     assert meta['migrado_em']
     pk = [r['name'] for r in con.execute('PRAGMA table_info(entrega_prisma)') if r['pk']]
     assert sorted(pk) == ['entrega_id', 'prisma']
@@ -183,3 +185,23 @@ def test_migracao_roda_uma_vez(privado, monkeypatch):
     banco.conectar().close()
     banco.conectar().close()
     assert chamadas == [True]
+
+
+def test_banco_do_esquema_1_ganha_as_tabelas_de_acesso_sem_migrar_de_novo(privado):
+    con = banco.conectar()
+    with banco.transacao(con):
+        con.execute("INSERT INTO lumen (quando, prisma, lm, luz, fonte, ref) VALUES ('2026-11-01', 'X', 20, 'propria', 'f', '')")
+        con.execute('DROP TABLE acesso_sessao')
+        con.execute('DROP TABLE acesso_link')
+        con.execute("UPDATE meta SET valor = '1' WHERE chave = 'esquema'")
+    migrado = con.execute("SELECT valor FROM meta WHERE chave = 'migrado_em'").fetchone()[0]
+    con.close()
+    con = banco.conectar()  # versão nova do código abre o banco antigo
+    try:
+        meta = dict(con.execute('SELECT chave, valor FROM meta').fetchall())
+        assert meta['esquema'] == '2' and meta['migrado_em'] == migrado
+        nomes = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        assert {'acesso_sessao', 'acesso_link'} <= nomes
+        assert con.execute('SELECT COUNT(*) FROM lumen').fetchone()[0] == 1
+    finally:
+        con.close()

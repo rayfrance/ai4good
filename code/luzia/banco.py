@@ -31,7 +31,7 @@ if os.name == 'nt':
 else:
     import fcntl
 
-ESQUEMA_VERSAO = 1
+ESQUEMA_VERSAO = 2  # 2: acesso_sessao e acesso_link (entrada no painel herdada do agente)
 ESPERA_MS = 5000
 ESPERA_CURTA_MS = 1500  # caminho quente do hook: abrir e gravar cabem no tempo dele
 PENDENTES = 'pendentes.jsonl'
@@ -235,6 +235,16 @@ ESQUEMA = (
         tokens_in INTEGER,
         tokens_out INTEGER,
         registro_json TEXT
+    )""",
+    # Entrada no painel (acesso.py): só o SHA-256 dos tokens; o token em claro nunca é gravado.
+    """CREATE TABLE IF NOT EXISTS acesso_sessao (
+        hash TEXT PRIMARY KEY,
+        criada_em REAL NOT NULL,
+        ultimo_uso REAL NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS acesso_link (
+        hash TEXT PRIMARY KEY,
+        expira REAL NOT NULL
     )""",
     'CREATE INDEX IF NOT EXISTS lumen_prisma_quando ON lumen (prisma, quando)',
     'CREATE INDEX IF NOT EXISTS avanco_prisma_estado ON avanco (prisma, estado)',

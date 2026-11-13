@@ -74,12 +74,10 @@ class Redactor:
         extra_colleagues: list[str] | None = None,
         keep_names: set[str] | None = None,
     ) -> 'Redactor':
-        keep = {k.lower() for k in (keep_names or {'rayane', 'france', 'tasy', 'jev', 'brevo', 'mv'})}
+        # `keep_names`: identidades da própria pessoa (do perfil e de private/entrada.json); nunca nomes no código.
+        keep = {t.casefold() for k in (keep_names or set()) for t in [k, *k.split()]}
         terms = _termos_do_arquivo(path)
-        colleagues = [
-            c for c in (extra_colleagues or [])
-            if len(c) >= 4 and c.lower() not in keep and 'rayane' not in c.lower()
-        ]
+        colleagues = [c for c in (extra_colleagues or []) if len(c) >= 4 and c.casefold() not in keep]
         uniq_terms = sorted({t for t in terms if len(t) >= 3}, key=len, reverse=True)
         uniq_cols = sorted(set(colleagues), key=len, reverse=True)
         return cls(terms=uniq_terms, colleagues=uniq_cols)

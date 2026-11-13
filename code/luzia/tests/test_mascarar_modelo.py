@@ -71,7 +71,7 @@ def test_leituras_vao_mascaradas_com_o_interruptor_ligado_e_a_base_na_tela_segue
 
 def test_colegas_do_repositorio_mascarados_so_com_o_interruptor(prompts, privado, monkeypatch):
     from luzia import triage
-    monkeypatch.setattr(triage, 'repo_authors', lambda repo: ['Pessoa Teste', 'Colega Fulana', 'Fulana'])
+    monkeypatch.setattr(triage, 'repo_authors', lambda repo, excluir=(): ['Pessoa Teste', 'Colega Fulana', 'Fulana'])
     payload = {'skill': {'nome': DDD, 'evidencia': 'Revisou com Colega Fulana o ProdutoZeta.'}}
     pipeline.run_plan(payload, prep_seconds=0, label='t', save_current_state=False, schema='{}', intro='Fatos:')
     assert 'Colega Fulana' in prompts[-1]
@@ -156,3 +156,51 @@ def test_aviso_quando_termos_txt_falta_e_alcance_do_interruptor(servidor, privad
     from pathlib import Path
     js = (Path(server.PAINEL) / 'luzia.js').read_text(encoding='utf-8')
     assert 'E.privacidade?.termos' in js and 'termos.txt' in js and 'agente do chat' in js
+
+
+# ------------------------------------------------------------------ nomes reais fora do código versionado
+def test_codigo_versionado_sem_nomes_reais_da_dona():
+    import re
+    from pathlib import Path
+    raiz = Path(cli.__file__).resolve().parent
+    proibidos = re.compile(r'rayane|cerebro_|rayfrance|\b(?:tasy|jev|brevo)\b', re.IGNORECASE)
+    achados = [f'{p.name}:{n}' for p in raiz.glob('*.py')
+               for n, linha in enumerate(p.read_text(encoding='utf-8').splitlines(), 1) if proibidos.search(linha)]
+    assert not achados, achados
+
+
+def test_colegas_do_git_sem_a_propria_pessoa_nem_partes_do_nome_dela(privado, monkeypatch):
+    from luzia import triage
+    import subprocess as sp
+    saida = 'Pessoa Teste\nColega Fulana\nOutra Teste\nPESSOA TESTE\n'
+    monkeypatch.setattr(sp, 'run', lambda *a, **k: type('R', (), {'stdout': saida})())
+    nomes = triage.repo_authors(privado, excluir=['Pessoa Teste', 'pessoa@exemplo.test'])
+    assert 'Pessoa Teste' not in nomes and 'PESSOA TESTE' not in nomes
+    assert {'Colega Fulana', 'Fulana', 'Colega', 'Outra Teste', 'Outra'} <= set(nomes)
+    assert 'Teste' not in nomes and 'Pessoa' not in nomes  # parte do nome dela nunca vira [COLEGA]
+
+
+def test_redator_da_triagem_nao_mascara_a_propria_pessoa(privado, monkeypatch):
+    from luzia import triage
+    monkeypatch.setattr(triage, 'repo_authors',
+                        lambda repo, excluir=(): [n for n in ('Pessoa Teste', 'Colega Fulana', 'Fulana')
+                                                  if n not in excluir])
+    pipeline.definir_mascarar_modelo(True)
+    r = cli.make_redactor(json.loads((privado / 'entrada.json').read_text(encoding='utf-8')))
+    assert r.redact('Pessoa Teste revisou com Colega Fulana') == 'Pessoa Teste revisou com [COLEGA]'
+    assert privacy.Redactor.from_file(None, extra_colleagues=['Brevo Silva']).colleagues == ['Brevo Silva']
+
+
+def test_triagem_mascarada_uma_vez_so(privado, monkeypatch, prompts):
+    from luzia import triage
+    (privado / 'entrada.json').write_text(json.dumps({'author': 'Pessoa Teste', 'incluir_historico_ia': False,
+                                                      'objetivo': 'Plena no ProdutoZeta'}), encoding='utf-8')
+    monkeypatch.setattr(triage, 'my_commits', lambda *a, **k: [])
+    chamadas = []
+    original = privacy.mascarar_estrutura
+    monkeypatch.setattr(pipeline, 'mascarar_estrutura', lambda *a, **k: chamadas.append(1) or original(*a, **k))
+    monkeypatch.setattr(pipeline, 'save_state', lambda *a, **k: None)
+    pipeline.definir_mascarar_modelo(True)
+    _, rec, _ = cli.execute_triage(privado / 'entrada.json')
+    assert 'ProdutoZeta' not in prompts[-1] and '[EMPRESA/PRODUTO]' in prompts[-1]
+    assert chamadas == [] and rec['mascarar_modelo'] is True  # o payload da triagem já sai mascarado do build_payload

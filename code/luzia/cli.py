@@ -42,12 +42,11 @@ def load_cfg(entrada_path: Path) -> dict:
 
 
 def make_redactor(cfg: dict) -> Redactor:
-    """Redator da triagem: só mascara com o interruptor `mascarar_modelo` ligado (padrão: envia real)."""
+    """Redator da triagem: só mascara com o interruptor `mascarar_modelo` ligado (padrão: envia real); mesmo redator do
+    envio ao modelo (`pipeline.redator_modelo`), que nunca mascara as identidades da própria pessoa."""
     if not pipeline.mascarar_modelo():
         return SemMascara()
-    repo = Path(cfg['repo']) if cfg.get('repo') else None
-    colleagues = triage.repo_authors(repo) if repo and repo.exists() else []
-    return Redactor.from_file(pipeline.PRIVATE / 'termos.txt', extra_colleagues=colleagues)
+    return pipeline.redator_modelo()
 
 
 def base_triagem(mascarado: bool) -> str:
@@ -82,14 +81,14 @@ def execute_triage(entrada_path: Path, rotulo: str = 'plugin-triage', save_state
         except Exception:
             inputs['github_data'] = {}
     if cfg.get('incluir_historico_ia', True):
-        inputs['ai_history'] = triage.shared_ai_history(vault_dir=Path(cfg.get('vault', r'C:\Repositorio\Cerebro_Rayane')))
+        inputs['ai_history'] = triage.shared_ai_history(vault_dir=Path(cfg['vault']) if cfg.get('vault') else None)
     else:
         inputs['ai_history'] = {}
 
     payload = pipeline.build_payload(inputs, redactor)
     result, record = pipeline.run_plan(
         payload, prep_seconds=time.perf_counter() - t0, label=rotulo, hits=dict(redactor.hits),
-        save_current_state=save_state,
+        save_current_state=save_state, ja_mascarado=not isinstance(redactor, SemMascara),
     )
     return result.plan, record, dict(redactor.hits)
 

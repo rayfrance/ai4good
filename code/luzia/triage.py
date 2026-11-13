@@ -3,10 +3,10 @@
 Fontes autorizadas pela pessoa desenvolvedora:
 1. Declaração de nível atual, objetivo, horizonte e uso de IA;
 2. Currículo (PDF ou texto) e LinkedIn exportado (PDF);
-3. Perfil público do GitHub (`rayfrance`);
+3. Perfil público do GitHub (campo `github` de private/entrada.json);
 4. Histórico compartilhado entre as IAs utilizadas (Claude Code `~/.claude`,
-   Codex `~/.codex` e vault compartilhado `C:/Repositorio/Cerebro_Rayane`, onde
-   a pessoa registra suas impressões, leituras como DDD e aprendizados do trabalho);
+   Codex `~/.codex` e o vault da pessoa, campo `vault` de private/entrada.json, onde
+   ela registra suas impressões, leituras como DDD e aprendizados do trabalho);
 5. Metadados dos commits da própria pessoa no repositório local autorizado
    (repositório corporativo local). O código-fonte e o diff nunca são lidos para o modelo.
 """
@@ -90,7 +90,7 @@ def github_profile(username: str, timeout: float = 8.0) -> dict:
 
 
 def shared_ai_history(
-    vault_dir: Path = Path(r'C:\Repositorio\Cerebro_Rayane'),
+    vault_dir: Path | None = None,
     home_dir: Path | None = None,
 ) -> dict:
     """Lê o histórico compartilhado entre Claude Code, Codex e o vault de impressões (Gemini/Obsidian).
@@ -106,9 +106,9 @@ def shared_ai_history(
         'plugins_agentes_ativos': [],
     }
 
-    # 1. Vault compartilhado (Cerebro_Rayane: leitura-ddd, topicos-avancados-ia)
-    frentes = vault_dir / '01-frentes'
-    if frentes.exists():
+    # 1. Vault compartilhado da pessoa (só se `vault` estiver em private/entrada.json)
+    frentes = Path(vault_dir) / '01-frentes' if vault_dir else None
+    if frentes and frentes.exists():
         for md in sorted(frentes.rglob('*.md')):
             raw = md.read_text(encoding='utf-8', errors='replace')
             # Remove o bloco de revisão automática da IA para ficar só com a impressão/registro da autora
@@ -164,8 +164,12 @@ def shared_ai_history(
     return out
 
 
-def repo_authors(repo: Path) -> list[str]:
-    """Nomes dos demais autores do repositório, para mascarar colegas."""
+def repo_authors(repo: Path, excluir: list[str] | tuple[str, ...] = ()) -> list[str]:
+    """Nomes dos demais autores do repositório, para mascarar colegas. `excluir`: identidades da própria pessoa
+    (nome ou e-mail); ela e as palavras do nome dela nunca entram na lista."""
+    from .entregas import casa_identidade
+    minhas = [i for i in excluir if i and '@' not in i]
+    tokens = {t.casefold() for i in minhas for t in [i, *i.split()]}
     out = subprocess.run(
         ['git', '-C', str(repo), 'log', '--all', '--format=%an'],
         capture_output=True, text=True, encoding='utf-8', errors='replace', check=True,
@@ -173,9 +177,9 @@ def repo_authors(repo: Path) -> list[str]:
     names = set()
     for name in out.splitlines():
         name = name.strip()
-        if name and 'rayane' not in name.lower():
+        if name and not any(casa_identidade(i, name, '') for i in minhas):
             names.add(name)
-            names.update(p for p in name.split() if len(p) >= 4)
+            names.update(p for p in name.split() if len(p) >= 4 and p.casefold() not in tokens)
     return sorted(names)
 
 

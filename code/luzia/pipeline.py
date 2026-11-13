@@ -57,6 +57,13 @@ def termos_configurados() -> int:
     return len(_termos_do_arquivo(PRIVATE / 'termos.txt'))
 
 
+def identidades_da_pessoa(cfg: dict | None = None) -> list[str]:
+    """Nomes e e-mails da própria pessoa: `author` de private/entrada.json e as identidades guardadas no perfil."""
+    if cfg is None:
+        cfg = read_json(PRIVATE / 'entrada.json', {})
+    return _identidades_da_pessoa(cfg if isinstance(cfg, dict) else {})
+
+
 def _identidades_da_pessoa(cfg: dict) -> list[str]:
     bruto = cfg.get('author') if isinstance(cfg, dict) else None
     ids = [bruto] if isinstance(bruto, str) else [a for a in (bruto or []) if isinstance(a, str)]
@@ -74,12 +81,12 @@ def redator_modelo() -> Redactor:
     cfg = read_json(PRIVATE / 'entrada.json', {})
     cfg = cfg if isinstance(cfg, dict) else {}
     repo = Path(cfg['repo']) if cfg.get('repo') else None
+    minhas = _identidades_da_pessoa(cfg)
     try:
-        colegas = triage.repo_authors(repo) if repo and repo.exists() else []
+        colegas = triage.repo_authors(repo, excluir=minhas) if repo and repo.exists() else []
     except (OSError, subprocess.CalledProcessError):
         colegas = []
-    tokens = {t.casefold() for i in _identidades_da_pessoa(cfg) for t in [i, *i.split()]}
-    return Redactor.from_file(PRIVATE / 'termos.txt', extra_colleagues=[c for c in colegas if c.casefold() not in tokens])
+    return Redactor.from_file(PRIVATE / 'termos.txt', extra_colleagues=colegas, keep_names=set(minhas))
 
 
 def para_o_modelo(payload: dict) -> tuple[dict, bool, int]:
@@ -251,6 +258,7 @@ def save_state(payload: dict, plan: dict, record: dict, hits: dict) -> None:
             'sessoes_codex': len((payload.get('historico_compartilhado_ia') or {}).get('sessoes_codex', [])),
         },
         'plano': plan,
+        # Nome mantido por compatibilidade: com `mascarar_modelo` desligado (padrão), guarda dados reais (só no banco privado).
         'payload_anonimizado': payload,
     }
     _gravar_estado(state)
@@ -284,13 +292,18 @@ def run_plan(
     save_current_state: bool = True,
     schema: str | None = None,
     intro: str | None = None,
+    ja_mascarado: bool = False,
 ) -> tuple[planner.LLMResult, dict]:
     """Chama o modelo e devolve a resposta com o registro de custo (sem dados pessoais).
 
     Único caminho até o modelo: com o interruptor `mascarar_modelo` ligado, o payload é mascarado aqui antes de sair.
+    `ja_mascarado`: a triagem já passou o payload pelo redator do envio (`build_payload`); não mascara de novo.
     """
     t0 = time.perf_counter()
-    enviado, mascarou, n_mascarados = para_o_modelo(payload)
+    if ja_mascarado:
+        enviado, mascarou, n_mascarados = payload, True, sum((hits or {}).values())
+    else:
+        enviado, mascarou, n_mascarados = para_o_modelo(payload)
     if mascarou:
         intro = (intro or planner.INTRO_PADRAO) + ' (mascarados localmente: marcadores entre colchetes substituem nomes)'
     prompt = planner.build_prompt(enviado, schema or planner.TRIAGE_SCHEMA, intro)

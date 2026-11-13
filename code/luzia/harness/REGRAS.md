@@ -19,6 +19,8 @@ Para receber o bloco com o caminho certo desta máquina: `python -m luzia.instal
   - "Acender avanços para provar a propriedade de uma entrega": `LUZIA acender-entrega <id>` (2 avanços: P3 e P4)
   - "Atualizar as leituras vencidas (cada leitura mostra base, modelo e data)": `LUZIA leituras`
   - "Trocar o modelo / o agente": `LUZIA modelo usar <provedor> <modelo>` (a chave nunca pelo chat: painel ou `.env`) e `LUZIA agente <nome>`
+  - "Esqueci a senha do painel": `LUZIA senha` (só rode `LUZIA senha apagar` depois do sim explícito da pessoa; nunca peça nem repita a senha no chat)
+  - "Mascarar (ou não) o que vai para o modelo": `LUZIA privacidade mascarar-modelo on|off` (padrão: desligado)
   - "Declarar nível de partida (0–5)": `LUZIA nivel "<prisma>" <0-5>`
   - "Plano em horizontes / próximo nível": `LUZIA next-level` · Dossiê formal: `LUZIA dossie`
 - Toda saída pode terminar com `LUZIA_CLI`, `LUZIA_PERGUNTA` e `LUZIA_BOTOES` (JSON com `rotulo`, `descricao`, `rodar`). Não mostre essas linhas brutas: apresente as opções ao usuário (ou lista numerada) e, após a escolha, rode `LUZIA <rodar>`.
@@ -29,7 +31,7 @@ Para receber o bloco com o caminho certo desta máquina: `python -m luzia.instal
   - Opcional: `--sessao <id>` (sem ele, vale um id por pasta e por dia).
   - Regras (as mesmas do hook): +10 lm de luz refletida quando você aplicou o conceito, +20 lm de luz própria quando a pessoa o dirigiu no pedido, uma vez por prisma por sessão, teto de 40 lm por prisma por dia, lampejo só em "em foco, com lampejos". Se a saída trouxer um lampejo, mostre no fim da resposta e ofereça os botões "Responder agora" e "Guardar para depois". Se não trouxer nada novo, não comente.
 - Nível pronto: só rode `LUZIA subir "<prisma>"` com o **sim explícito** da pessoa.
-- Painel local: `LUZIA career-map` (`http://localhost:8501`).
+- Painel local: `LUZIA career-map` (`http://localhost:8501`). O painel pede uma senha local (criada no primeiro acesso); o chat não pede, porque já roda como a pessoa no sistema. Os dados reais (empresa, colegas, tickets) aparecem para ela no painel e no chat, mas nunca em arquivo versionado.
 ```
 
 Os hooks (`PostToolUse`, `UserPromptSubmit`, `SessionStart`) rodam nativamente só no Claude Code. Nos outros harnesses, o comando `LUZIA foco` (acima) dá o mesmo reconhecimento passivo, e o resto da Luzia vem dos comandos `LUZIA`.

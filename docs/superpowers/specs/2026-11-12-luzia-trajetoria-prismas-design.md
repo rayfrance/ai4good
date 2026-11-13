@@ -55,11 +55,12 @@ A troca vale em toda superfície visível: painel, saídas da CLI, comandos, ski
 - Perder progresso (lúmens, avanços, níveis) por mudança de trajetória, migração ou escrita concorrente.
 - Exigir abrir o painel para alguma ação.
 - Nomes infantis ou fantasiosos além do vocabulário acima.
-- Nome da empresa, de produto interno, clientes, colegas, e-mails, números de PR/ticket ou hashes em arquivo versionado ou na tela.
+- Nome da empresa, de produto interno, clientes, colegas, e-mails, números de PR/ticket ou hashes em arquivo versionado.
+- Dados reais na tela sem login. (Decidido com a Rayane em 13/11/2026: a proteção é por login, não por máscara; esses dados ficam visível só para quem fez login (painel com senha local) e no chat da própria pessoa; nunca em arquivo versionado; envio ao modelo conforme o interruptor `mascarar_modelo` (padrão: desligado, envia real). Hashes de commit continuam só no banco privado. Sem modo apresentação.)
 
 ## 4. Restrições
 - Local, Python da biblioteca padrão (sem dependência nova para persistência), Windows primeiro, funciona sem internet exceto nas chamadas ao modelo.
-- LGPD: tudo pessoal em `code/luzia/private/` (gitignored). O mascaramento existente (`privacy.Redactor`) continua valendo antes de qualquer envio ao modelo.
+- LGPD: tudo pessoal em `code/luzia/private/` (gitignored). O painel exige a senha local (hash PBKDF2-HMAC-SHA256 em `private/acesso.json`; sessão em memória, cookie `HttpOnly; SameSite=Strict`, 30 min sem uso; 5 erros travam 60 s; `senha` no chat redefine). O mascaramento (`privacy.Redactor`) vale só no envio ao modelo e só com o interruptor `mascarar_modelo` ligado (Ajustes no painel ou `privacidade mascarar-modelo on|off` no chat). O foco continua sem guardar texto de prompt nem código; `erros.log` guarda só o tipo do erro.
 - Regras de jogo já decididas continuam (ver `docs/luzia-ux.md`): valor do avanço = esforço + lacuna + prioridade (10–100 lm); rubrica 4/3/2 = 100/75/50%, 0–1 tente de novo; uma revisita (só a diferença); registrar exige avanço iniciado; passivos +10 refletida / +20 própria / conversão até +30 uma vez por cartão; teto 40 lm passivos por prisma por dia; subir de nível: 150 lm desde o último nível, ≥40% luz própria, ≥1 avanço conquistado, e **só com o sim da pessoa**.
 - Agnóstico de harness: toda saída da CLI termina com `LUZIA_CLI` / `LUZIA_PERGUNTA` / `LUZIA_BOTOES` (protocolo atual).
 - Plugin do Claude Code continua válido (`claude plugin validate`).
@@ -84,8 +85,8 @@ A troca vale em toda superfície visível: painel, saídas da CLI, comandos, ski
 | lumen | quando, prisma, lm, luz (própria/refletida), fonte (avanço, passivo-prompt, passivo-refletida, conversão), referência (avanço, cartão, sessão, entrega) |
 | nivel_subido | prisma, de → para, quando, lm e % luz própria no momento |
 | lampejo | prisma, sessão, quando, estado (aberto/convertido/guardado) |
-| entrega | título mascarado, início, fim, nº commits, arquivos, linhas, áreas, ids privados de PR/ticket, fonte de detecção |
-| commit | hash (privado), data, mensagem mascarada, arquivos, linhas, áreas; ligado à entrega |
+| entrega | título real, início, fim, nº commits, arquivos, linhas, áreas, ids de PR/ticket, fonte de detecção |
+| commit | hash (privado), data, mensagem real, arquivos, linhas, áreas; ligado à entrega |
 | entrega_prisma | prismas que a entrega atravessa, com a evidência da detecção (quais termos) |
 | leitura | alvo (prisma, entrega, trajetória, pedido), texto, base (fatos usados, em JSON), hash da base, modelo, data |
 | fila | avanços enviados do painel ao agente, sessões em que já foram oferecidos |
@@ -126,13 +127,14 @@ Decidido com a Rayane: uma entrega é um **ticket** no DevOps; por enquanto rast
 - propriedade P1–P4 com base: P1 geral (prompts), **P2 calculado sobre a entrega inteira** (regra atual aplicada a arquivos, linhas e áreas somados), P3/P4 só com evidência;
 - **Leitura da Luzia sobre esta entrega** (substitui o texto de "risco"): 1–2 frases geradas só a partir dos fatos, com "com base em …", modelo e data. Visual de observação assinada, não de alerta.
 
-Títulos de entrega mascarados; números de PR/ticket e hashes nunca na tela.
+Títulos e mensagens de commit reais, com os números de PR/ticket: visível só para quem fez login (painel com senha local) e no chat da própria pessoa; nunca em arquivo versionado; envio ao modelo conforme o interruptor `mascarar_modelo` (padrão: desligado, envia real). Os números também ficam em `ids_privados`; hashes nunca saem do banco. Títulos mascarados por versões antigas são regravados a partir do git na próxima leitura das entregas, sem duplicar.
 
 ## 8. Leituras com base (fim do texto solto)
 Toda leitura de IA guarda os fatos usados, o hash desses fatos, o modelo e a data, e aparece como "Leitura da Luzia · com base em: … · modelo · data".
 - **Por prisma** (substitui o diagnóstico geral repetido): fatos = commits e entregas que passaram pelo prisma, avanços e notas, lúmens próprios × refletidos, proporção dirigido × feito pelo agente ("como você usa IA aqui", calculado), nível e meta, e o trecho da triagem sobre aquele prisma (evidência e currículo × prática). Texto curto: o que a Luzia vê e o próximo foco.
 - **Por entrega**: ver seção 7.
 - **Por pedido de mudança**: ver seção 6.
+- A base guarda os fatos reais (visível só para quem fez login (painel com senha local) e no chat da própria pessoa; nunca em arquivo versionado; envio ao modelo conforme o interruptor `mascarar_modelo` (padrão: desligado, envia real)); com o interruptor ligado, o que sai para o modelo é mascarado em `pipeline.run_plan`, e a base guardada continua real.
 - Regeneração só quando o hash da base muda (nível subido, entrega nova, avanço conquistado) ou a pedido da pessoa; leituras vencidas são renovadas **em lote numa chamada** para poupar tokens. Sem base suficiente, a tela mostra só os fatos e "a Luzia ainda não tem base para uma leitura".
 
 ## 9. Avanços: filtros e paridade
@@ -154,6 +156,7 @@ Toda leitura de IA guarda os fatos usados, o hash desses fatos, o modelo e a dat
 - **Observador (caminho quente):** abrir o banco e gravar o evento deve caber no tempo do hook. Se o banco estiver travado além do `busy_timeout`, o evento vai para `private/pendentes.jsonl` e é absorvido na próxima escrita bem-sucedida (nenhum evento se perde, a sessão nunca trava).
 - **Migração:** pode disparar de qualquer ponto de entrada (hook, CLI, painel), dentro de uma transação exclusiva com uma marca de versão do esquema; quem chega depois só confere a marca.
 - **Sem modelo ou sem internet:** a tela mostra os fatos medidos e "leitura indisponível"; nenhum texto montado por modelo de frase finge ser leitura da Luzia.
+- **Login e dados visíveis (13/11/2026, decidido com a Rayane):** dados sensíveis (empresa, módulos, clientes, colegas, números de ticket/PR) ficam visíveis para a usuária autenticada, no painel e no chat. Painel com senha local criada no primeiro acesso (mínimo 8 caracteres); toda rota `/api` fora `ping` e `acesso/*` devolve 401 sem sessão válida; chat e CLI não pedem senha (já rodam como a pessoa no sistema). O envio ao modelo vai sem máscara por padrão; o interruptor `mascarar_modelo` volta a mascarar. Arquivos versionados nunca recebem dados reais. Sem modo apresentação.
 
 ## 12. Deixado ao construtor
 Nomes de tabelas e colunas, índices, formato exato da foto de versão da trajetória, cores das faixas do espectro dentro da paleta, se as chaves JSON dos esquemas do modelo mudam e como dividir módulos.

@@ -16,17 +16,18 @@
 | `pedidos.py` | fluxo formal de pedidos de mudança na trajetória (`abrir`, `propor`, `aceitar`, `recusar`, `listar`) |
 | `entregas.py` | detecção local via `git` (PR merges, tickets, commits), prismas atravessados, ligação com lúmens/avanços e detalhe completo |
 | `leituras.py` | geração em lote e cache de leituras assinadas por IA com base determinística, hash, modelo e data (prisma, entrega e pedido) |
-| `cli.py` | comandos (`hoje`, `trajetoria`, `pedido`, `avancos`, `acender`, `entregas`, `entrega`, `acender-entrega`, `identidade`, `leituras`, `foco`, `modelo usar`, `agente`, `nivel`, `fazer`, `registrar`, `subir`, `dossie`...); toda saída termina em `LUZIA_BOTOES` |
+| `cli.py` | comandos (`hoje`, `trajetoria`, `pedido`, `avancos`, `acender`, `entregas`, `entrega`, `acender-entrega`, `identidade`, `leituras`, `foco`, `modelo usar`, `agente`, `nivel`, `fazer`, `registrar`, `subir`, `dossie`, `senha`, `privacidade`...); toda saída termina em `LUZIA_BOTOES` |
 | `jogo.py` | avanços, lúmens, níveis, lampejos, tetos diários, ritmo e dossiê formal de evidências |
 | `acoes.py` | catálogo de avanços derivado do plano, fila do painel, evidências P3/P4 e prompt autossuficiente |
 | `propriedade.py` | propriedade intelectual das entregas (P1–P4 e `p2_entrega` sobre a entrega consolidada) |
 | `observer.py` | foco e hooks `SessionStart`, `UserPromptSubmit` e `PostToolUse` (local, sem modelo) com envio de lampejos; `reconhecer_em` é a única implementação do reconhecimento, usada também pelo comando `foco` da CLI (agentes sem hooks) |
 | `statusline.py` | linha de status do Claude Code com estado do foco e prisma mais próximo (só nos repositórios autorizados) |
-| `server.py` + `painel/` | painel local em `127.0.0.1:8501` (**Hoje · Trajetória · Avanços · Entregas · Ajustes**), espectro de 5 faixas e proteção Host/Origin/JSON |
+| `server.py` + `painel/` | painel local em `127.0.0.1:8501` (**Hoje · Trajetória · Avanços · Entregas · Ajustes**), espectro de 5 faixas, proteção Host/Origin/JSON e login: toda rota `/api` fora `ping` e `acesso/*` exige sessão (401) |
+| `acesso.py` | senha local do painel (PBKDF2-HMAC-SHA256, 600 000 iterações, sal de 16 bytes, em `private/acesso.json`), sessões só em memória (30 min sem uso), trava de 60 s após 5 erros e redefinição pelo comando `senha` |
 | `planner.py`, `pipeline.py`, `modelo.py` | esquemas JSON estruturados, chamadas ao modelo configurável e registro de custo em `runs.jsonl` e `chamada_modelo` |
-| `triage.py`, `privacy.py` | leitura das fontes locais e mascaramento LGPD (`Redactor`) |
+| `triage.py`, `privacy.py` | leitura das fontes locais e mascaramento LGPD (`Redactor`, `mascarar_estrutura`), usado só no envio ao modelo com o interruptor `mascarar_modelo` ligado (`pipeline.run_plan`) |
 | `arquivos.py` | leitura/escrita atômica para arquivos de configuração (`observer.json`, `entrada.json`, etc.), `LUZIA_PRIVATE` e registro seguro de erros |
 | `commands/`, `skills/`, `hooks/`, `.claude-plugin/`, `.*-plugin/` | plugin multi-harness (fonte única em `code/luzia`; o instalador resolve `${CLAUDE_PLUGIN_ROOT}` quando usado fora do sistema de plugins) |
 
 ## Privado (fora do git)
-`private/` (ou `LUZIA_PRIVATE` em testes): `luzia.db` (fonte única do estado do jogo), `pendentes.jsonl` (spool temporário sob contenção), `migracao-AAAAMMDD/` (backups dos JSON legados), `entrada.json`, `observer.json`, `modelo.json`, `termos.txt` e `erros.log`. `outputs/sem2/career_state.json` é apenas a foto histórica do seminário. Nomes da empresa, produtos internos, clientes, colegas, e-mails, números privados de PR/ticket e hashes nunca entram em arquivo versionado ou na tela.
+`private/` (ou `LUZIA_PRIVATE` em testes): `luzia.db` (fonte única do estado do jogo), `pendentes.jsonl` (spool temporário sob contenção), `migracao-AAAAMMDD/` (backups dos JSON legados), `entrada.json`, `observer.json`, `modelo.json`, `acesso.json` (só o hash da senha do painel e a versão que derruba sessões), `termos.txt` e `erros.log`. `outputs/sem2/career_state.json` é apenas a foto histórica do seminário. Nomes da empresa, produtos internos, clientes, colegas, e-mails e números de PR/ticket nunca entram em arquivo versionado; na tela, aparecem só para quem entrou no painel com a senha (e no chat da própria pessoa). Hashes de commit ficam só no banco. O envio ao modelo vai real por padrão e mascarado com `mascarar_modelo` ligado (`perfil('privacidade')`).

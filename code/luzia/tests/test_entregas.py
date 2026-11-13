@@ -148,7 +148,8 @@ def test_janela_90_dias_e_incremental(con, repo, privado):
     assert entregas.atualizar(con, dias=120) == {'novas': 0, 'atualizadas': 0}
 
 
-def test_titulo_mascarado_sem_ids(con, repo, privado):
+def test_titulo_e_mensagem_reais_com_numeros_e_ids_guardados(con, repo, privado):
+    """A dona dos dados vê o título real (empresa, colegas, tickets); os números também ficam em ids_privados."""
     repo.git('checkout', '-q', '-b', 'feat')
     repo.commit('feat: ProdutoZeta integra #12 com Colega Fulana', 'src/Z.cs', quando=_dias(6))
     repo.commit('refactor: ajusta AB#777', 'src/Y.cs', quando=_dias(5))
@@ -160,14 +161,17 @@ def test_titulo_mascarado_sem_ids(con, repo, privado):
     entregas.atualizar(con)
     titulos = [r['titulo'] for r in con.execute('SELECT titulo FROM entrega')]
     assert len(titulos) >= 3
-    for t in titulos:
-        assert '12' not in t and '777' not in t and 'ProdutoZeta' not in t and 'Fulana' not in t
-        assert h[:7] not in t
-    for r in con.execute('SELECT mensagem FROM commit_'):
-        m = r['mensagem']
-        assert '#12' not in m and 'ProdutoZeta' not in m and 'AB#' not in m and 'Fulana' not in m
+    assert 'ProdutoZeta de Colega Fulana (#12)' in titulos and 'fix: ProdutoZeta quebrado #12' in titulos
+    assert all(h[:7] not in t for t in titulos)  # hash nunca vira título
+    mensagens = [r['mensagem'] for r in con.execute('SELECT mensagem FROM commit_')]
+    assert 'feat: ProdutoZeta integra #12 com Colega Fulana' in mensagens and 'refactor: ajusta AB#777' in mensagens
     ids = [json.loads(r['ids_privados_json']) for r in con.execute('SELECT ids_privados_json FROM entrega')]
     assert any('12' in i for i in ids)
+    eid = con.execute("SELECT id FROM entrega WHERE fonte = 'merge-pr'").fetchone()[0]
+    det = entregas.detalhe(con, eid, incluir_leitura=False)
+    assert det['titulo'] == 'ProdutoZeta de Colega Fulana (#12)' and '12' in det['ids']
+    assert any('#12' in c['mensagem'] for c in det['commits'])
+    assert all(h not in json.dumps(det, ensure_ascii=False) for h in [h, h[:7]])  # hashes ficam só no banco
 
 
 def test_commits_soltos_depois_mergeados_nao_duplicam(con, repo, privado):
@@ -260,8 +264,8 @@ def test_janela_refaz_a_busca_quando_nada_casou_ou_identidade_mudou(con, repo, p
     assert entregas.atualizar(con)['novas'] == 1
 
 
-def test_titulo_do_pr_do_github_vem_do_ramo_sem_numeros_de_ticket(repo):
-    """O título do `Merge pull request` sai do nome do ramo, que costuma levar a chave do ticket."""
+def test_titulo_do_pr_do_github_vem_do_ramo_com_a_chave_do_ticket(repo):
+    """O título do `Merge pull request` sai do nome do ramo, com a chave do ticket (visível para a dona dos dados)."""
     repo.git('checkout', '-q', '-b', 'feature/ABC-1234-ajusta-agregado-2')
     repo.commit('feat: agregado', 'src/Pedido.cs', quando=_dias(6))
     repo.git('checkout', '-q', 'main')
@@ -269,15 +273,14 @@ def test_titulo_do_pr_do_github_vem_do_ramo_sem_numeros_de_ticket(repo):
              'feature/ABC-1234-ajusta-agregado-2', quando=_dias(5))
     pr = [e for e in entregas.detectar(repo.pasta, [EU], _desde()) if e['fonte'] == 'merge-pr']
     assert len(pr) == 1
-    assert not any(c.isdigit() for c in pr[0]['titulo']), pr[0]['titulo']
-    assert 'ABC' not in pr[0]['titulo'] and 'ajusta agregado' in pr[0]['titulo']
+    assert pr[0]['titulo'] == 'ABC-1234 ajusta agregado 2', pr[0]['titulo']
     assert '4821' in pr[0]['ids_privados']
 
 
-def test_chave_de_ticket_no_titulo_de_commit_e_removida(repo):
+def test_chave_de_ticket_no_titulo_de_commit_fica_visivel(repo):
     repo.commit('feat: ABC-1234 ajusta agregado', 'src/A.cs', quando=_dias(3))
     titulos = [e['titulo'] for e in entregas.detectar(repo.pasta, [EU], _desde())]
-    assert titulos[-1] == 'feat: ajusta agregado'
+    assert titulos[-1] == 'feat: ABC-1234 ajusta agregado'
 
 
 @pytest.mark.parametrize('bruto, esperado, id_', [
@@ -306,7 +309,7 @@ def test_limpar_ids_mantem_numeros_do_texto_e_tag():
     assert entregas.tag_inicial('ajusta [x]') is None
 
 
-def test_entrega_azure_tira_numero_do_titulo_e_guarda_em_ids(repo):
+def test_entrega_azure_mantem_numero_no_titulo_e_guarda_em_ids(repo):
     repo.git('checkout', '-q', '-b', 'feat')
     repo.commit('feat: mapa', 'src/M.cs', quando=_dias(6))
     repo.git('checkout', '-q', 'main')
@@ -315,19 +318,40 @@ def test_entrega_azure_tira_numero_do_titulo_e_guarda_em_ids(repo):
     repo.commit('Task 77 - ajusta 3 telas v2', 'src/T.cs', quando=_dias(2))
     achadas = entregas.detectar(repo.pasta, [EU], _desde())
     pr = next(e for e in achadas if e['fonte'] == 'merge-pr')
-    assert pr['titulo'] == 'corrigir layout do mapa ao aplicar zoom'
+    assert pr['titulo'] == 'Bug 14988: corrigir layout do mapa ao aplicar zoom'
     assert pr['ids_privados'] == ['123', '14988']
     solto = next(e for e in achadas if e['fonte'] == 'commit' and e['ids_privados'])
-    assert solto['titulo'] == 'ajusta 3 telas v2' and solto['ids_privados'] == ['77']
+    assert solto['titulo'] == 'Task 77 - ajusta 3 telas v2' and solto['ids_privados'] == ['77']
 
 
-def test_titulo_guardado_e_limpo_na_proxima_atualizacao(con, repo, privado):
-    repo.commit('feat: algo', 'src/A.cs', quando=_dias(3))
+def test_titulo_mascarado_por_versao_antiga_e_regravado_do_git_sem_duplicar(con, repo, privado):
+    from luzia import jogo
+    repo.commit('feat: ProdutoZeta algo Bug 14988', 'src/A.cs', quando=_dias(40))
+    repo.commit('fix: outra coisa #321', 'src/B.cs', quando=_dias(3))
     _entrada(privado, repo)
     entregas.atualizar(con)
-    con.execute("UPDATE entrega SET titulo = 'Bug 14988: algo antigo 3 telas', ids_privados_json = '[]'")
+    total = con.execute('SELECT COUNT(*) FROM entrega').fetchone()[0]
+    # Como uma versão antiga deixava: título e mensagem mascarados, janela sem a marca de títulos reais.
+    con.execute("UPDATE entrega SET titulo = 'feat: [EMPRESA/PRODUTO] algo' WHERE titulo LIKE 'feat: ProdutoZeta%'")
+    con.execute("UPDATE commit_ SET mensagem = 'feat: [EMPRESA/PRODUTO] algo' WHERE mensagem LIKE 'feat: ProdutoZeta%'")
+    con.execute("UPDATE entrega SET titulo = 'fix: outra coisa' WHERE titulo LIKE 'fix: outra coisa%'")
+    janela = trajetoria.perfil_ler(con, 'entregas_desde')
+    janela.pop('titulos')
+    trajetoria.perfil_gravar(con, 'entregas_desde', janela)
     con.commit()
-    entregas.atualizar(con)
-    r = con.execute('SELECT titulo, ids_privados_json FROM entrega').fetchone()
-    assert r['titulo'] == 'algo antigo 3 telas'
-    assert '14988' in json.loads(r['ids_privados_json'])
+    eid = con.execute("SELECT id FROM entrega WHERE titulo = 'feat: [EMPRESA/PRODUTO] algo'").fetchone()[0]
+    jogo.lancar(DDD, 20, 'propria', 'feixe', 'feat: [EMPRESA/PRODUTO] algo')  # lúmen antigo citava o título mascarado
+
+    assert entregas.atualizar(con) == {'novas': 0, 'atualizadas': 0}
+    assert con.execute('SELECT COUNT(*) FROM entrega').fetchone()[0] == total
+    titulos = {r['titulo'] for r in con.execute('SELECT titulo FROM entrega')}
+    assert {'feat: ProdutoZeta algo Bug 14988', 'fix: outra coisa #321'} <= titulos
+    assert not any('[EMPRESA/PRODUTO]' in t for t in titulos)
+    assert con.execute("SELECT mensagem FROM commit_ WHERE entrega_id = ?", (eid,)).fetchone()[0] == \
+        'feat: ProdutoZeta algo Bug 14988'
+    assert '14988' in json.loads(con.execute('SELECT ids_privados_json FROM entrega WHERE id = ?', (eid,)).fetchone()[0])
+    det = entregas.detalhe(con, eid, incluir_leitura=False)
+    assert det['titulo'] == 'feat: ProdutoZeta algo Bug 14988'
+    assert any(l['ref'] == 'feat: [EMPRESA/PRODUTO] algo' for l in det['lumens_ligados'])  # o lúmen segue ligado
+    assert entregas.atualizar(con) == {'novas': 0, 'atualizadas': 0}  # a releitura inteira acontece uma vez só
+    assert trajetoria.perfil_ler(con, 'entregas_desde')['titulos'] == 'reais'

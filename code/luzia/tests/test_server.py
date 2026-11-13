@@ -270,7 +270,7 @@ def test_estado_sem_entrega_git_nao_usa_tarefas_da_ia(api):
     diag = st['entregas_diagnostico']
     assert diag['repo_configurado'] is True and diag['identidades'] == ['Pessoa Teste']
     c, r = api('POST', '/api/identidade', {'identidade': 'outra@exemplo.test'})
-    assert c == 200 and r['identidades'] == ['Pessoa Teste', 'o***@***']
+    assert c == 200 and r['identidades'] == ['Pessoa Teste', 'outra@exemplo.test']
     c, r = api('POST', '/api/identidade', {'identidade': ''})
     assert c == 400 and r['erro']
 

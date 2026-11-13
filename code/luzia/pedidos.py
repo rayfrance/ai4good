@@ -19,8 +19,7 @@ import sqlite3
 import time
 from datetime import datetime
 
-from . import acoes, arquivos, banco, entregas, jogo, leituras, modelo, pipeline, planner, trajetoria
-from .privacy import Redactor
+from . import acoes, arquivos, banco, jogo, leituras, modelo, pipeline, planner, trajetoria
 
 TIPOS = ('incluir', 'arquivar', 'reativar', 'mudar_meta')
 
@@ -29,12 +28,9 @@ def _agora() -> str:
     return datetime.now().isoformat(timespec='seconds')
 
 
-def _redator() -> Redactor:
-    return Redactor.from_file(arquivos.PRIVATE / 'termos.txt')
-
-
 def _limpar(texto: str) -> str:
-    return _redator().redact(entregas._limpar(str(texto or '')))
+    """Texto real (visível para quem entrou); o envio ao modelo mascara conforme `mascarar_modelo`."""
+    return str(texto or '').strip()
 
 
 def _propostas_de(proposta_json: str | None) -> tuple[dict | None, list[dict]]:

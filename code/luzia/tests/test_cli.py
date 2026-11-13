@@ -382,12 +382,12 @@ def test_sem_entrega_git_mostra_diagnostico_e_nunca_tarefas_da_ia(privado, monke
         assert 'entregas --ampliar 180' in rodar_bts and 'identidade' in rodar_bts, rodar_bts
 
 
-def test_identidade_confere_e_acrescenta_sem_mostrar_email(privado, monkeypatch):
+def test_identidade_confere_e_acrescenta_mostrando_o_email_para_a_dona(privado, monkeypatch):
     s = rodar(monkeypatch, 'identidade')
     assert 'Pessoa Teste' in visivel(s) and tem_rodape_botoes(s)
     s = rodar(monkeypatch, 'identidade', 'adicionar', 'pessoa.segunda@exemplo.test')
     v = visivel(s)
-    assert 'pessoa.segunda' not in v and 'exemplo.test' not in v and 'p***@***' in v
+    assert 'pessoa.segunda@exemplo.test' in v and '***' not in v
     assert tem_rodape_botoes(s) and any(b['rodar'] == 'entregas' for b in botoes_de(s))
     with trajetoria.abrir() as con:
         assert 'pessoa.segunda@exemplo.test' in entregas.identidades(con)
@@ -530,3 +530,17 @@ def test_acender_sem_modelo_no_chat_nao_quebra_nem_grava(privado, monkeypatch):
     s = rodar(monkeypatch, 'acender', DDD)
     assert 'não deu para acender' in visivel(s) and tem_rodape_botoes(s)
     assert len(jogo.catalogo(pipeline.load_state()['plano'])) == antes
+
+
+def test_entrega_no_chat_mostra_titulo_real_e_numero_do_ticket(privado, monkeypatch):
+    jogo.sincronizar(pipeline.load_state()['plano'])
+    with trajetoria.abrir() as con, banco.transacao(con):
+        eid = con.execute(
+            "INSERT INTO entrega (chave, titulo, inicio, fim, fonte, commits, arquivos, linhas, areas_json, ids_privados_json) "
+            "VALUES ('tk-x', 'Bug 14988: ProdutoZeta corrige mapa', '2026-11-10T10:00:00', '2026-11-11T10:00:00', "
+            "'ticket', 1, 1, 5, '[]', '[\"14988\"]')").lastrowid
+    monkeypatch.setattr(entregas, 'atualizar', lambda con, dias=90: {'novas': 0, 'atualizadas': 0})
+    v = visivel(rodar(monkeypatch, 'entrega', eid))
+    assert 'Bug 14988: ProdutoZeta corrige mapa' in v and '#14988' in v
+    v = visivel(rodar(monkeypatch, 'entregas'))
+    assert 'Bug 14988: ProdutoZeta corrige mapa' in v

@@ -348,6 +348,7 @@ async function abrirEntregaDetalhe(id) {
     <button class="fechar" data-fechar aria-label="Fechar">${ic('fechar')}</button>
     <span class="sobre">Entrega detectada (${esc(det.fonte || 'git')})</span>
     <h3>${esc(det.titulo)}</h3>
+    ${(det.ids || []).length ? `<p class="dica">PR/ticket: ${det.ids.map((i) => `#${esc(i)}`).join(' · ')}</p>` : ''}
     <div class="fatos-entrega">
       <span class="tag">${esc(String(f.inicio || '').slice(0, 10) || '—')} → ${esc(String(f.fim || '').slice(0, 10) || '—')} (${f.duracao_dias || 1}d)</span>
       <span class="tag">${f.commits || 1} commit(s)</span>

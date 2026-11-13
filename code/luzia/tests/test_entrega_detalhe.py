@@ -197,4 +197,5 @@ def test_avancos_uteis_mesmos_prismas(con, privado):
     lista = entregas.listar(con)
     assert len(lista) == 1 and lista[0]['id'] == eid
     texto_dump = json.dumps(det, ensure_ascii=False)
-    assert 'h1' not in texto_dump and '42' not in texto_dump
+    assert 'h1' not in texto_dump  # hash de commit nunca sai do banco
+    assert det['ids'] == ['42'] and lista[0]['ids'] == ['42']  # o número do PR/ticket fica visível para a dona

@@ -7,8 +7,9 @@ Uma entrega é um bloco semântico fechado de commits da pessoa:
 3. senão, 1 commit = 1 entrega.
 
 Só entram commits cujo autor casa com uma identidade da pessoa (`casa_identidade`); a data é a data de autor.
-LGPD: título e mensagem passam pelo `Redactor` antes de ir ao banco e nunca carregam número de PR/ticket nem hash;
-esses ids ficam só em `entrega.ids_privados_json` e `commit_.hash` (banco privado).
+Título e mensagem ficam reais no banco privado, com os números de PR/ticket (visíveis só para quem entrou no painel e no
+chat da própria pessoa; nunca em arquivo versionado). Os números também vão para `entrega.ids_privados_json`; o hash
+fica só em `commit_.hash`. O envio ao modelo mascara conforme o interruptor `mascarar_modelo` (`pipeline.run_plan`).
 """
 
 from __future__ import annotations
@@ -24,7 +25,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from . import arquivos, banco, jogo, propriedade, trajetoria, triage
-from .privacy import Redactor
 
 SEP_REG, SEP_CAMPO = '\x1e', '\x1f'
 FORMATO = '--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%aI%x1f%B%x1f'
@@ -39,6 +39,10 @@ IGNORADOS = {'node_modules', 'vendor', '.venv', 'venv', 'dist', 'bin', 'obj', 'p
 LOCKS = {'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'poetry.lock', 'composer.lock', 'gemfile.lock',
          'packages.lock.json', 'cargo.lock'}
 SOBREPOSICAO = timedelta(days=2)  # a busca incremental volta um pouco: datas de autor podem ficar para trás
+# Marca da janela: títulos e mensagens reais. Janela gravada sem ela (versões que mascaravam) é relida inteira uma vez,
+# e os títulos mascarados são regravados a partir do git (mesma chave: nenhuma entrega duplica).
+TITULOS = 'reais'
+TITULOS_ANTIGOS = 'entrega_titulos_antigos'  # perfil: id da entrega → títulos que ela já teve no banco
 
 
 # ------------------------------------------------------------------ identidades
@@ -111,14 +115,6 @@ def acrescentar_identidade(con: sqlite3.Connection, identidade: str) -> list[str
         with banco.transacao(con):
             trajetoria.perfil_gravar(con, 'identidades', [*atuais, ident])
     return identidades(con)
-
-
-def mascarar_identidade(identidade: str) -> str:
-    """Para a tela: e-mail nunca aparece inteiro (nem o domínio, que pode ser o da empresa)."""
-    ident = (identidade or '').strip()
-    if '@' in ident:
-        return (ident[:1] or '?') + '***@***'
-    return ident
 
 
 def _assinatura(repo: Path, ids: list[str]) -> str:
@@ -205,8 +201,8 @@ RE_TAG_INICIAL = re.compile(r'^\s*(\[[^\]\n]{1,60}\])')
 
 
 def tag_inicial(titulo: str) -> str | None:
-    """A etiqueta entre colchetes no início ("[Módulo X] ..."): texto de produto, não id; o `Redactor` a mascara
-    se o termo estiver em `termos.txt`."""
+    """A etiqueta entre colchetes no início ("[Módulo X] ..."): texto de produto, não id; no envio ao modelo, o
+    `Redactor` a mascara se o termo estiver em `termos.txt` e o interruptor `mascarar_modelo` estiver ligado."""
     m = RE_TAG_INICIAL.match(titulo or '')
     return m.group(1) if m else None
 
@@ -233,7 +229,7 @@ def limpar_ids(texto: str) -> tuple[str, list[str]]:
 
 
 def _limpar(texto: str) -> str:
-    """Tira números de PR/ticket/item do texto (eles só podem existir em `ids_privados`)."""
+    """Tira números de PR/ticket/item do texto (no envio ao modelo, quando `mascarar_modelo` está ligado)."""
     return limpar_ids(texto)[0]
 
 
@@ -244,21 +240,22 @@ def _chave(prefixo: str, semente: str) -> str:
 def _entrega(chave: str, titulo: str, fonte: str, regs: list[dict], ids: list[str]) -> dict:
     regs = sorted(regs, key=lambda r: r['data'])
     ids_tk = [i for r in regs for i in RE_TICKET.findall(r['mensagem'])]
-    titulo, ids_titulo = limpar_ids(titulo)
-    ids = ids + ids_titulo
+    titulo = (titulo or '').strip()
+    ids = ids + limpar_ids(titulo)[1]  # o título fica real; os números também vão para ids_privados
     return {'chave': chave, 'titulo': titulo or 'Entrega', 'inicio': regs[0]['data'], 'fim': regs[-1]['data'],
             'commits': [_commit(r) for r in regs], 'fonte': fonte,
             'ids_privados': list(dict.fromkeys(ids + (ids_tk if fonte == 'merge-pr' else [])))}
 
 
 def _titulo_do_ramo(ramo: str) -> str:
-    """Título legível a partir do nome do ramo, sem a chave do ticket nem qualquer palavra com número."""
-    nome = RE_CHAVE_TICKET.sub(' ', ramo.split('/', 1)[-1])
-    palavras = nome.replace('-', ' ').replace('_', ' ').replace('/', ' ').split()
-    palavras = [p for p in palavras if not any(c.isdigit() for c in p)]
+    """Título legível a partir do nome do ramo (sem o prefixo `feature/`...), com a chave do ticket inteira."""
+    nome = ramo.split('/', 1)[-1]
+    chaves = RE_CHAVE_TICKET.findall(nome)
+    resto = RE_CHAVE_TICKET.sub(' ', nome)
+    palavras = resto.replace('-', ' ').replace('_', ' ').replace('/', ' ').split()
     if palavras and palavras[0].lower() in PREFIXOS_DE_RAMO:
         palavras = palavras[1:]
-    return ' '.join(palavras)
+    return ' '.join([*chaves, *palavras])
 
 
 def _titulo_pr(assunto: str, corpo: str) -> tuple[str, str] | None:
@@ -343,16 +340,6 @@ def prismas_de(entrega: dict, prismas: list[dict]) -> dict[str, list[str]]:
 
 
 # ------------------------------------------------------------------ gravação
-def _redator(repo: Path, minhas: list[str]) -> Redactor:
-    try:
-        colegas = triage.repo_authors(repo)
-    except (OSError, subprocess.CalledProcessError):
-        colegas = []
-    tokens = {t.casefold() for i in minhas for t in [i, *i.split()]}
-    return Redactor.from_file(arquivos.PRIVATE / 'termos.txt',
-                              extra_colleagues=[c for c in colegas if c.casefold() not in tokens])
-
-
 def _repo_configurado() -> Path | None:
     try:
         cfg = json.loads((arquivos.PRIVATE / 'entrada.json').read_text(encoding='utf-8'))
@@ -362,18 +349,24 @@ def _repo_configurado() -> Path | None:
     return repo if repo and repo.exists() else None
 
 
-def _limpar_titulos_guardados(con: sqlite3.Connection, redator: Redactor) -> None:
-    """Títulos já gravados por versões antigas ganham a limpeza de ids; os números vão para `ids_privados`."""
-    for r in con.execute('SELECT id, titulo, ids_privados_json FROM entrega').fetchall():
-        if not r['titulo']:
-            continue
-        limpo, ids = limpar_ids(r['titulo'])
-        limpo = redator.redact(limpo or 'Entrega')
-        if limpo == r['titulo'] and not ids:
-            continue
-        antes = json.loads(r['ids_privados_json'] or '[]')
-        con.execute('UPDATE entrega SET titulo = ?, ids_privados_json = ? WHERE id = ?',
-                    (limpo, json.dumps(list(dict.fromkeys(antes + ids))), r['id']))
+def titulos_antigos(con: sqlite3.Connection) -> dict[str, list[str]]:
+    """Títulos (mascarados por versões antigas) que cada entrega já teve: avanços, evidências e lúmens antigos citam a
+    entrega pelo título, então continuam ligados a ela depois que o título real é regravado."""
+    dados = trajetoria.perfil_ler(con, TITULOS_ANTIGOS)
+    if not isinstance(dados, dict):
+        return {}
+    return {str(k): [str(t) for t in v] for k, v in dados.items() if isinstance(v, list)}
+
+
+def _trocar_titulo(con: sqlite3.Connection, eid: int, novo: str, antigos: dict[str, list[str]]) -> None:
+    velho = con.execute('SELECT titulo FROM entrega WHERE id = ?', (eid,)).fetchone()['titulo']
+    if velho == novo:
+        return
+    if velho:
+        lista = antigos.setdefault(str(eid), [])
+        if velho not in lista:
+            lista.append(velho)
+    con.execute('UPDATE entrega SET titulo = ? WHERE id = ?', (novo, eid))
 
 
 def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
@@ -397,11 +390,12 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
     janela = trajetoria.perfil_ler(con, 'entregas_desde') or {}
     janela = janela if isinstance(janela, dict) else {}
     incremental = bool(janela.get('desde') and janela.get('ultima') and alvo.isoformat() >= janela['desde']
-                       and janela.get('identidades') == assinatura and int(janela.get('meus') or 0) > 0)
+                       and janela.get('identidades') == assinatura and int(janela.get('meus') or 0) > 0
+                       and janela.get('titulos') == TITULOS)
     if incremental:
         busca = datetime.fromisoformat(janela['ultima']) - SOBREPOSICAO
         desde_gravado = janela['desde']
-    else:  # primeira leitura, janela maior, outra identidade ou nada casou da última vez: a janela inteira
+    else:  # primeira leitura, janela maior, outra identidade, nada casou ou títulos antigos: a janela inteira
         desde_gravado = min(alvo.isoformat(), janela['desde']) if janela.get('desde') else alvo.isoformat()
         busca = datetime.fromisoformat(desde_gravado)
     try:
@@ -409,11 +403,11 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
     except (subprocess.CalledProcessError, OSError) as erro:  # não é repositório git, ou git ausente
         arquivos.registrar_erro('entregas.atualizar', erro)
         return {**resultado, 'aviso': 'não consegui ler o histórico git deste repositório'}
-    redator = _redator(repo, minhas)
     prismas = trajetoria.prismas(con)
 
     with banco.transacao(con):
-        _limpar_titulos_guardados(con, redator)
+        antigos = titulos_antigos(con)
+        antes_antigos = json.dumps(antigos, sort_keys=True)
         tocadas: set[int] = set()
         antigas: dict[int, int] = {}
         for e in achadas:
@@ -421,22 +415,22 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
             novos = 0
             if linha is None:
                 cur = con.execute("INSERT INTO entrega (chave, titulo, fonte) VALUES (?, ?, ?)",
-                                  (e['chave'], redator.redact(e['titulo']), e['fonte']))
+                                  (e['chave'], e['titulo'], e['fonte']))
                 eid = cur.lastrowid
             else:
                 eid = linha['id']
-                con.execute('UPDATE entrega SET titulo = ? WHERE id = ? AND titulo IS NOT ?',
-                            (redator.redact(e['titulo']), eid, redator.redact(e['titulo'])))
+                _trocar_titulo(con, eid, e['titulo'], antigos)
             for c in e['commits']:
                 antes = con.execute('SELECT entrega_id FROM commit_ WHERE hash = ?', (c['hash'],)).fetchone()
                 if antes is None or antes['entrega_id'] != eid:
                     novos += 1
                     if antes is not None and antes['entrega_id'] not in (None, eid):
                         antigas[antes['entrega_id']] = eid  # saiu de outra entrega (ex.: o PR chegou depois)
-                msg = redator.redact(_limpar(c['mensagem']))[:MAX_MENSAGEM]
+                msg = c['mensagem'][:MAX_MENSAGEM]
                 con.execute(
                     'INSERT INTO commit_ (hash, entrega_id, data, mensagem, arquivos, linhas, areas_json) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (hash) DO UPDATE SET entrega_id = excluded.entrega_id',
+                    'VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (hash) DO UPDATE SET entrega_id = excluded.entrega_id, '
+                    'mensagem = excluded.mensagem',
                     (c['hash'], eid, c['data'], msg, c['arquivos'], c['linhas'], json.dumps(c['areas'], ensure_ascii=False)))
             ids_antes = json.loads(con.execute('SELECT ids_privados_json FROM entrega WHERE id = ?', (eid,)).fetchone()[0])
             ids = list(dict.fromkeys(ids_antes + e['ids_privados']))
@@ -457,20 +451,23 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
             if _recalcular(con, velha, destino=destino):
                 tocadas.add(velha)
         resultado['atualizadas'] = len(tocadas)
+        if json.dumps(antigos, sort_keys=True) != antes_antigos:
+            trajetoria.perfil_gravar(con, TITULOS_ANTIGOS, antigos)
         meus = int(con.execute('SELECT COUNT(*) FROM commit_').fetchone()[0])  # só há commits da pessoa
         trajetoria.perfil_gravar(con, 'entregas_desde', {'desde': desde_gravado, 'ultima': agora.isoformat(),
-                                                         'identidades': assinatura, 'meus': meus})
+                                                         'identidades': assinatura, 'meus': meus,
+                                                         'titulos': TITULOS})
     return resultado
 
 
 def diagnostico(con: sqlite3.Connection) -> dict:
-    """Por que não há entregas: repositório autorizado, identidades (e-mails mascarados) e a janela já lida."""
+    """Por que não há entregas: repositório autorizado, identidades do git e a janela já lida."""
     repo = _repo_configurado()
     janela = trajetoria.perfil_ler(con, 'entregas_desde') or {}
     janela = janela if isinstance(janela, dict) else {}
     return {
         'repo_configurado': repo is not None,
-        'identidades': [mascarar_identidade(i) for i in identidades(con, repo)],
+        'identidades': identidades(con, repo),
         'janela_desde': str(janela.get('desde') or '')[:10],
         'ultima_leitura': str(janela.get('ultima') or '')[:10],
         'commits_seus': int(janela.get('meus') or 0),
@@ -524,6 +521,15 @@ def _fatos(r: sqlite3.Row) -> dict:
     }
 
 
+def _ids(r: sqlite3.Row) -> list[str]:
+    """Números de PR/ticket da entrega (visíveis para a dona dos dados)."""
+    try:
+        ids = json.loads(r['ids_privados_json'] or '[]')
+    except (ValueError, IndexError, KeyError):
+        return []
+    return [str(i) for i in ids] if isinstance(ids, list) else []
+
+
 def _prismas_entrega(con: sqlite3.Connection, eid: int) -> list[dict]:
     out = []
     for r in con.execute('SELECT prisma, termos_json FROM entrega_prisma WHERE entrega_id = ? ORDER BY rowid', (eid,)):
@@ -535,7 +541,8 @@ def _prismas_entrega(con: sqlite3.Connection, eid: int) -> list[dict]:
     return out
 
 
-def _propriedade_entrega(con: sqlite3.Connection, r: sqlite3.Row, commits: list[dict], avancos_feitos: list[dict]) -> dict:
+def _propriedade_entrega(con: sqlite3.Connection, r: sqlite3.Row, commits: list[dict], avancos_feitos: list[dict],
+                         titulos: set[str] | None = None) -> dict:
     plano = trajetoria.perfil_ler(con, 'plano') or {}
     p1 = plano.get('p1_direcao_prompt')
     dims: dict[str, dict | None] = {}
@@ -546,7 +553,7 @@ def _propriedade_entrega(con: sqlite3.Connection, r: sqlite3.Row, commits: list[
     dims['P2'] = propriedade.p2_entrega(commits)
 
     por_id = {a['id']: a for a in avancos_feitos}
-    alvos_legado = {x for x in (r['titulo'], str(r['id']), r['chave']) if x}
+    alvos_legado = {x for x in (r['titulo'], str(r['id']), r['chave']) if x} | (titulos or set())
     for dim in ('P3', 'P4'):
         candidatos: list[dict] = []
         for a in avancos_feitos:
@@ -584,8 +591,9 @@ def _propriedade_entrega(con: sqlite3.Connection, r: sqlite3.Row, commits: list[
     return {'dimensoes': dims, 'indice': indice, 'base': f'{len(com_base)} de 4 dimensões'}
 
 
-def _lumens_ligados(con: sqlite3.Connection, r: sqlite3.Row, prismas_nomes: set[str], ids_avancos: set[str]) -> list[dict]:
-    refs = {str(r['id']), r['chave'], *ids_avancos} | ({r['titulo']} if r['titulo'] else set())
+def _lumens_ligados(con: sqlite3.Connection, r: sqlite3.Row, prismas_nomes: set[str], ids_avancos: set[str],
+                    titulos: set[str] | None = None) -> list[dict]:
+    refs = {str(r['id']), r['chave'], *ids_avancos} | ({r['titulo']} if r['titulo'] else set()) | (titulos or set())
     janela_ini = janela_fim = ''
     if r['inicio'] and r['fim']:
         try:
@@ -613,7 +621,8 @@ def _lumens_ligados(con: sqlite3.Connection, r: sqlite3.Row, prismas_nomes: set[
 
 def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = True,
             todos_avancos: list[dict] | None = None) -> dict | None:
-    """Detalhe completo de uma entrega ligada ao jogo (sem hashes nem ids privados).
+    """Detalhe completo de uma entrega ligada ao jogo: título e mensagens reais e os números de PR/ticket (`ids`);
+    nunca os hashes dos commits.
 
     `todos_avancos`: a lista de avanços já carregada por quem chama várias entregas de uma vez (evita recarregá-la em cada uma).
     """
@@ -637,9 +646,10 @@ def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = Tr
         })
 
     todos_avancos = todos_avancos if todos_avancos is not None else jogo.avancos(con)
+    titulos = {t for t in [r['titulo'], *titulos_antigos(con).get(str(eid), [])] if t}
     avancos_feitos = [
         a for a in todos_avancos
-        if a.get('entrega_id') == eid or (a.get('entrega_id') is None and r['titulo'] and a.get('entrega') == r['titulo'])
+        if a.get('entrega_id') == eid or (a.get('entrega_id') is None and a.get('entrega') in titulos)
     ]
     ids_feitos = {a['id'] for a in avancos_feitos}
     avancos_uteis = [
@@ -649,12 +659,13 @@ def detalhe(con: sqlite3.Connection, entrega_id: int, incluir_leitura: bool = Tr
         and (a.get('skill_plano') or a.get('skill')) in prismas_nomes
     ][:3]
 
-    lumens = _lumens_ligados(con, r, prismas_nomes, ids_feitos)
-    prop = _propriedade_entrega(con, r, commits, avancos_feitos)
+    lumens = _lumens_ligados(con, r, prismas_nomes, ids_feitos, titulos)
+    prop = _propriedade_entrega(con, r, commits, avancos_feitos, titulos)
 
     det = {
         'id': eid,
         'titulo': r['titulo'] or 'Entrega',
+        'ids': _ids(r),
         'fonte': r['fonte'],
         'inicio': fatos['inicio'],
         'fim': fatos['fim'],
@@ -682,6 +693,7 @@ def listar(con: sqlite3.Connection) -> list[dict]:
         out.append({
             'id': eid,
             'titulo': r['titulo'] or 'Entrega',
+            'ids': _ids(r),
             'fonte': r['fonte'],
             'inicio': fatos['inicio'],
             'fim': fatos['fim'],

@@ -161,10 +161,10 @@ def test_sem_modelo_devolve_none(con):
     assert det['fatos']['commits'] == 2
 
 
-def test_base_sem_nomes_privados(con, privado):
+def test_base_mostra_os_dados_reais_para_a_dona(con, privado):
+    """A base aparece na tela de quem entrou: fica real. O que vai ao modelo é testado em test_mascarar_modelo.py."""
     from luzia import leituras
 
-    # Injeta termos privados em estado e entrega para garantir que a base os mascara/remove
     plano = trajetoria.perfil_ler(con, 'plano')
     plano['skills'][0]['evidencia'] = 'Trabalhou no ProdutoZeta para ClienteAlfa no PR #42 (AB#99).'
     plano['diagnostico_fontes'] = {'conflito_curriculo_vs_realidade': 'No ProdutoZeta faz integração com ClienteAlfa.'}
@@ -174,9 +174,9 @@ def test_base_sem_nomes_privados(con, privado):
 
     b_prisma = json.dumps(leituras.base(con, 'prisma', DDD), ensure_ascii=False)
     b_entrega = json.dumps(leituras.base(con, 'entrega', str(eid)), ensure_ascii=False)
-    for proibido in ('ProdutoZeta', 'ClienteAlfa', '#42', 'AB#99', 'abcdef123456'):
-        assert proibido not in b_prisma
-        assert proibido not in b_entrega
+    for real in ('ProdutoZeta', 'ClienteAlfa', '#42', 'AB#99'):
+        assert real in b_prisma
+    assert 'abcdef123456' not in b_prisma and 'abcdef123456' not in b_entrega  # hash de commit nunca na base
 
 
 def _muitas_entregas(con, n):

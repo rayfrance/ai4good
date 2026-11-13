@@ -15,22 +15,18 @@ import time
 from datetime import datetime
 
 from . import arquivos, banco, entregas, jogo, pipeline, planner, trajetoria
-from .privacy import Redactor
 
 
 def _agora() -> str:
     return datetime.now().isoformat(timespec='seconds')
 
 
-def _redator() -> Redactor:
-    return Redactor.from_file(arquivos.PRIVATE / 'termos.txt')
+def _texto(texto) -> str:
+    """Texto real (a base aparece na tela de quem entrou); o envio ao modelo mascara conforme `mascarar_modelo`."""
+    return str(texto or '').strip()
 
 
-def _limpar_texto(texto: str, redator: Redactor) -> str:
-    return redator.redact(entregas._limpar(str(texto or '')))
-
-
-def _base_prisma(con: sqlite3.Connection, nome: str, redator: Redactor) -> dict:
+def _base_prisma(con: sqlite3.Connection, nome: str) -> dict:
     todos = {p['nome']: p for p in trajetoria.prismas(con, incluir_arquivados=True)}
     p = todos.get(nome, {'nome': nome, 'nivel': 0, 'meta': 5, 'estado': 'ativo'})
     plano = trajetoria.perfil_ler(con, 'plano') or {}
@@ -53,7 +49,7 @@ def _base_prisma(con: sqlite3.Connection, nome: str, redator: Redactor) -> dict:
         for t in ts:
             termos_set[str(t)] = None
         entregas_resumo.append({
-            'titulo': _limpar_texto(r['titulo'] or '', redator),
+            'titulo': _texto(r['titulo']),
             'commits': int(r['commits'] or 0),
             'arquivos': int(r['arquivos'] or 0),
             'linhas': int(r['linhas'] or 0),
@@ -61,7 +57,7 @@ def _base_prisma(con: sqlite3.Connection, nome: str, redator: Redactor) -> dict:
 
     avs = jogo.avancos(con, prisma=nome, historico=False)
     conquistados = [
-        {'titulo': _limpar_texto(a.get('titulo', ''), redator), 'tipo': a.get('tipo'),
+        {'titulo': _texto(a.get('titulo')), 'tipo': a.get('tipo'),
          'nota': a.get('nota'), 'lm_ganho': int(a.get('lm_ganho') or 0)}
         for a in avs if a.get('estado') == 'conquistado'
     ]
@@ -106,13 +102,13 @@ def _base_prisma(con: sqlite3.Connection, nome: str, redator: Redactor) -> dict:
         'lumens': {'propria': lm_propria, 'refletida': lm_refletida, 'total': lm_propria + lm_refletida},
         'uso_ia': {'dirigido': dirigido, 'pelo_agente': pelo_agente, 'pct_dirigido': pct_dirigido},
         'triagem': {
-            'evidencia': _limpar_texto(skill_tri.get('evidencia', ''), redator),
-            'curriculo_vs_pratica': _limpar_texto(diag.get('conflito_curriculo_vs_realidade', ''), redator),
+            'evidencia': _texto(skill_tri.get('evidencia')),
+            'curriculo_vs_pratica': _texto(diag.get('conflito_curriculo_vs_realidade')),
         },
     }
 
 
-def _base_entrega(con: sqlite3.Connection, entrega_id: str, redator: Redactor, det: dict | None = None) -> dict:
+def _base_entrega(con: sqlite3.Connection, entrega_id: str, det: dict | None = None) -> dict:
     try:
         eid = int(entrega_id)
     except ValueError:
@@ -127,11 +123,11 @@ def _base_entrega(con: sqlite3.Connection, entrega_id: str, redator: Redactor, d
     dims = prop.get('dimensoes') or {}
     return {
         'entrega_id': eid,
-        'titulo': _limpar_texto(det.get('titulo', ''), redator),
+        'titulo': _texto(det.get('titulo')),
         'fatos': det.get('fatos') or {},
         'prismas': [{'prisma': p['nome'], 'termos': p['termos']} for p in (det.get('prismas') or [])],
         'avancos_feitos': [
-            {'titulo': _limpar_texto(a.get('titulo', ''), redator), 'estado': a.get('estado'),
+            {'titulo': _texto(a.get('titulo')), 'estado': a.get('estado'),
              'nota': a.get('nota'), 'dimensao': a.get('dimensao')}
             for a in (det.get('avancos_feitos') or [])
         ],
@@ -144,7 +140,7 @@ def _base_entrega(con: sqlite3.Connection, entrega_id: str, redator: Redactor, d
     }
 
 
-def _base_pedido(con: sqlite3.Connection, pedido_id: str, redator: Redactor) -> dict:
+def _base_pedido(con: sqlite3.Connection, pedido_id: str) -> dict:
     try:
         pid = int(pedido_id)
     except ValueError:
@@ -158,25 +154,25 @@ def _base_pedido(con: sqlite3.Connection, pedido_id: str, redator: Redactor) -> 
         'pedido_id': int(r['id']),
         'tipo': r['tipo'],
         'prisma': r['prisma'],
-        'motivo': _limpar_texto(r['motivo'] or '', redator),
+        'motivo': _texto(r['motivo']),
         'trajetoria': resumo,
         'prismas_ativos': ativos,
     }
 
 
 def base(con: sqlite3.Connection, alvo_tipo: str, alvo_id: str, det: dict | None = None) -> dict:
-    """Fatos determinísticos e anonimizados que fundamentam a leitura de um prisma, entrega ou pedido.
+    """Fatos determinísticos que fundamentam a leitura de um prisma, entrega ou pedido (reais: aparecem na tela de quem
+    entrou; o envio ao modelo mascara conforme o interruptor `mascarar_modelo`, em `pipeline.run_plan`).
 
     `det` (entrega): o detalhe já calculado por quem chama (sem leitura), para não calculá-lo duas vezes.
     """
-    redator = _redator()
     alvo_id = str(alvo_id)
     if alvo_tipo == 'prisma':
-        return _base_prisma(con, alvo_id, redator)
+        return _base_prisma(con, alvo_id)
     if alvo_tipo == 'entrega':
-        return _base_entrega(con, alvo_id, redator, det)
+        return _base_entrega(con, alvo_id, det)
     if alvo_tipo == 'pedido':
-        return _base_pedido(con, alvo_id, redator)
+        return _base_pedido(con, alvo_id)
     raise ValueError(f'tipo de alvo desconhecido para leitura: {alvo_tipo!r}')
 
 
@@ -283,7 +279,7 @@ def _gerar_lote(con: sqlite3.Connection, lista: list[tuple[str, str]]) -> int:
             label='leituras-lote',
             save_current_state=False,
             schema=planner.LEITURAS_SCHEMA,
-            intro='Fatos medidos localmente pela Luzia para gerar leituras com base (anonimizados por LGPD):',
+            intro='Fatos medidos localmente pela Luzia para gerar leituras com base:',
         )
     except Exception as e:
         arquivos.registrar_erro('leituras.gerar', e)
@@ -300,13 +296,12 @@ def _gerar_lote(con: sqlite3.Connection, lista: list[tuple[str, str]]) -> int:
             if txt:
                 por_chave[item['alvo']] = txt
 
-    redator = _redator()
     prontas: list[tuple[dict, str]] = []
     for it in itens:
         txt = por_chave.get(it['alvo']) or por_chave.get(it['alvo_id'])
         if not txt:
             return 0  # lote incompleto: grava todas ou nenhuma
-        prontas.append((it, _limpar_texto(txt, redator)))
+        prontas.append((it, txt))
 
     modelo_nome = (rec or {}).get('modelo') or getattr(res, 'model', '') or 'desconhecido'
     quando = (rec or {}).get('quando') or _agora()

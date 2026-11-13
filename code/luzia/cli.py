@@ -151,7 +151,8 @@ ABERTOS = ('sugerido', 'na_fila', 'em_andamento')
 def acender_entrega(entrega_id: int, rotulo: str = 'cmd-acender-entrega') -> dict:
     """2 avanços ligados a uma entrega: P3 (explicar o conceito aplicado) e P4 (defender a decisão e as alternativas).
 
-    Uma chamada ao modelo só com os fatos da entrega (título mascarado, período, arquivos/áreas, prismas atravessados).
+    Uma chamada ao modelo só com os fatos da entrega (título, período, arquivos/áreas, prismas atravessados; mascarados
+    no envio se `mascarar_modelo` estiver ligado).
     O prisma de cada avanço é sempre um dos prismas ativos da entrega. Sem modelo: erro claro e nada gravado.
     """
     pipeline.load_env()
@@ -168,8 +169,7 @@ def acender_entrega(entrega_id: int, rotulo: str = 'cmd-acender-entrega') -> dic
         abertos = [a for a in det['avancos_feitos'] if a.get('dimensao') in ('P3', 'P4') and a.get('estado') in ABERTOS]
         if {a['dimensao'] for a in abertos} >= {'P3', 'P4'}:
             return {'erro': 'esta entrega já tem avanços P3 e P4 abertos', 'avancos': abertos, 'entrega': det}
-        redator = leituras._redator()
-        titulo = leituras._limpar_texto(det['titulo'], redator)
+        titulo = det['titulo']
         f = det['fatos']
         payload = {'entrega': {
             'titulo': titulo,
@@ -181,7 +181,7 @@ def acender_entrega(entrega_id: int, rotulo: str = 'cmd-acender-entrega') -> dic
     try:
         result, record = pipeline.run_plan(payload, prep_seconds=time.perf_counter() - t0, label=rotulo,
                                            save_current_state=False, schema=planner.ENTREGA_SCHEMA,
-                                           intro='Fatos medidos no git de uma entrega da pessoa (anonimizados por LGPD):')
+                                           intro='Fatos medidos no git de uma entrega da pessoa:')
     except Exception as e:  # sem modelo, sem chave ou sem internet
         arquivos.registrar_erro('cli.acender_entrega', e)
         return {'erro': f'não deu para acender avanços sem o modelo ({modelo.resumo_erro(e)})', 'entrega': det}
@@ -197,7 +197,7 @@ def acender_entrega(entrega_id: int, rotulo: str = 'cmd-acender-entrega') -> dic
         for dim, a in (('P3', p3), ('P4', p4)):
             prisma = jogo.skill_de(str(a.get('skill') or ''), plan, nomes)
             prisma = prisma if prisma in nomes_entrega else nomes_entrega[0]
-            novo = {**a, 'titulo': leituras._limpar_texto(a['titulo'], redator)[:120], 'dimensao': dim,
+            novo = {**a, 'titulo': str(a['titulo']).strip()[:120], 'dimensao': dim,
                     'skill': prisma, 'skill_plano': prisma, 'origem': 'entrega', 'entrega': titulo,
                     'entrega_id': int(det['id']), 'estado': 'sugerido', 'criado_em': quando}
             novo['id'] = acoes.aid('entrega', f"{det['id']}|{dim}|{novo['titulo']}")
@@ -691,7 +691,7 @@ def cmd_identidade(args, restantes: list[str]) -> None:
     for linha in linhas_diagnostico(diag):
         print(linha)
     print('\nPara acrescentar um nome ou e-mail que você usa nos commits: '
-          '`identidade adicionar "<nome ou e-mail>"` (e-mails nunca aparecem inteiros na tela).')
+          '`identidade adicionar "<nome ou e-mail>"`.')
     botoes([{'rotulo': 'Ler entregas de novo', 'descricao': 'detectar entregas com estas identidades', 'rodar': 'entregas'},
             BT_PAINEL], 'Quer ler suas entregas de novo?')
 
@@ -706,6 +706,8 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
         return
     fatos = det['fatos']
     print(f"## ✦ Luzia · Entrega `#{det['id']}` · {det['titulo']} ({det['fonte']})")
+    if det.get('ids'):
+        print('- **PR/ticket:** ' + ' · '.join(f'#{i}' for i in det['ids']))
     print(f"- **Período:** {fatos['inicio'][:10]} a {fatos['fim'][:10]} ({fatos['duracao_dias']} dia(s))")
     print(f"- **Volume:** {fatos['commits']} commit(s) · {fatos['arquivos']} arquivo(s) · {fatos['linhas']} linhas · áreas: {', '.join(fatos['areas']) or 'n/d'}")
     if det['prismas']:

@@ -7,6 +7,12 @@
   - Plano em 16 tarefas: [docs/superpowers/plans/2026-11-12-luzia-trajetoria-prismas.md](../superpowers/plans/2026-11-12-luzia-trajetoria-prismas.md)
   - Regras de experiência atualizadas: [docs/luzia-ux.md](../luzia-ux.md)
 
+## Revisão final e correções · 13/11/2026 (Claude, sobre a entrega do Antigravity)
+- **Estado:** `feature/luzia-acoes` = `feature/luzia-banco` = `e7e58ea`, local, **sem push**. Suíte: 295 testes; `claude plugin validate` OK nos dois manifestos. Backup do banco real antes das correções em `private/backup-antes-correcoes-*`.
+- **Corrigido (revisões Opus independentes):** entregas reais não eram detectadas (identidade exigia nome exato; janela marcada como lida) e a tela caía nas entregas antigas geradas por IA; pedidos com traceback ou presos sem modelo; leituras sem fonte/modelo/data e nunca geradas pelo chat; ligação entrega↔avanço (P3/P4) inexistente; lampejo com +10 lm fixo; prisma por pedido sem lúmens passivos; linha de status quebrada como script; números de ticket nos títulos; custo da rodada automática de leituras (até 16 alvos por rodada). Novo: `foco` (reconhecimento passivo em harness sem hooks, como o Antigravity), `identidade`, `leituras`, `acender-entrega`, `modelo usar`, `agente`.
+- **Verificado com os dados reais:** 8 entregas detectadas no repositório autorizado, sem números de ticket nos títulos; painel sem erros de console; hook e linha de status rodando como o harness roda.
+- **Pendências da Rayane:** (1) antes de qualquer push, decidir o histórico: o arquivo do plano teve nomes da empresa num commit antigo da branch (5ea3bab) e todos os commits têm o e-mail corporativo como autor; (2) nomes de módulos internos aparecem nos títulos das entregas — acrescentar ao `private/termos.txt` os que não podem aparecer nem ir ao modelo antes de gerar leituras; (3) minors adiados no registro de progresso da execução (`.superpowers/sdd/.../progress.md`, fora do git).
+
 ## O que foi entregue (Tasks 1–15)
 1. **Fundação SQLite e concorrência (`banco.py`, `migrar.py`, `arquivos.py`):**
    - `LUZIA_PRIVATE` configurável por ambiente e suíte isolada sobre dados sintéticos (`conftest.py`, nunca toca em `code/luzia/private/`).

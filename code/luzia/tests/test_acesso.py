@@ -1,18 +1,19 @@
-"""Senha local do painel e sessões em memória (`acesso.py`): só dados sintéticos, relógio injetável."""
+"""Entrada herdada do agente (`acesso.py`): link de uso único e sessões de 30 dias no banco privado; relógio injetável."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
 
-from luzia import acesso
+from luzia import acesso, banco
 
-SENHA = 'senha-de-teste-123'
+DIA = 24 * 3600
 
 
 class Relogio:
-    def __init__(self, t: float = 1000.0):
+    def __init__(self, t: float = 1_800_000_000.0):
         self.t = t
 
     def __call__(self) -> float:
@@ -20,195 +21,123 @@ class Relogio:
 
 
 @pytest.fixture
-def portaria(privado):
-    return acesso.Portaria(relogio=Relogio())
+def relogio(privado):
+    return Relogio()
 
 
-def test_criar_senha_grava_so_o_hash_pbkdf2(privado):
-    assert not acesso.tem_senha()
-    acesso.criar_senha(SENHA, SENHA)
-    bruto = (privado / 'acesso.json').read_text(encoding='utf-8')
-    assert SENHA not in bruto
-    dados = json.loads(bruto)
-    s = dados['senha']
-    assert s['algoritmo'] == 'pbkdf2_sha256' and s['iteracoes'] >= 600_000
-    assert len(bytes.fromhex(s['sal'])) == 16 and len(bytes.fromhex(s['hash'])) == 32
-    assert SENHA.encode().hex() not in bruto
-    assert acesso.tem_senha() and acesso.conferir(SENHA) and not acesso.conferir(SENHA + 'x')
+@pytest.fixture
+def portaria(relogio):
+    return acesso.Portaria(relogio=relogio)
 
 
-def test_criar_senha_so_uma_vez_minimo_8_e_confirmacao(privado, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    with pytest.raises(ValueError, match='8'):
-        acesso.criar_senha('curta12', 'curta12')
-    with pytest.raises(ValueError, match='confirma'):
-        acesso.criar_senha(SENHA, SENHA + '!')
-    assert not acesso.tem_senha()
-    acesso.criar_senha(SENHA, SENHA)
-    with pytest.raises(acesso.SenhaJaExiste):
-        acesso.criar_senha('outra-senha-boa', 'outra-senha-boa')
-    assert acesso.conferir(SENHA)
+def _linhas(tabela: str) -> list[dict]:
+    con = banco.conectar()
+    try:
+        return [dict(r) for r in con.execute(f'SELECT * FROM {tabela}')]
+    finally:
+        con.close()
 
 
-def test_sal_diferente_a_cada_senha(privado, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    primeiro = json.loads((privado / 'acesso.json').read_text(encoding='utf-8'))['senha']
-    acesso.apagar_senha()
-    acesso.criar_senha(SENHA, SENHA)
-    segundo = json.loads((privado / 'acesso.json').read_text(encoding='utf-8'))['senha']
-    assert primeiro['sal'] != segundo['sal'] and primeiro['hash'] != segundo['hash']
+def test_link_guarda_so_o_hash_e_vale_uma_vez(portaria, relogio, privado):
+    token = acesso.emitir_link(agora=relogio())
+    assert len(token) >= 40
+    links = _linhas('acesso_link')
+    assert [l['hash'] for l in links] == [hashlib.sha256(token.encode()).hexdigest()]
+    assert token not in json.dumps(links) and not (privado / 'acesso.json').exists()
+    sessao = portaria.entrar_por_link(token)
+    assert sessao.token and portaria.valida(sessao.token)
+    assert portaria.entrar_por_link(token).token is None  # uso único
+    assert _linhas('acesso_link') == []
 
 
-def test_arquivo_corrompido_bloqueia_criar_e_entrar(privado):
-    (privado / 'acesso.json').write_text('{isto não é json', encoding='utf-8')
-    assert acesso.tem_senha()  # o mais seguro: não deixa criar outra por cima; `senha` no chat redefine
-    assert not acesso.conferir(SENHA)
-    with pytest.raises(acesso.SenhaJaExiste):
-        acesso.criar_senha(SENHA, SENHA)
-    acesso.apagar_senha()
-    assert not acesso.tem_senha()
+def test_link_expirado_nao_entra_e_e_consumido(portaria, relogio):
+    token = acesso.emitir_link(agora=relogio())
+    relogio.t += acesso.LINK_S + 1
+    assert portaria.entrar_por_link(token).token is None
+    relogio.t -= acesso.LINK_S + 1  # nem voltando o relógio: já foi consumido
+    assert portaria.entrar_por_link(token).token is None
 
 
-def test_entrar_certo_e_errado(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    r = portaria.entrar('errada-errada')
-    assert r.token is None and r.restantes == 4 and r.travado_s == 0
-    r = portaria.entrar(SENHA)
-    assert r.token and portaria.valida(r.token)
-    assert not portaria.valida('token-inventado') and not portaria.valida('')
+def test_varios_links_pendentes_convivem(portaria, relogio):
+    a, b = acesso.emitir_link(agora=relogio()), acesso.emitir_link(agora=relogio())
+    assert portaria.entrar_por_link(b).token and portaria.entrar_por_link(a).token
 
 
-def test_trava_apos_5_erros_e_libera_apos_60_s(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    for _ in range(5):
-        assert portaria.entrar('errada-errada').token is None
-    r = portaria.entrar(SENHA)  # travado: nem a senha certa entra, e o hash nem é calculado
-    assert r.token is None and r.travado_s == 60
-    portaria.relogio.t += 59
-    assert portaria.entrar(SENHA).travado_s == 1
-    portaria.relogio.t += 1
-    r = portaria.entrar(SENHA)
-    assert r.token and r.travado_s == 0
+def test_token_errado_e_limite_de_tentativas(portaria, relogio):
+    bom = acesso.emitir_link(agora=relogio())
+    for i in range(acesso.LIMITE_LINKS):
+        r = portaria.entrar_por_link(f'inventado-{i}-' + 'x' * 30)
+        assert r.token is None and r.limitado_s == 0
+    r = portaria.entrar_por_link(bom)  # 11ª tentativa no mesmo minuto: nem confere
+    assert r.token is None and r.limitado_s > 0
+    relogio.t += 61
+    assert portaria.entrar_por_link(bom).token  # o link bom não foi gasto pela recusa
 
 
-def test_depois_da_trava_um_erro_trava_de_novo(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    for _ in range(5):
-        portaria.entrar('errada-errada')
-    portaria.relogio.t += 60
-    r = portaria.entrar('errada-de-novo')
-    assert r.token is None and r.travado_s == 60  # o contador só zera com a senha certa
-    portaria.relogio.t += 60
-    assert portaria.entrar(SENHA).token
-    assert portaria.entrar('errada-errada').restantes == 4
-
-
-def test_sessao_expira_apos_30_min_sem_uso_e_renova_com_uso(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    token = portaria.entrar(SENHA).token
-    portaria.relogio.t += 29 * 60
+def test_sessao_dura_30_dias_sem_uso_e_renova_com_uso(portaria, relogio):
+    token = portaria.entrar_por_link(acesso.emitir_link(agora=relogio())).token
+    relogio.t += 29 * DIA
     assert portaria.valida(token)  # usou: renova
-    portaria.relogio.t += 29 * 60
-    assert portaria.valida(token)
-    portaria.relogio.t += 30 * 60 + 1
-    assert not portaria.valida(token)
-    assert not portaria.valida(token)  # expirada some de vez
+    relogio.t += 29 * DIA
+    assert portaria.valida(token, renovar=False)  # chamada automática: confere sem renovar
+    relogio.t += 1 * DIA + 1
+    assert not portaria.valida(token)  # 30 dias desde o último uso real
+    assert _linhas('acesso_sessao') == []
 
 
-def test_sair_invalida_so_aquela_sessao(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    a, b = portaria.entrar(SENHA).token, portaria.entrar(SENHA).token
+def test_sessao_sobrevive_a_reinicio_do_servidor(portaria, relogio):
+    token = portaria.entrar_por_link(acesso.emitir_link(agora=relogio())).token
+    nova = acesso.Portaria(relogio=relogio)  # outro processo do servidor
+    assert nova.valida(token)
+
+
+def test_sair_encerra_so_a_atual_e_sair_de_todos_encerra_todas(portaria, relogio):
+    a = portaria.entrar_por_link(acesso.emitir_link(agora=relogio())).token
+    b = portaria.entrar_por_link(acesso.emitir_link(agora=relogio())).token
     portaria.fechar(a)
     assert not portaria.valida(a) and portaria.valida(b)
+    c = portaria.entrar_por_link(acesso.emitir_link(agora=relogio())).token
+    assert acesso.sessoes_ativas(agora=relogio()) == 2
+    assert acesso.encerrar_todas() == 2
+    assert not portaria.valida(b) and not portaria.valida(c)
 
 
-def test_apagar_senha_derruba_todas_as_sessoes(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    token = portaria.entrar(SENHA).token
-    v = acesso.versao()
-    acesso.apagar_senha()
-    assert acesso.versao() == v + 1 and not acesso.tem_senha()
-    assert not portaria.valida(token)
-    acesso.criar_senha(SENHA, SENHA)  # mesma senha de novo: a sessão antiga continua morta
-    assert not portaria.valida(token)
+def test_banco_nunca_guarda_token_em_claro(portaria, relogio, privado):
+    link = acesso.emitir_link(agora=relogio())
+    sessao = portaria.entrar_por_link(link).token
+    acesso.emitir_link(agora=relogio())
+    for arq in privado.glob('luzia.db*'):
+        bruto = arq.read_bytes()
+        assert link.encode() not in bruto and sessao.encode() not in bruto
+    assert [s['hash'] for s in _linhas('acesso_sessao')] == [hashlib.sha256(sessao.encode()).hexdigest()]
 
 
-def test_token_nao_fica_guardado_em_claro(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    token = portaria.entrar(SENHA).token
-    assert len(token) >= 40
-    assert token not in repr(portaria.__dict__)
+def test_acesso_json_antigo_com_senha_e_apagado_sem_erro(portaria, relogio, privado):
+    (privado / 'acesso.json').write_text(json.dumps({'versao': 3, 'senha': {'algoritmo': 'pbkdf2_sha256',
+                                                                            'iteracoes': 600000, 'sal': '00' * 16,
+                                                                            'hash': 'ab' * 32}}), encoding='utf-8')
+    token = portaria.entrar_por_link(acesso.emitir_link(agora=relogio())).token
+    assert token and portaria.valida(token)
+    assert not (privado / 'acesso.json').exists()  # o hash da senha antiga não fica largado
 
 
-# ------------------------------------------------------------------ rodada de correções 1
-def _travar(portaria):
-    for _ in range(5):
-        portaria.entrar('errada-errada')
-    assert portaria.travado_s() == 60
+def test_banco_ocupado_vira_acesso_indisponivel_sem_apagar_a_sessao(portaria, relogio, monkeypatch):
+    import sqlite3
+    token = portaria.entrar_por_link(acesso.emitir_link(agora=relogio())).token
+    original = acesso._abrir
 
+    def ocupado():
+        raise sqlite3.OperationalError('database is locked')
 
-def test_apagar_e_criar_senha_zeram_as_tentativas(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    _travar(portaria)
-    acesso.apagar_senha()  # `senha apagar` no chat, outro processo
-    assert portaria.travado_s() == 0
-    acesso.criar_senha('senha-nova-boa', 'senha-nova-boa')
-    assert portaria.entrar('senha-nova-boa').token
-    for _ in range(4):
-        portaria.entrar('errada-errada')
-    acesso.apagar_senha()
-    acesso.criar_senha(SENHA, SENHA)
-    assert portaria.entrar('errada-errada').restantes == 4  # contador zerado pela troca de senha
-
-
-def test_erro_de_leitura_passageiro_nao_derruba_sessao_nem_conta_erro(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    token = portaria.entrar(SENHA).token
-    original = acesso.Path.read_text
-    falhas = {'n': 0}
-
-    def le_com_falha(self, *a, **k):
-        if self.name == 'acesso.json' and falhas['n'] < 2:  # Windows: arquivo trocado neste instante
-            falhas['n'] += 1
-            raise PermissionError('em uso')
-        return original(self, *a, **k)
-
-    monkeypatch.setattr(acesso.Path, 'read_text', le_com_falha)
-    monkeypatch.setattr(acesso, 'ESPERA_LEITURA_S', 0)
-    assert portaria.valida(token)  # tenta de novo e lê
-    falhas['n'] = -100  # falha de vez
+    monkeypatch.setattr(acesso, '_abrir', ocupado)
     with pytest.raises(acesso.AcessoIndisponivel):
         portaria.valida(token)
-    r = portaria.entrar('errada-errada')
-    assert r.indisponivel and r.restantes == acesso.TENTATIVAS  # não contou como erro
-    monkeypatch.setattr(acesso.Path, 'read_text', original)
-    assert portaria.valida(token)  # a sessão continuou lá
-    assert portaria.entrar('errada-errada').restantes == 4
+    assert portaria.entrar_por_link('qualquer-' + 'x' * 30).indisponivel
+    monkeypatch.setattr(acesso, '_abrir', original)
+    assert portaria.valida(token)
 
 
-def test_iteracoes_abaixo_do_minimo_sao_refeitas_no_login(portaria, monkeypatch, privado):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    v = acesso.versao()
-    monkeypatch.setattr(acesso, 'ITERACOES', 2000)
-    assert portaria.entrar(SENHA).token
-    s = json.loads((privado / 'acesso.json').read_text(encoding='utf-8'))['senha']
-    assert s['iteracoes'] == 2000 and acesso.conferir(SENHA) and acesso.versao() == v
-
-
-def test_novo_login_invalida_o_token_anterior(portaria, monkeypatch):
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
-    acesso.criar_senha(SENHA, SENHA)
-    a = portaria.entrar(SENHA).token
-    b = portaria.entrar(SENHA).token
-    assert not portaria.valida(a) and portaria.valida(b)
+def test_tokens_estranhos_nao_quebram(portaria):
+    for ruim in (None, '', 12, 'x' * 300, ['lista']):
+        assert portaria.entrar_por_link(ruim).token is None
+        assert not portaria.valida(ruim)

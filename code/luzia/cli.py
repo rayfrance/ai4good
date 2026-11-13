@@ -7,7 +7,7 @@ O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de 
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
 - `foco --prompt-arquivo F | --arquivos P... [--cwd D] [--sessao S]` (foco sem hooks, para Antigravity, Codex e Cursor)
 - `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
-- `senha` (redefine a senha do painel: `senha apagar`, só depois do sim da pessoa),
+- `acesso [sair-de-todos]` (sessões do painel; `career-map` já entra logado),
   `privacidade [mascarar-modelo on|off]` (mascarar ou não o que vai ao modelo; padrão: desligado)
 """
 
@@ -838,25 +838,47 @@ def cmd_foco(args) -> None:
     ], 'Quer responder ao lampejo agora?')
 
 
-def cmd_senha(valor: str) -> None:
-    """Redefinir a senha do painel. O chat/CLI roda como a pessoa no sistema (essa já é a autenticação), então não
-    pede a senha antiga: só o sim explícito (botão), que roda `senha apagar`. Apagar derruba as sessões abertas."""
+def cmd_acesso(valor: str, restantes: list[str]) -> None:
+    """Sessões do painel. O chat roda como a pessoa no sistema, então `career-map` já entra logado; aqui ela vê quantas
+    sessões estão abertas e pode encerrar todas (`acesso sair-de-todos`, só depois do sim explícito no botão)."""
     from . import acesso
-    print('## ✦ Luzia · senha do painel')
-    if not acesso.tem_senha():
-        print('Você ainda não tem senha no painel. Ao abrir o painel, a Luzia pede para criar uma '
-              f'(mínimo de {acesso.MIN_SENHA} caracteres); ela fica só nesta máquina, como hash.')
-        botoes([BT_PAINEL], 'Quer abrir o painel para criar a senha?')
+    print('## ✦ Luzia · acesso ao painel')
+    if (valor or '').strip().lower() == 'sair-de-todos':
+        if restantes[:1] == ['confirmar']:
+            n = acesso.encerrar_todas()
+            print(f'✦ {n} sessão(ões) encerrada(s). Para voltar, abra o painel pelo chat (`career-map`).')
+            botoes([BT_PAINEL], 'Quer abrir o painel de novo?')
+            return
+        print('Encerrar todas as sessões tira o painel de todos os navegadores em que ele está aberto. '
+              'Para voltar, basta abrir o painel pelo chat. Seus dados não mudam.')
+        botoes([{'rotulo': 'Sim, sair de todos', 'descricao': 'encerra todas as sessões do painel',
+                 'rodar': 'acesso sair-de-todos confirmar'}, BT_PAINEL], 'Quer encerrar todas as sessões do painel?')
         return
-    if (valor or '').strip().lower() == 'apagar':
-        acesso.apagar_senha()
-        print('✦ Senha apagada e sessões abertas encerradas. Na próxima vez que abrir o painel, crie uma senha nova.')
-        botoes([BT_PAINEL], 'Quer abrir o painel para criar a senha nova?')
-        return
-    print('A senha do painel existe. Apagar encerra as sessões abertas no navegador; no próximo acesso você cria '
-          'outra. Os seus dados (trajetória, avanços, entregas) não mudam.')
-    botoes([{'rotulo': 'Sim, apagar a senha', 'descricao': 'encerra as sessões; o painel pede uma senha nova',
-             'rodar': 'senha apagar'}, BT_PAINEL], 'Quer apagar a senha do painel para criar outra?')
+    n = acesso.sessoes_ativas()
+    print(f'{n} sessão(ões) do painel aberta(s). Abrir o painel pelo chat (`career-map`) já entra; a sessão dura 30 '
+          'dias sem uso e renova a cada uso. "Sair", no painel, encerra só aquele navegador.')
+    botoes([BT_PAINEL, {'rotulo': 'Sair de todos', 'descricao': 'encerra todas as sessões do painel',
+                        'rodar': 'acesso sair-de-todos'}], 'Quer abrir o painel ou encerrar as sessões?')
+
+
+def abrir_painel() -> None:
+    """Abre o painel já logado: link de uso único (2 min) no fragmento da URL. O link só aparece no chat quando o
+    navegador não pôde ser aberto (ex.: agente remoto), uma vez e com o aviso de prazo."""
+    import webbrowser
+    from . import acesso
+    if not panel_up():
+        start_panel()
+    url = f'{PAINEL}/#entrar={acesso.emitir_link()}'
+    try:
+        aberto = bool(webbrowser.open(url))
+    except Exception:
+        aberto = False
+    if aberto:
+        print(f'## ✦ Luzia · painel aberto em {PAINEL} (já entra com a sua sessão)')
+    else:
+        print('## ✦ Luzia · não consegui abrir o navegador daqui')
+        print(f'Abra este link no navegador desta máquina. Ele vale 2 minutos e funciona uma vez só: {url}')
+    botoes([BT_TRAJETORIA, BT_PAINEL])
 
 
 def cmd_privacidade(valor: str, restantes: list[str]) -> None:
@@ -881,7 +903,7 @@ def cmd_privacidade(valor: str, restantes: list[str]) -> None:
         print('◐ Sem termos em `private/termos.txt`: com o mascaramento ligado, nomes de empresa, produto e cliente '
               'passariam como estão. Liste-os lá, um por linha.')
     print('O interruptor vale só para as chamadas da própria Luzia ao modelo; o agente do chat (Claude Code, Codex...) '
-          'recebe os dados reais na saída da CLI. Na tela nada é mascarado: o painel pede a sua senha. Arquivos '
+          'recebe os dados reais na saída da CLI. Na tela nada é mascarado: o painel só abre pelo seu agente. Arquivos '
           'versionados nunca recebem dados reais.')
     alterna = ({'rotulo': 'Enviar dados reais', 'descricao': 'desliga o mascaramento no envio ao modelo',
                 'rodar': 'privacidade mascarar-modelo off'} if ligado else
@@ -897,7 +919,7 @@ COMANDOS = [
     'leituras', 'foco', 'agente',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido',
-    'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo', 'senha', 'privacidade',
+    'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo', 'acesso', 'privacidade',
 ]
 
 
@@ -1009,8 +1031,8 @@ def main() -> None:
         cmd_foco(args)
         return
 
-    if args.comando == 'senha':
-        cmd_senha(args.valor)
+    if args.comando == 'acesso':
+        cmd_acesso(args.valor, restantes)
         return
 
     if args.comando == 'privacidade':
@@ -1018,15 +1040,7 @@ def main() -> None:
         return
 
     if args.comando == 'career-map':
-        import webbrowser
-        if not panel_up():
-            start_panel()
-        print(f'## ✦ Luzia · painel aberto em {PAINEL}')
-        try:
-            webbrowser.open(PAINEL)
-        except Exception:
-            pass
-        botoes([BT_TRAJETORIA, BT_PAINEL])
+        abrir_painel()
         return
 
     if args.comando == 'triage':

@@ -161,20 +161,18 @@ class ClientePainel:
                 self.cookie = token or None
         return resp.status, data, cabecalhos
 
-    def entrar(self, senha: str = 'senha-de-teste-123') -> None:
-        """Cria a senha (se ainda não existe) e entra: o cookie fica guardado."""
-        c, _, _ = self.pedir('POST', '/api/acesso/criar', {'senha': senha, 'confirmacao': senha})
-        if c != 200:
-            c, r, _ = self.pedir('POST', '/api/acesso/entrar', {'senha': senha})
-            assert c == 200, r
+    def entrar(self) -> None:
+        """Entra como o agente faz: `career-map` grava um link de uso único e o painel o troca por uma sessão."""
+        from luzia import acesso
+        c, r, _ = self.pedir('POST', '/api/acesso/link', {'token': acesso.emitir_link()})
+        assert c == 200, r
 
 
 @pytest.fixture
 def servidor(privado, monkeypatch):
-    """Servidor do painel em thread, numa porta livre, com portaria nova e PBKDF2 leve (só nos testes)."""
+    """Servidor do painel em thread, numa porta livre, com portaria nova (sem tentativas de link de outro teste)."""
     import threading
     from luzia import acesso, server
-    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
     monkeypatch.setattr(server, 'PORTARIA', acesso.Portaria())
     httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
     port = httpd.server_address[1]

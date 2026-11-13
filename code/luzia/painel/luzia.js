@@ -89,7 +89,7 @@ async function api(caminho, dados, auto = false) {
     const j = await r.json().catch(() => ({}));
     if (r.status === 401 && j.login) {  // sessão ausente, vencida ou derrubada: volta ao login e para o polling
       acessoAoIniciar();
-      return { erro: j.erro || 'entre com a sua senha', login: true };
+      return { erro: j.erro || 'abra o painel pelo seu agente', login: true };
     }
     return r.ok ? j : { ...j, erro: j.erro || `erro ${r.status}` };
   } catch {
@@ -800,7 +800,7 @@ function telaAjustes() {
     <div class="opcoes">${Object.entries(AGENTES).map(([k, [t, d]]) => opcao('agente', k, ['agente', t, d], E.agente === k)).join('')}</div>
     <div class="titulo"><h2>Foco da Luzia na sessão</h2><span>como a Luzia acompanha seu trabalho em tempo real</span></div>
     <div class="opcoes">${Object.entries(MODOS).map(([k, v]) => opcao('modo', k, v, E.modo === k)).join('')}</div>
-    <div class="titulo"><h2>Privacidade no envio ao modelo</h2><span>na tela você vê tudo real; o painel pede a sua senha</span></div>
+    <div class="titulo"><h2>Privacidade no envio ao modelo</h2><span>na tela você vê tudo real; o painel só abre pelo seu agente</span></div>
     <div class="opcoes">
       ${opcao('privacidade', 'off', ['olho', 'Enviar dados reais', 'padrão: o modelo recebe os fatos como você os vê'], !E.privacidade?.mascarar_modelo)}
       ${opcao('privacidade', 'on', ['info', 'Mascarar antes de enviar', 'e-mails, tickets e colegas do git viram marcadores; empresa e clientes, se listados em termos.txt'], !!E.privacidade?.mascarar_modelo)}
@@ -1101,13 +1101,15 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') $('#gaveta').hidden = true;
 });
 
-// ------------------------------------------------------------------ acesso (senha local)
-// Nenhum dado é buscado antes do login. A sessão vive só no cookie HttpOnly (o JS não a vê nem guarda nada no
-// navegador); qualquer 401 traz de volta esta tela e para o polling.
+// ------------------------------------------------------------------ acesso (entrada herdada do agente)
+// O painel abre pelo agente (`career-map`) com um link de uso único no fragmento (#entrar=...), que nunca vai ao
+// servidor nem ao Referer: a página o tira da barra e do histórico e o troca por uma sessão de 30 dias (cookie
+// HttpOnly que o JS não vê). Nenhum dado é buscado antes de haver sessão; qualquer 401 traz de volta a tela de entrada
+// e para o polling. Nada fica guardado no navegador.
 const MAIN_HTML = $('main').innerHTML;
+const COMANDO_PAINEL = '/luzia:career-map';
 let polling = null;
 let acessoAberto = false;
-let travaTimer = null;
 
 function pararPolling() {
   clearInterval(polling);
@@ -1126,97 +1128,46 @@ function limparPainel() {
   $('#telemetria').innerHTML = '';
 }
 
+function linkDaBarra() {
+  const m = /^#entrar=([\w-]{20,256})$/.exec(location.hash || '');
+  if (location.hash) history.replaceState(null, '', location.pathname);  // o token sai da barra e do histórico
+  return m ? m[1] : null;
+}
+
 async function acessoAoIniciar() {
   if (acessoAberto) return;
   acessoAberto = true;
   limparPainel();
   document.body.classList.add('fora');
+  const token = linkDaBarra();
+  let aviso = '';
+  if (token) {
+    const r = await api('/api/acesso/link', { token });
+    if (!r.erro) return entrou();
+    aviso = r.erro;
+  }
   const st = await api('/api/acesso/estado');
   if (st.erro) {
-    $('#acesso').innerHTML = `<div class="bloco destaque acesso-cartao"><span class="sobre">Luzia</span><h3>Não consegui abrir.</h3><p>${esc(st.erro)}</p></div>`;
-    acessoAberto = false;
-    return;
+    aviso = st.erro;
+  } else if (st.sessao_valida) {
+    return entrou();
   }
-  if (st.sessao_valida) return entrou();
-  telaAcesso(st);
+  telaAcesso(aviso);
 }
 
-function telaAcesso(st) {
-  const criar = !st.senha_criada;
-  const min = st.min_senha || 8;
+function telaAcesso(aviso = '') {
   $('#acesso').innerHTML = `<div class="bloco destaque acesso-cartao">
     <div class="marca"><img src="logo.svg" alt=""><div><b>Luzia</b><small>sua líder técnica</small></div></div>
-    <span class="sobre">${criar ? 'Primeiro acesso' : 'Painel protegido'}</span>
-    <h3>${criar ? 'Crie a senha do seu painel' : 'Entre no seu painel'}</h3>
-    <p>${criar ? `O painel mostra seus dados reais (empresa, módulos, tickets, colegas). Só quem tiver esta senha vê. Mínimo de ${min} caracteres.`
-      : 'Seus dados reais aparecem só depois de entrar. A sessão cai após 30 min sem uso.'}</p>
-    <form id="form-acesso" class="campos" data-modo="${criar ? 'criar' : 'entrar'}" novalidate>
-      <label>Senha<input id="ac-senha" type="password" autocomplete="${criar ? 'new-password' : 'current-password'}" minlength="${min}" required autofocus></label>
-      ${criar ? `<label>Confirme a senha<input id="ac-conf" type="password" autocomplete="new-password" minlength="${min}" required></label>` : ''}
-      <button class="btn prim" type="submit" id="ac-enviar">${ic('check')}${criar ? 'Criar senha e entrar' : 'Entrar'}</button>
-    </form>
-    <p class="dica acesso-msg" id="ac-msg" role="alert"></p>
-    <p class="dica">${criar ? 'A senha fica só nesta máquina, como hash, em private/acesso.json.'
-      : 'Esqueceu a senha? No chat, rode <b>/luzia:senha</b> (ou <b>senha</b> na CLI): ela é apagada depois do seu sim e aqui você cria outra.'}</p>
+    <span class="sobre">Painel protegido</span>
+    <h3>Abra o painel pelo seu agente</h3>
+    <p>No chat do seu agente, rode o comando abaixo (ou toque em "Abrir o painel" nos botões da Luzia). Ele abre esta página já com a sua sessão, que dura 30 dias sem uso.</p>
+    <div class="acoes-bt"><code class="tag">${COMANDO_PAINEL}</code><button class="btn sec mini" type="button" id="ac-copiar">${ic('copiar')}Copiar</button></div>
+    <p class="dica acesso-msg" role="alert">${esc(aviso)}</p>
+    <p class="dica">Assim, só quem usa o seu agente nesta máquina vê os seus dados reais.</p>
   </div>`;
-  if (st.travado_s) travar(st.travado_s);
-  $('#ac-senha')?.focus();
-}
-
-function travar(segundos) {
-  clearInterval(travaTimer);
-  let resto = segundos;
-  const bt = $('#ac-enviar');
-  const msg = $('#ac-msg');
-  const passo = () => {
-    if (!bt || !msg) return clearInterval(travaTimer);
-    if (resto <= 0) {
-      clearInterval(travaTimer);
-      bt.disabled = false;
-      msg.textContent = 'Pode tentar de novo.';
-      return;
-    }
-    bt.disabled = true;
-    msg.textContent = `Muitas tentativas erradas. Espere ${resto} s.`;
-    resto -= 1;
-  };
-  passo();
-  travaTimer = setInterval(passo, 1000);
-}
-
-async function enviarAcesso(form) {
-  const senha = $('#ac-senha').value;
-  const conf = $('#ac-conf');
-  const msg = $('#ac-msg');
-  const criar = form.dataset.modo === 'criar';
-  if (criar && senha.length < Number($('#ac-senha').minLength || 8)) {
-    msg.textContent = `A senha precisa ter pelo menos ${$('#ac-senha').minLength} caracteres.`;
-    return;
-  }
-  if (criar && senha !== conf.value) {
-    msg.textContent = 'A confirmação não é igual à senha.';
-    return;
-  }
-  const bt = $('#ac-enviar');
-  bt.disabled = true;
-  msg.textContent = criar ? 'Guardando…' : 'Conferindo…';
-  const r = await api(criar ? '/api/acesso/criar' : '/api/acesso/entrar',
-    criar ? { senha, confirmacao: conf.value } : { senha });
-  $('#ac-senha').value = '';
-  if (conf) conf.value = '';
-  bt.disabled = false;
-  if (!r.erro) return entrou();
-  if (r.segundos) return travar(r.segundos);
-  if (/já foi criada|ainda não há senha/.test(r.erro)) {  // mudou em outro lugar (outra aba, ou `senha` no chat)
-    acessoAberto = false;
-    return acessoAoIniciar();
-  }
-  msg.textContent = r.restantes ? `${r.erro} · ${r.restantes} tentativa(s) antes de travar por 60 s.` : r.erro;
-  $('#ac-senha').focus();
 }
 
 async function entrou() {
-  clearInterval(travaTimer);
   acessoAberto = false;
   $('#acesso').innerHTML = '';
   document.body.classList.remove('fora');
@@ -1226,16 +1177,26 @@ async function entrou() {
 
 async function sair() {
   await api('/api/acesso/sair', {});
-  toast('Você saiu do painel.');
+  toast('Você saiu do painel neste navegador.');
   acessoAoIniciar();
 }
 
-document.addEventListener('submit', (ev) => {
-  if (ev.target.id !== 'form-acesso') return;
-  ev.preventDefault();
-  enviarAcesso(ev.target);
+document.addEventListener('click', async (ev) => {
+  if (ev.target.closest('#ac-copiar')) {
+    try {
+      await navigator.clipboard.writeText(COMANDO_PAINEL);
+      toast('Comando copiado: cole no chat do seu agente.');
+    } catch {
+      toast(`Copie: ${COMANDO_PAINEL}`);
+    }
+  }
 });
 $('#sair').addEventListener('click', sair);
+window.addEventListener('hashchange', () => {  // link novo do agente numa aba que já estava aberta
+  if (!/^#entrar=/.test(location.hash)) return;
+  acessoAberto = false;
+  acessoAoIniciar();
+});
 
 async function atualizarSozinho() {
   if (!E || !$('#gaveta').hidden || mostrarFormPedido) return;

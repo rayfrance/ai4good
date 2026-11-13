@@ -7,8 +7,10 @@ Proteção contra outros sites abertos no navegador: só atende `Host` localhost
 (barra DNS rebinding) e só aceita POST com `Content-Type: application/json` vindo da própria página
 (um site de fora não consegue mandar esse POST sem permissão de CORS, que este servidor nunca dá).
 
-Login (`acesso.py`): os arquivos do painel e as rotas `ABERTAS_GET`/`ABERTAS_POST` (ping e acesso) não pedem sessão;
-qualquer outro caminho `/api...`, GET ou POST, listado ou não, devolve 401 JSON sem um cookie `luzia_sessao` válido.
+Entrada herdada do agente (`acesso.py`): `career-map` abre o painel com um link de uso único no fragmento
+(`#entrar=<token>`), que a página troca por uma sessão de 30 dias em `/api/acesso/link`. Os arquivos do painel e as
+rotas `ABERTAS_GET`/`ABERTAS_POST` (ping e acesso) não pedem sessão; qualquer outro caminho `/api...`, GET ou POST,
+listado ou não, devolve 401 JSON sem um cookie `luzia_sessao` válido.
 As proteções acima (Host, Origin/Sec-Fetch-Site, JSON, 64 KB) valem para todas as rotas, inclusive as de acesso.
 """
 
@@ -41,14 +43,15 @@ AUTO_LEITURAS_MIN = 10  # leituras automáticas do painel: no máximo uma rodada
 
 # Rotas da API. Só as ABERTAS dispensam sessão; toda outra `/api...` (inclusive uma que ainda não exista) exige login.
 ABERTAS_GET = ('/api/ping', '/api/acesso/estado')
-ABERTAS_POST = ('/api/acesso/criar', '/api/acesso/entrar', '/api/acesso/sair')
+ABERTAS_POST = ('/api/acesso/link', '/api/acesso/sair')
 ROTAS_GET = ('/api/estado', '/api/sessao', '/api/avancos', '/api/entrega')
 ROTAS_POST = ('/api/nivel', '/api/autoavaliacao', '/api/pedido', '/api/leituras', '/api/identidade',
               '/api/entrega/acender', '/api/entregas/ampliar', '/api/modo', '/api/agente', '/api/enviar', '/api/modelo',
               '/api/modelo/testar', '/api/descartar', '/api/restaurar', '/api/subir', '/api/acender', '/api/trecho',
               '/api/iniciar', '/api/privacidade')
-PORTARIA = acesso.Portaria()  # sessões e trava de tentativas: só na memória deste processo
+PORTARIA = acesso.Portaria()  # links e sessões no banco privado; só o limite de links errados fica em memória
 COOKIE_ATTRS = 'HttpOnly; SameSite=Strict; Path=/'  # sem Secure: o painel é http://localhost
+COOKIE_MAX_AGE = acesso.SESSAO_MAX_S
 
 
 def repo_cwd() -> str:
@@ -266,7 +269,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self._cabecalhos_seguros()
-        for nome, valor in cabecalhos or []:
+        cabecalhos = list(cabecalhos or [])
+        renovada = getattr(self, '_sessao_renovada', None)
+        if renovada and not any(n == 'Set-Cookie' for n, _ in cabecalhos):  # uso real: o cookie ganha mais 30 dias
+            cabecalhos += self._cookie_sessao(renovada)
+        for nome, valor in cabecalhos:
             self.send_header(nome, valor)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
@@ -287,61 +294,55 @@ class Handler(BaseHTTPRequestHandler):
 
     def _sessao_ok(self) -> bool:
         # Pedidos automáticos do painel (polling de 4 s, leituras automáticas) conferem a sessão sem renovar: uma aba
-        # esquecida aberta cai após 30 min sem um gesto da pessoa.
+        # esquecida aberta cai após 30 dias sem um gesto da pessoa. Uso real renova a sessão e o cookie.
         automatico = (self.headers.get('X-Luzia-Auto') or '').strip() == '1'
+        token = self._token()
         try:
-            return PORTARIA.valida(self._token(), renovar=not automatico)
-        except acesso.AcessoIndisponivel:  # leitura passageira de acesso.json: 503, a sessão continua
+            ok = PORTARIA.valida(token, renovar=not automatico)
+        except acesso.AcessoIndisponivel:  # banco ocupado: 503, a sessão continua
             self._acesso_indisponivel = True
             return False
+        if ok and not automatico:
+            self._sessao_renovada = token
+        return ok
 
     def _indisponivel(self) -> None:
-        self._json({'erro': 'a Luzia não conseguiu conferir a senha agora; tente de novo'}, 503,
+        self._json({'erro': 'a Luzia não conseguiu conferir a sua sessão agora; tente de novo'}, 503,
                    [('Retry-After', '1')])
 
     def _negar(self) -> None:
         if getattr(self, '_acesso_indisponivel', False):
             return self._indisponivel()
-        self._json({'erro': 'entre com a sua senha para ver o painel', 'login': True}, 401)
+        self._json({'erro': 'abra o painel pelo seu agente (/luzia:career-map)', 'login': True}, 401)
 
     @staticmethod
     def _protegida(path: str, abertas: tuple[str, ...]) -> bool:
         return path.lower().startswith('/api') and path not in abertas
 
     def _estado_acesso(self) -> dict:
-        return {'senha_criada': acesso.tem_senha(), 'sessao_valida': PORTARIA.valida(self._token(), renovar=False),
-                'travado_s': PORTARIA.travado_s(), 'min_senha': acesso.MIN_SENHA}
+        return {'sessao_valida': PORTARIA.valida(self._token(), renovar=False)}
 
     @staticmethod
     def _cookie_sessao(token: str) -> list[tuple[str, str]]:
-        return [('Set-Cookie', f'{acesso.COOKIE}={token}; {COOKIE_ATTRS}')]
+        return [('Set-Cookie', f'{acesso.COOKIE}={token}; Max-Age={COOKIE_MAX_AGE}; {COOKIE_ATTRS}')]
 
     def _acesso(self, path: str, dados: dict) -> None:
-        """Rotas abertas de acesso: criar a senha, entrar e sair. A senha nunca volta na resposta nem vai ao log."""
-        if path == '/api/acesso/criar':
-            try:
-                acesso.criar_senha(dados.get('senha'), dados.get('confirmacao'))
-            except acesso.AcessoIndisponivel:
-                return self._indisponivel()
-            except acesso.SenhaJaExiste:
-                return self._json({'erro': 'a senha já foi criada: entre com ela (para trocar, use "senha" no chat)'}, 409)
-            except ValueError as e:
-                return self._json({'erro': str(e)}, 400)
-            PORTARIA.fechar_todas()
-            return self._json({'ok': True}, 200, self._cookie_sessao(PORTARIA.abrir()))
-        if path == '/api/acesso/entrar':
-            r = PORTARIA.entrar(dados.get('senha'))
+        """Rotas abertas de acesso: trocar o link de uso único por uma sessão, e sair. Tokens nunca voltam nem vão ao log."""
+        if path == '/api/acesso/link':
+            r = PORTARIA.entrar_por_link(dados.get('token'))
             if r.indisponivel:
                 return self._indisponivel()
-            if r.travado_s:
-                return self._json({'erro': f'muitas tentativas: espere {r.travado_s} s', 'segundos': r.travado_s}, 429,
-                                  [('Retry-After', str(r.travado_s))])
-            if r.sem_senha:
-                return self._json({'erro': 'ainda não há senha: crie a sua primeiro'}, 409)
+            if r.limitado_s:
+                return self._json({'erro': f'muitas tentativas: espere {r.limitado_s} s', 'segundos': r.limitado_s},
+                                  429, [('Retry-After', str(r.limitado_s))])
             if not r.token:
-                return self._json({'erro': 'senha incorreta', 'restantes': r.restantes}, 401)
+                return self._json({'erro': 'este link já foi usado ou venceu: abra o painel pelo seu agente '
+                                           '(/luzia:career-map)'}, 401)
             return self._json({'ok': True}, 200, self._cookie_sessao(r.token))
-        PORTARIA.fechar(self._token())  # /api/acesso/sair
+        try:  # /api/acesso/sair: encerra só a sessão deste navegador
+            PORTARIA.fechar(self._token())
+        except acesso.AcessoIndisponivel:
+            return self._indisponivel()
         return self._json({'ok': True}, 200, [('Set-Cookie', f'{acesso.COOKIE}=; Max-Age=0; {COOKIE_ATTRS}')])
 
     def _drenar(self) -> None:
@@ -382,6 +383,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         self._acesso_indisponivel = False
+        self._sessao_renovada = None
         if self._barrar(post=False):
             return
         parsed = urlparse(self.path)
@@ -447,6 +449,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         self._acesso_indisponivel = False
+        self._sessao_renovada = None
         if self._barrar(post=True):
             return
         try:

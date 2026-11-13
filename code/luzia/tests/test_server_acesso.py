@@ -281,3 +281,36 @@ def test_instrucoes_ao_agente_nao_proibem_os_nomes_da_dona_dos_dados():
         for proibido in ('sem nomes da empresa', 'nunca escreva nomes', 'nunca cite nomes', 'nem cite nomes',
                          'sem nomes da empresa, produtos internos'):
             assert proibido not in texto, (arq.name, proibido)
+
+
+def test_leitura_passageira_do_acesso_responde_503_sem_derrubar_a_sessao(servidor, monkeypatch):
+    servidor.entrar(SENHA)
+
+    original, quebrado = acesso._ler, [True]
+
+    def falha():
+        if quebrado[0]:
+            raise acesso.AcessoIndisponivel('em uso')
+        return original()
+
+    monkeypatch.setattr(acesso, '_ler', falha)
+    c, r, _ = servidor.pedir('GET', '/api/estado')
+    assert c == 503 and not r.get('login')
+    assert servidor.pedir('GET', '/api/acesso/estado')[0] == 503
+    assert servidor.pedir('POST', '/api/acesso/entrar', {'senha': 'errada-errada'})[0] == 503
+    assert servidor.pedir('POST', '/api/acesso/criar', {'senha': SENHA, 'confirmacao': SENHA})[0] == 503
+    quebrado[0] = False
+    assert servidor.pedir('GET', '/api/estado')[0] == 200  # a sessão seguiu valendo
+    assert servidor.pedir('POST', '/api/acesso/entrar', {'senha': 'errada-errada'})[1]['restantes'] == 4
+
+
+def test_novo_login_no_painel_derruba_o_cookie_anterior(servidor):
+    servidor.entrar(SENHA)
+    antigo = servidor.cookie
+    servidor.cookie = None
+    assert servidor.pedir('POST', '/api/acesso/entrar', {'senha': SENHA})[0] == 200
+    novo = servidor.cookie
+    servidor.cookie = antigo
+    assert servidor.pedir('GET', '/api/estado')[0] == 401
+    servidor.cookie = novo
+    assert servidor.pedir('GET', '/api/estado')[0] == 200

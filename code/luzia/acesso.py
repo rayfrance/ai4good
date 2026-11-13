@@ -9,7 +9,12 @@
 - Força bruta: 5 erros seguidos travam a entrada por 60 s. O contador só zera com a senha certa, então depois da trava
   cada novo erro trava de novo.
 - Redefinir (`senha` no chat/CLI, que já roda como a pessoa no sistema): apaga a senha e soma 1 à `versao` de
-  `acesso.json`; toda sessão aberta com a versão antiga deixa de valer, inclusive em outro processo.
+  `acesso.json`; toda sessão aberta com a versão antiga deixa de valer, inclusive em outro processo. Criar a senha também
+  soma 1. Mudar a versão zera as tentativas erradas e a trava.
+- Uma sessão por vez: entrar de novo encerra a sessão anterior.
+- Hash com menos iterações que `ITERACOES` é refeito no próximo login certo (sem mudar a versão).
+- Erro passageiro ao ler `acesso.json` (Windows: arquivo sendo trocado) é tentado de novo; se persistir, vira
+  `AcessoIndisponivel` (o servidor responde 503), sem derrubar sessões nem contar como tentativa errada.
 - Nada aqui grava ou devolve a senha, o hash ou o token em log ou resposta.
 """
 
@@ -37,11 +42,17 @@ SESSAO_MAX_S = 30 * 60
 TENTATIVAS = 5
 TRAVA_S = 60
 COOKIE = 'luzia_sessao'
+LEITURAS = 4             # tentativas de ler acesso.json antes de desistir
+ESPERA_LEITURA_S = 0.05
 _CRIAR = threading.Lock()
 
 
 class SenhaJaExiste(RuntimeError):
     """Já há uma senha (ou um acesso.json que não dá para ler): criar outra exige redefinir pelo chat."""
+
+
+class AcessoIndisponivel(RuntimeError):
+    """`acesso.json` existe mas não deu para ler agora (erro de sistema passageiro): tente de novo."""
 
 
 def caminho() -> Path:
@@ -51,14 +62,36 @@ def caminho() -> Path:
 def _ler() -> tuple[dict, bool]:
     """(dados, legível). Arquivo ausente = vazio e legível; corrompido = vazio e ilegível (cópia guardada ao lado)."""
     p = caminho()
-    if not p.exists():
-        return {}, True
+    for tentativa in range(LEITURAS):
+        try:
+            texto = p.read_text(encoding='utf-8')
+            break
+        except FileNotFoundError:
+            return {}, True
+        except OSError:
+            if tentativa == LEITURAS - 1:
+                arquivos.registrar_erro('acesso ler acesso.json', 'OSError')
+                raise AcessoIndisponivel('não deu para ler a senha agora; tente de novo') from None
+            time.sleep(ESPERA_LEITURA_S * (tentativa + 1))
     try:
-        dados = json.loads(p.read_text(encoding='utf-8'))
-    except (OSError, ValueError):
+        dados = json.loads(texto)
+    except ValueError:
         arquivos.ler_json(p, {})  # guarda a cópia do arquivo ruim e registra só o tipo do erro
         return {}, False
     return (dados, True) if isinstance(dados, dict) else ({}, False)
+
+
+def _versao_de(dados: dict) -> int:
+    try:
+        return int(dados.get('versao') or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _situacao() -> tuple[int, bool]:
+    """(versão, há senha) numa só leitura do arquivo."""
+    dados, legivel = _ler()
+    return _versao_de(dados), (not legivel or 'senha' in dados)
 
 
 def _senha_valida(s) -> bool:
@@ -70,17 +103,12 @@ def _senha_valida(s) -> bool:
 
 
 def versao() -> int:
-    dados, _ = _ler()
-    try:
-        return int(dados.get('versao') or 0)
-    except (TypeError, ValueError):
-        return 0
+    return _situacao()[0]
 
 
 def tem_senha() -> bool:
     """True quando há senha, ou quando `acesso.json` existe mas não dá para ler (não deixa criar outra por cima)."""
-    dados, legivel = _ler()
-    return not legivel or 'senha' in dados
+    return _situacao()[1]
 
 
 def _normalizar(senha: str) -> bytes:
@@ -103,20 +131,33 @@ def validar_nova(senha, confirmacao) -> str:
     return senha
 
 
+def _registro(senha: str, criada_em: str | None = None) -> dict:
+    sal = secrets.token_bytes(TAMANHO_SAL)
+    iteracoes = max(int(ITERACOES), 1)
+    return {'algoritmo': ALGORITMO, 'iteracoes': iteracoes, 'sal': sal.hex(),
+            'hash': _derivar(senha, sal, iteracoes).hex(),
+            'criada_em': criada_em or datetime.now().isoformat(timespec='seconds')}
+
+
 def criar_senha(senha, confirmacao) -> None:
-    """Grava o hash da senha nova. Só quando ainda não existe senha (SenhaJaExiste); regra inválida: ValueError."""
+    """Grava o hash da senha nova (versão + 1). Só quando ainda não existe senha (SenhaJaExiste); regra inválida:
+    ValueError. No primeiro uso e depois de `senha apagar`, quem chegar primeiro ao painel cria a senha."""
     validar_nova(senha, confirmacao)
     with _CRIAR:  # dois pedidos juntos no mesmo servidor: só o primeiro cria
-        if tem_senha():
+        v, existe = _situacao()
+        if existe:
             raise SenhaJaExiste('a senha do painel já existe')
-        sal = secrets.token_bytes(TAMANHO_SAL)
-        iteracoes = max(int(ITERACOES), 1)
-        arquivos.gravar_json(caminho(), {
-            'versao': versao(),
-            'senha': {'algoritmo': ALGORITMO, 'iteracoes': iteracoes, 'sal': sal.hex(),
-                      'hash': _derivar(senha, sal, iteracoes).hex(),
-                      'criada_em': datetime.now().isoformat(timespec='seconds')},
-        })
+        arquivos.gravar_json(caminho(), {'versao': v + 1, 'senha': _registro(senha)})
+
+
+def _refazer_hash_se_fraco(senha: str) -> None:
+    """Hash com menos iterações que o mínimo atual: regrava com sal novo e `ITERACOES`, mantendo a versão."""
+    with _CRIAR:
+        dados, legivel = _ler()
+        s = dados.get('senha') if legivel else None
+        if not _senha_valida(s) or int(s['iteracoes']) >= ITERACOES:
+            return
+        arquivos.gravar_json(caminho(), {**dados, 'senha': _registro(senha, s.get('criada_em'))})
 
 
 def conferir(senha) -> bool:
@@ -148,6 +189,7 @@ class Entrada:
     restantes: int = TENTATIVAS
     travado_s: int = 0
     sem_senha: bool = False
+    indisponivel: bool = False
 
 
 class Portaria:
@@ -158,14 +200,19 @@ class Portaria:
         self._sessoes: dict[str, tuple[float, int]] = {}  # sha256(token) → (último uso, versão do acesso)
         self._erros = 0
         self._travado_ate = 0.0
+        self._versao_tentativas: int | None = None  # versão do acesso a que o contador de erros se refere
         self._trava = threading.Lock()
 
     # ------------------------------------------------------------ sessões
-    def abrir(self) -> str:
+    def abrir(self, unica: bool = True) -> str:
+        """Nova sessão; `unica` encerra as anteriores (uma sessão por vez)."""
         token = secrets.token_urlsafe(32)
+        v = versao()
         with self._trava:
+            if unica:
+                self._sessoes.clear()
             self._limpar()
-            self._sessoes[_chave(token)] = (self.relogio(), versao())
+            self._sessoes[_chave(token)] = (self.relogio(), v)
         return token
 
     def _limpar(self) -> None:
@@ -174,10 +221,14 @@ class Portaria:
             del self._sessoes[k]
 
     def valida(self, token: str | None, renovar: bool = True) -> bool:
+        """Sessão válida? `AcessoIndisponivel` (leitura passageira) sobe sem apagar a sessão."""
         if not token or not isinstance(token, str) or len(token) > 256:
             return False
         chave = _chave(token)
-        v_atual, senha = versao(), tem_senha()
+        with self._trava:
+            if chave not in self._sessoes:
+                return False
+        v_atual, senha = _situacao()
         with self._trava:
             dado = self._sessoes.get(chave)
             if dado is None:
@@ -201,19 +252,41 @@ class Portaria:
             self._sessoes.clear()
 
     # ------------------------------------------------------------ entrada
-    def travado_s(self) -> int:
+    def _acompanhar_versao(self, v: int) -> None:
+        """Senha criada ou apagada (versão nova): as tentativas erradas e a trava recomeçam do zero."""
+        if self._versao_tentativas is not None and v != self._versao_tentativas:
+            self._erros = 0
+            self._travado_ate = 0.0
+        self._versao_tentativas = v
+
+    def _restante(self) -> int:
         resto = self._travado_ate - self.relogio()
         return max(0, int(-(-resto // 1)))  # arredonda para cima
 
-    def entrar(self, senha) -> Entrada:
-        """Confere a senha (um pedido por vez); 5 erros seguidos travam por 60 s."""
+    def travado_s(self) -> int:
+        try:
+            v = versao()
+        except AcessoIndisponivel:
+            return self._restante()
         with self._trava:
-            espera = self.travado_s()
-            if espera:
-                return Entrada(restantes=0, travado_s=espera)
-            if not tem_senha():
-                return Entrada(sem_senha=True)
-            if not conferir(senha):
+            self._acompanhar_versao(v)
+            return self._restante()
+
+    def entrar(self, senha) -> Entrada:
+        """Confere a senha (um pedido por vez); 5 erros seguidos travam por 60 s; erro de leitura não conta."""
+        with self._trava:
+            try:
+                v, existe = _situacao()
+                self._acompanhar_versao(v)
+                espera = self._restante()
+                if espera:
+                    return Entrada(restantes=0, travado_s=espera)
+                if not existe:
+                    return Entrada(sem_senha=True)
+                certa = conferir(senha)
+            except AcessoIndisponivel:
+                return Entrada(indisponivel=True, restantes=max(0, TENTATIVAS - self._erros))
+            if not certa:
                 self._erros += 1
                 if self._erros >= TENTATIVAS:
                     self._travado_ate = self.relogio() + TRAVA_S
@@ -221,4 +294,8 @@ class Portaria:
                 return Entrada(restantes=TENTATIVAS - self._erros)
             self._erros = 0
             self._travado_ate = 0.0
+        try:
+            _refazer_hash_se_fraco(senha)
+        except (AcessoIndisponivel, OSError) as e:  # a senha está certa: o hash é refeito no próximo login
+            arquivos.registrar_erro('acesso refazer hash', e)
         return Entrada(token=self.abrir())

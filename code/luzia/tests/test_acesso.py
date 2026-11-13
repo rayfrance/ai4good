@@ -146,3 +146,69 @@ def test_token_nao_fica_guardado_em_claro(portaria, monkeypatch):
     token = portaria.entrar(SENHA).token
     assert len(token) >= 40
     assert token not in repr(portaria.__dict__)
+
+
+# ------------------------------------------------------------------ rodada de correções 1
+def _travar(portaria):
+    for _ in range(5):
+        portaria.entrar('errada-errada')
+    assert portaria.travado_s() == 60
+
+
+def test_apagar_e_criar_senha_zeram_as_tentativas(portaria, monkeypatch):
+    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
+    acesso.criar_senha(SENHA, SENHA)
+    _travar(portaria)
+    acesso.apagar_senha()  # `senha apagar` no chat, outro processo
+    assert portaria.travado_s() == 0
+    acesso.criar_senha('senha-nova-boa', 'senha-nova-boa')
+    assert portaria.entrar('senha-nova-boa').token
+    for _ in range(4):
+        portaria.entrar('errada-errada')
+    acesso.apagar_senha()
+    acesso.criar_senha(SENHA, SENHA)
+    assert portaria.entrar('errada-errada').restantes == 4  # contador zerado pela troca de senha
+
+
+def test_erro_de_leitura_passageiro_nao_derruba_sessao_nem_conta_erro(portaria, monkeypatch):
+    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
+    acesso.criar_senha(SENHA, SENHA)
+    token = portaria.entrar(SENHA).token
+    original = acesso.Path.read_text
+    falhas = {'n': 0}
+
+    def le_com_falha(self, *a, **k):
+        if self.name == 'acesso.json' and falhas['n'] < 2:  # Windows: arquivo trocado neste instante
+            falhas['n'] += 1
+            raise PermissionError('em uso')
+        return original(self, *a, **k)
+
+    monkeypatch.setattr(acesso.Path, 'read_text', le_com_falha)
+    monkeypatch.setattr(acesso, 'ESPERA_LEITURA_S', 0)
+    assert portaria.valida(token)  # tenta de novo e lê
+    falhas['n'] = -100  # falha de vez
+    with pytest.raises(acesso.AcessoIndisponivel):
+        portaria.valida(token)
+    r = portaria.entrar('errada-errada')
+    assert r.indisponivel and r.restantes == acesso.TENTATIVAS  # não contou como erro
+    monkeypatch.setattr(acesso.Path, 'read_text', original)
+    assert portaria.valida(token)  # a sessão continuou lá
+    assert portaria.entrar('errada-errada').restantes == 4
+
+
+def test_iteracoes_abaixo_do_minimo_sao_refeitas_no_login(portaria, monkeypatch, privado):
+    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
+    acesso.criar_senha(SENHA, SENHA)
+    v = acesso.versao()
+    monkeypatch.setattr(acesso, 'ITERACOES', 2000)
+    assert portaria.entrar(SENHA).token
+    s = json.loads((privado / 'acesso.json').read_text(encoding='utf-8'))['senha']
+    assert s['iteracoes'] == 2000 and acesso.conferir(SENHA) and acesso.versao() == v
+
+
+def test_novo_login_invalida_o_token_anterior(portaria, monkeypatch):
+    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
+    acesso.criar_senha(SENHA, SENHA)
+    a = portaria.entrar(SENHA).token
+    b = portaria.entrar(SENHA).token
+    assert not portaria.valida(a) and portaria.valida(b)

@@ -289,9 +289,19 @@ class Handler(BaseHTTPRequestHandler):
         # Pedidos automáticos do painel (polling de 4 s, leituras automáticas) conferem a sessão sem renovar: uma aba
         # esquecida aberta cai após 30 min sem um gesto da pessoa.
         automatico = (self.headers.get('X-Luzia-Auto') or '').strip() == '1'
-        return PORTARIA.valida(self._token(), renovar=not automatico)
+        try:
+            return PORTARIA.valida(self._token(), renovar=not automatico)
+        except acesso.AcessoIndisponivel:  # leitura passageira de acesso.json: 503, a sessão continua
+            self._acesso_indisponivel = True
+            return False
+
+    def _indisponivel(self) -> None:
+        self._json({'erro': 'a Luzia não conseguiu conferir a senha agora; tente de novo'}, 503,
+                   [('Retry-After', '1')])
 
     def _negar(self) -> None:
+        if getattr(self, '_acesso_indisponivel', False):
+            return self._indisponivel()
         self._json({'erro': 'entre com a sua senha para ver o painel', 'login': True}, 401)
 
     @staticmethod
@@ -311,6 +321,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/acesso/criar':
             try:
                 acesso.criar_senha(dados.get('senha'), dados.get('confirmacao'))
+            except acesso.AcessoIndisponivel:
+                return self._indisponivel()
             except acesso.SenhaJaExiste:
                 return self._json({'erro': 'a senha já foi criada: entre com ela (para trocar, use "senha" no chat)'}, 409)
             except ValueError as e:
@@ -319,6 +331,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'ok': True}, 200, self._cookie_sessao(PORTARIA.abrir()))
         if path == '/api/acesso/entrar':
             r = PORTARIA.entrar(dados.get('senha'))
+            if r.indisponivel:
+                return self._indisponivel()
             if r.travado_s:
                 return self._json({'erro': f'muitas tentativas: espere {r.travado_s} s', 'segundos': r.travado_s}, 429,
                                   [('Retry-After', str(r.travado_s))])
@@ -367,6 +381,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'erro': f'a Luzia não conseguiu montar esta tela ({type(e).__name__})'}, 500)
 
     def do_GET(self) -> None:
+        self._acesso_indisponivel = False
         if self._barrar(post=False):
             return
         parsed = urlparse(self.path)
@@ -377,7 +392,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/ping':
             return self._json({'ok': True})
         if path == '/api/acesso/estado':
-            return self._json(self._estado_acesso())
+            try:
+                return self._json(self._estado_acesso())
+            except acesso.AcessoIndisponivel:
+                return self._indisponivel()
         if path == '/api/estado':
             return self._api(estado)
         if path == '/api/sessao':
@@ -428,6 +446,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_POST(self) -> None:
+        self._acesso_indisponivel = False
         if self._barrar(post=True):
             return
         try:

@@ -23,11 +23,15 @@
 | `observer.py` | foco e hooks `SessionStart`, `UserPromptSubmit` e `PostToolUse` (local, sem modelo) com envio de lampejos; `reconhecer_em` é a única implementação do reconhecimento, usada também pelo comando `foco` da CLI (agentes sem hooks) |
 | `statusline.py` | linha de status do Claude Code com estado do foco e prisma mais próximo (só nos repositórios autorizados) |
 | `server.py` + `painel/` | painel local em `127.0.0.1:8501` (**Hoje · Trajetória · Avanços · Entregas · Ajustes**), espectro de 5 faixas, proteção Host/Origin/JSON e login: toda rota `/api` fora `ping` e `acesso/*` exige sessão (401) |
-| `acesso.py` | senha local do painel (PBKDF2-HMAC-SHA256, 600 000 iterações, sal de 16 bytes, em `private/acesso.json`), sessões só em memória (30 min sem uso), trava de 60 s após 5 erros e redefinição pelo comando `senha` |
+| `acesso.py` | senha local do painel (PBKDF2-HMAC-SHA256, 600 000 iterações, sal de 16 bytes, em `private/acesso.json`; hash mais fraco é refeito no login), uma sessão por vez só em memória (30 min sem um gesto da pessoa: o polling do painel manda `X-Luzia-Auto: 1` e não renova), trava de 60 s após 5 erros (zera ao criar ou apagar a senha) e redefinição pelo comando `senha` |
 | `planner.py`, `pipeline.py`, `modelo.py` | esquemas JSON estruturados, chamadas ao modelo configurável e registro de custo em `runs.jsonl` e `chamada_modelo` |
 | `triage.py`, `privacy.py` | leitura das fontes locais e mascaramento LGPD (`Redactor`, `mascarar_estrutura`), usado só no envio ao modelo com o interruptor `mascarar_modelo` ligado (`pipeline.run_plan`) |
 | `arquivos.py` | leitura/escrita atômica para arquivos de configuração (`observer.json`, `entrada.json`, etc.), `LUZIA_PRIVATE` e registro seguro de erros |
 | `commands/`, `skills/`, `hooks/`, `.claude-plugin/`, `.*-plugin/` | plugin multi-harness (fonte única em `code/luzia`; o instalador resolve `${CLAUDE_PLUGIN_ROOT}` quando usado fora do sistema de plugins) |
+
+## Limites conhecidos do login
+- O cookie `luzia_sessao` é de `localhost`/`127.0.0.1`, e navegadores não separam cookies por porta: qualquer outro servidor local aberto no mesmo navegador recebe o cookie. Ele é `HttpOnly` e `SameSite=Strict` (sites de fora não o usam), mas um programa local malicioso em outra porta poderia lê-lo; quem tem esse acesso à máquina já lê `private/`.
+- No primeiro uso e depois de `senha apagar`, a tela "Crie a senha" fica aberta para quem chegar primeiro ao painel. Crie a senha logo depois de instalar ou redefinir.
 
 ## Privado (fora do git)
 `private/` (ou `LUZIA_PRIVATE` em testes): `luzia.db` (fonte única do estado do jogo), `pendentes.jsonl` (spool temporário sob contenção), `migracao-AAAAMMDD/` (backups dos JSON legados), `entrada.json`, `observer.json`, `modelo.json`, `acesso.json` (só o hash da senha do painel e a versão que derruba sessões), `termos.txt` e `erros.log`. `outputs/sem2/career_state.json` é apenas a foto histórica do seminário. Nomes da empresa, produtos internos, clientes, colegas, e-mails e números de PR/ticket nunca entram em arquivo versionado; na tela, aparecem só para quem entrou no painel com a senha (e no chat da própria pessoa). Hashes de commit ficam só no banco. O envio ao modelo vai real por padrão e mascarado com `mascarar_modelo` ligado (`perfil('privacidade')`).

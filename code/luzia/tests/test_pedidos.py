@@ -10,7 +10,7 @@ from luzia import banco, jogo, leituras, pipeline, planner, trajetoria
 DDD = 'Domain-Driven Design (DDD)'
 TESTES = 'Testes e Qualidade / SQL'
 FRONT = 'Front-end (JS / Razor / React)'
-MENSAGERIA = 'Mensageria e Eventos Assíncronos'
+MENSAGERIA = 'Mensageria'
 
 
 @pytest.fixture

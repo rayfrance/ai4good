@@ -326,11 +326,14 @@ def sincronizar(plan: dict) -> dict[str, dict]:
                             'nota': None}
                 novos.append(fid)
             else:
-                atual.update({k: v for k, v in conteudo.items() if k != 'titulo' or not atual.get('renomeado')})
+                # título renomeado e prisma escolhido num pedido `dividir` (prisma_fixo) não voltam ao do plano
+                atual.update({k: v for k, v in conteudo.items()
+                              if not (k == 'titulo' and atual.get('renomeado'))
+                              and not (k == 'skill' and atual.get('prisma_fixo'))})
         for f in cat.values():
             if f.get('estado') != 'conquistado':
                 f['valor_lm'], f['conta'] = valor(f, plan, nv, nomes)
-            f['skill_plano'] = skill_de(f.get('skill', ''), plan, nomes)
+            f['skill_plano'] = f.get('prisma_fixo') or skill_de(f.get('skill', ''), plan, nomes)
         mudaram = [fid for fid, f in cat.items() if fid not in novos and _colunas(f) != antes[fid]]
         if novos or mudaram:
             with banco.transacao(con):

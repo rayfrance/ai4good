@@ -77,3 +77,119 @@ def test_triagem_divide_skill_composta_que_o_modelo_devolver():
     assert sql['luzia_sugere'] == 2 and sql['alvo'] == 4 and sql['dividido_de'] == TESTES and 'JOIN' in sql['palavras_chave']
     assert out['plano'][0]['acoes'][0]['skill'] == 'SQL'
     assert not any(prismas.composto(n) for n in nomes)
+
+
+# ------------------------------------------------------------------ pedido `dividir`
+from luzia import acoes, banco, jogo, pedidos, pipeline, trajetoria  # noqa: E402
+
+TESTE_GUIADO = acoes.aid('rota', 'Escrever um teste de unidade guiado')
+COMPONENTE = acoes.aid('rota', 'Extrair um componente de tela')
+
+
+@pytest.fixture
+def con(privado, monkeypatch):
+    def sem_modelo(*a, **k):  # dividir nunca chama o modelo
+        raise AssertionError('dividir não deve chamar o modelo')
+    monkeypatch.setattr(pipeline, 'run_plan', sem_modelo)
+    jogo.sincronizar(trajetoria.plano())
+    c = banco.conectar()
+    yield c
+    c.close()
+
+
+def _prisma(con, nome):
+    return next((p for p in trajetoria.prismas(con, incluir_arquivados=True) if p['nome'] == nome), None)
+
+
+def test_dividir_cria_prismas_herdados_arquiva_o_antigo_e_preserva_lumens(con):
+    jogo.lancar(TESTES, 40, 'propria', 'feixe', TESTE_GUIADO)
+    jogo.lancar(TESTES, 10, 'refletida', 'observer', 's1')
+    total_antes = trajetoria.lumens_totais(con)
+    lm_antigo = con.execute('SELECT SUM(lm) FROM lumen WHERE prisma = ?', (TESTES,)).fetchone()[0]
+    antigo = _prisma(con, TESTES)
+    versoes_antes = len(trajetoria.versoes(con))
+
+    p = pedidos.abrir(con, 'dividir', TESTES, 'um prisma por habilidade')
+    p = pedidos.propor(con, p['id'])
+    prop = p['proposta']
+    assert p['estado'] == 'proposto' and p['tipo'] == 'dividir'
+    assert [x['nome'] for x in prop['partes']] == ['Testes e Qualidade', 'SQL']
+    assert all(x['nivel'] == antigo['nivel'] and x['meta'] == antigo['meta'] for x in prop['partes'])
+    para = {a['id']: a['para'] for a in prop['avancos']}
+    assert para[TESTE_GUIADO] == 'Testes e Qualidade'
+
+    out = pedidos.aceitar(con, p['id'])
+    assert out['estado'] == 'aceito' and out['versao'] == versoes_antes + 1
+    assert _prisma(con, TESTES)['estado'] == 'arquivado'
+    for nome in ('Testes e Qualidade', 'SQL'):
+        novo = _prisma(con, nome)
+        assert (novo['estado'], novo['nivel'], novo['meta'], novo['origem']) == ('ativo', antigo['nivel'], antigo['meta'], 'pedido')
+        reg = trajetoria.registros(con, nome)
+        assert [(r['origem'], r['para']) for r in reg] == [('pedido', antigo['nivel'])]
+    assert 'xunit' in _prisma(con, 'Testes e Qualidade')['palavras']
+    foto = [x['nome'] for x in trajetoria.versoes(con)[-1]['prismas']]
+    assert 'SQL' in foto and TESTES not in foto
+    # lúmens: livro intacto no prisma arquivado, totais iguais, o nível novo conta de agora
+    assert trajetoria.lumens_totais(con) == total_antes
+    assert con.execute('SELECT SUM(lm) FROM lumen WHERE prisma = ?', (TESTES,)).fetchone()[0] == lm_antigo
+    rota = jogo.rota(trajetoria.plano(), con)
+    nomes = [s['nome'] for s in rota['skills']]
+    assert 'SQL' in nomes and 'Testes e Qualidade' in nomes and TESTES not in nomes
+    assert next(s for s in rota['skills'] if s['nome'] == 'SQL')['lm'] == 0
+
+
+def test_avanco_reclassificado_continua_no_prisma_novo_depois_do_sync(con):
+    p = pedidos.propor(con, pedidos.abrir(con, 'dividir', FRONT)['id'])
+    assert [x['nome'] for x in p['proposta']['partes']] == ['JavaScript', 'Razor', 'React']
+    assert {a['id']: a['para'] for a in p['proposta']['avancos']}[COMPONENTE] == 'React'
+    pedidos.aceitar(con, p['id'])
+    plan = trajetoria.plano()
+    for _ in range(2):  # o painel sincroniza a cada leitura: o avanço não volta para o prisma antigo
+        jogo.sincronizar(plan)
+        a = next(x for x in jogo.avancos(con) if x['id'] == COMPONENTE)
+        assert a['skill_plano'] == 'React' and a['skill'] == 'React'
+    assert not [x for x in jogo.avancos(con, prisma=FRONT) if x['estado'] != 'conquistado']
+
+
+def test_ajustar_dividir_renomeia_parte_e_move_avanco(con):
+    p = pedidos.abrir(con, 'dividir', TESTES)
+    pedidos.propor(con, p['id'])
+    p = pedidos.propor(con, p['id'], partes=['Testes automatizados', 'SQL'], mover={TESTE_GUIADO: 'SQL'})
+    assert len(p['propostas']) == 2
+    assert [x['nome'] for x in p['proposta']['partes']] == ['Testes automatizados', 'SQL']
+    assert {a['id']: a['para'] for a in p['proposta']['avancos']}[TESTE_GUIADO] == 'SQL'
+    with pytest.raises(ValueError):  # uma parte também tem de ser uma habilidade só
+        pedidos.propor(con, p['id'], partes=['Kafka / RabbitMQ', 'SQL'])
+    with pytest.raises(ValueError):
+        pedidos.propor(con, p['id'], mover={TESTE_GUIADO: 'Parte que não existe'})
+    pedidos.aceitar(con, p['id'])
+    assert _prisma(con, 'Testes automatizados')['estado'] == 'ativo'
+    assert next(x for x in jogo.avancos(con) if x['id'] == TESTE_GUIADO)['skill_plano'] == 'SQL'
+
+
+def test_dividir_recusa_prisma_isolado_desconhecido_ou_parte_que_ja_existe(con):
+    with pytest.raises(ValueError):
+        pedidos.abrir(con, 'dividir', DDD)
+    with pytest.raises(ValueError):
+        pedidos.abrir(con, 'dividir', 'Prisma que não existe / Outro')
+    with banco.transacao(con):
+        con.execute("INSERT INTO prisma (nome, palavras_json, nivel, meta, estado, origem) "
+                    "VALUES ('SQL', '[]', 1, 3, 'ativo', 'pedido')")
+    p = pedidos.abrir(con, 'dividir', TESTES)
+    with pytest.raises(ValueError):
+        pedidos.propor(con, p['id'])
+
+
+def test_incluir_recusa_nome_composto_e_reativar_prisma_dividido_e_recusado(con):
+    with pytest.raises(ValueError):
+        pedidos.abrir(con, 'incluir', 'Kafka / RabbitMQ')
+    pedidos.aceitar(con, pedidos.propor(con, pedidos.abrir(con, 'dividir', TESTES)['id'])['id'])
+    with pytest.raises(ValueError):
+        pedidos.abrir(con, 'reativar', TESTES)
+
+
+def test_dividir_todos_abre_um_pedido_por_prisma_composto(con):
+    lista = pedidos.dividir_todos(con)
+    assert sorted(p['prisma'] for p in lista) == sorted([TESTES, FRONT])
+    assert all(p['estado'] == 'proposto' for p in lista)
+    assert pedidos.dividir_todos(con) == []  # já há pedido aberto para cada um: nada duplica

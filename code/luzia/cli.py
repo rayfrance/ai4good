@@ -1,8 +1,8 @@
 """CLI da Luzia (agnóstica de harness; no Claude Code é chamada pelos comandos /luzia:*).
 
-O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de cada prisma (skill); os níveis formam a trajetória até a meta.
+O jogo (docs/luzia-ux.md): centelhas (avanços, no código) valem lúmens; lúmens enchem os níveis de cada prisma (skill); os níveis formam a trajetória até a meta.
 - `hoje`, `triage`, `trajetoria` (`next-level`/`rota`), `entregas` (`feedback-progress`), `entrega <id>`,
-  `acender-entrega <id>`, `identidade`, `leituras`,
+  `acender-entrega <id>`, `identidade`, `leituras` (`analises`),
   `feedback-skills-opportunities`
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
 - `foco --prompt-arquivo F | --arquivos P... [--cwd D] [--sessao S]` (foco sem hooks, para Antigravity, Codex e Cursor)
@@ -148,7 +148,7 @@ def gerar_trecho(skill: str, rotulo: str = 'cmd-trecho') -> dict:
                                        intro='Trajetória salva da pessoa e o prisma que precisa de 3 novos avanços:')
     novas = [a for a in result.plan.get('acoes', []) if isinstance(a, dict) and a.get('titulo')][:3]
     if not novas:
-        return {'erro': 'o modelo não devolveu avanços; tente de novo'}
+        return {'erro': 'o modelo não devolveu centelhas; tente de novo'}
     for a in novas:  # o avanço é do prisma pedido, uma habilidade só, mesmo que o modelo escreva outro nome
         a['skill'] = skill
     trechos = plan.get('trechos', []) + [{'skill': skill, 'para': nv['nivel'] + 1, 'quando': record['quando'], 'acoes': novas}]
@@ -183,7 +183,7 @@ def acender_entrega(entrega_id: int, rotulo: str = 'cmd-acender-entrega') -> dic
             return {'erro': 'esta entrega não atravessa nenhum prisma ativo da sua trajetória'}
         abertos = [a for a in det['avancos_feitos'] if a.get('dimensao') in ('P3', 'P4') and a.get('estado') in ABERTOS]
         if {a['dimensao'] for a in abertos} >= {'P3', 'P4'}:
-            return {'erro': 'esta entrega já tem avanços P3 e P4 abertos', 'avancos': abertos, 'entrega': det}
+            return {'erro': 'esta entrega já tem centelhas P3 e P4 abertas', 'avancos': abertos, 'entrega': det}
         titulo = det['titulo']
         f = det['fatos']
         payload = {'entrega': {
@@ -199,10 +199,10 @@ def acender_entrega(entrega_id: int, rotulo: str = 'cmd-acender-entrega') -> dic
                                            intro='Fatos medidos no git de uma entrega da pessoa:')
     except Exception as e:  # sem modelo, sem chave ou sem internet
         arquivos.registrar_erro('cli.acender_entrega', e)
-        return {'erro': f'não deu para acender avanços sem o modelo ({modelo.resumo_erro(e)})', 'entrega': det}
+        return {'erro': f'não deu para acender centelhas sem o modelo ({modelo.resumo_erro(e)})', 'entrega': det}
     brutas = [a for a in ((result.plan or {}).get('acoes') or []) if isinstance(a, dict) and a.get('titulo')]
     if len(brutas) < 2:
-        return {'erro': 'o modelo não devolveu os 2 avanços; tente de novo', 'entrega': det}
+        return {'erro': 'o modelo não devolveu as 2 centelhas; tente de novo', 'entrega': det}
     p3, p4 = brutas[0], brutas[1]  # pelo esquema: a primeira é a P3 e a segunda a P4 (a posição manda)
     nomes_entrega = [p['prisma'] for p in prismas]
     nomes = list(nv)
@@ -225,6 +225,11 @@ def acender_entrega(entrega_id: int, rotulo: str = 'cmd-acender-entrega') -> dic
 
 
 # ------------------------------------------------------------------ apresentação
+# Voz (ux/auditoria.md): números antes de palavras, plural correto, nome curto do prisma, botões com verbo.
+VERBOSE = False  # `--verbose`: mostra o rodapé técnico (tempo, memória, tokens) depois de cada chamada ao modelo
+MESES = ('jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez')
+
+
 def bar(value, total: int = 5, width: int = 5) -> str:
     value = max(0, min(total, int(value or 0)))
     filled = round(value / total * width)
@@ -232,6 +237,8 @@ def bar(value, total: int = 5, width: int = 5) -> str:
 
 
 def footer(rec: dict, hits: dict | None = None) -> None:
+    if not VERBOSE:
+        return
     masked = sum((hits or {}).values())
     print(
         f"\n`{rec.get('tempo_total_s', '?')} s · {rec.get('pico_memoria_mib', '?')} MiB · "
@@ -245,8 +252,50 @@ def curto(nome: str, n: int = 44) -> str:
     return base if len(base) <= n else base[: n - 1] + '…'
 
 
+def nome_prisma(nome: str) -> str:
+    """Nome curto do prisma, o mesmo do painel (`prismas.nome_curto`)."""
+    return prismas.nome_curto(nome or '')
+
+
+def titulo_curto(titulo: str, n: int = 32) -> str:
+    t = ' '.join(str(titulo or '').split())
+    return t if len(t) <= n else t[: n - 1].rstrip() + '…'
+
+
+def plural(n, um: str, varios: str | None = None) -> str:
+    return f"{n} {um if n == 1 else (varios or um + 's')}"
+
+
+def numero(n) -> str:
+    return f'{int(n or 0):,}'.replace(',', '.')
+
+
+def data_curta(iso: str | None) -> str:
+    """'2026-11-12' → '12 nov' (com o ano quando não é o ano corrente)."""
+    s = str(iso or '')
+    if len(s) < 10 or not s[:4].isdigit():
+        return ''
+    try:
+        ano, mes, dia = int(s[:4]), int(s[5:7]), int(s[8:10])
+        rot = f'{dia} {MESES[mes - 1]}'
+    except (ValueError, IndexError):
+        return s[:10]
+    return rot if str(ano) == jogo.agora()[:4] else f'{rot} {ano}'
+
+
+def periodo_curto(inicio: str | None, fim: str | None) -> str:
+    a, b = str(inicio or '')[:10], str(fim or inicio or '')[:10]
+    if not a:
+        return ''
+    if a == b:
+        return data_curta(a)
+    if a[:7] == b[:7]:
+        return f'{int(a[8:10])}–{data_curta(b)}'
+    return f'{data_curta(a)} – {data_curta(b)}'
+
+
 # ------------------------------------------------------------------ botões (protocolo para qualquer agente)
-def botoes(itens: list[dict], pergunta: str = 'O que você quer fazer agora?') -> None:
+def botoes(itens: list[dict], pergunta: str = 'Próximo passo?') -> None:
     vistos, lista = set(), []
     for b in itens:
         if b and b['rodar'] not in vistos:
@@ -259,14 +308,15 @@ def botoes(itens: list[dict], pergunta: str = 'O que você quer fazer agora?') -
     print('LUZIA_BOTOES=' + json.dumps(lista[:3], ensure_ascii=False))
 
 
-def bt_feixe(f: dict, prefixo: str = '') -> dict:
-    return {'rotulo': (prefixo + f.get('titulo', ''))[:48],
-            'descricao': f"{f.get('tipo', '')} · {curto(f.get('skill_plano') or f.get('skill', ''))} · {f.get('duracao_min', '?')} min · {f.get('valor_lm')} lm",
+def bt_feixe(f: dict, prefixo: str = 'Acender: ') -> dict:
+    return {'rotulo': prefixo + titulo_curto(f.get('titulo', '')),
+            'descricao': f"{f.get('tipo', '')} · {nome_prisma(f.get('skill_plano') or f.get('skill', ''))} · "
+                         f"{f.get('duracao_min', '?')} min · {f.get('valor_lm')} lm",
             'rodar': f"fazer {f['id']}"}
 
 
-BT_PAINEL = {'rotulo': 'Abrir o painel', 'descricao': 'trajetória, avanços e entregas no navegador', 'rodar': 'career-map'}
-BT_TRAJETORIA = {'rotulo': 'Ver minha trajetória', 'descricao': 'prismas, níveis e lúmens até a meta', 'rodar': 'trajetoria'}
+BT_PAINEL = {'rotulo': 'Abrir painel', 'descricao': 'mapa completo no navegador', 'rodar': 'career-map'}
+BT_TRAJETORIA = {'rotulo': 'Ver trajetória', 'descricao': 'níveis por prisma', 'rodar': 'trajetoria'}
 
 
 def proximos_botoes(plan: dict, excluir: set | tuple = ()) -> list[dict]:
@@ -274,22 +324,22 @@ def proximos_botoes(plan: dict, excluir: set | tuple = ()) -> list[dict]:
     r = jogo.rota(plan)
     lista = [f for f in acoes.todas(plan) if f['id'] not in excluir]
     fila_ids = [x['id'] for x in acoes.fila()]
-    bts = [{'rotulo': f"Subir {curto(s['nome'])} para {s['proximo']}",
-            'descricao': f"nível pronto: {s['lm']} lm, {s['luz_propria']}% luz própria · você confirma",
+    bts = [{'rotulo': f"Subir {nome_prisma(s['nome'])} para {s['proximo']}",
+            'descricao': f"{s['lm']} lm · {s['luz_propria']}% própria · você confirma",
             'rodar': f'subir "{s["nome"]}"'} for s in r['skills'] if s['pronto'] and not s['na_meta']]
     bts += [bt_feixe(f, 'Continuar: ') for f in lista if f['estado'] == 'em_andamento'][:1]
     bts += [bt_feixe(f) for f in lista if f['id'] in fila_ids][:1]
-    bts += [{'rotulo': f"Revisitar: {f.get('titulo', '')}"[:48],
-             'descricao': f"buscar o restante: você levou {f.get('lm_ganho')} de {f.get('valor_lm')} lm",
+    bts += [{'rotulo': 'Revisitar: ' + titulo_curto(f.get('titulo', '')),
+             'descricao': f"vale +{(f.get('valor_lm') or 0) - (f.get('lm_ganho') or 0)} lm",
              'rodar': f"fazer {f['id']}"} for f in lista if jogo.pode_revisitar(f)][:1]
     compostos = [s['nome'] for s in r['skills'] if prismas.composto(s['nome'])]
     if compostos:  # um prisma = uma habilidade: oferece separar os que juntam assuntos
         bts.append({'rotulo': 'Separar prismas compostos',
-                    'descricao': f"{len(compostos)} juntam assuntos: um prisma por habilidade, com nível e meta herdados",
+                    'descricao': f"{len(compostos)} juntam assuntos · nível e meta herdados",
                     'rodar': 'dividir-todos'})
     abertos = {f.get('skill_plano') or f.get('skill') for f in lista if f['estado'] in ('sugerido', 'na_fila', 'em_andamento')}
-    bts += [{'rotulo': f"Acender avanços de {curto(s['nome'])}"[:48],
-             'descricao': f"3 avanços novos para o nível {s['proximo']} (o modelo leva ~10 s)",
+    bts += [{'rotulo': f"Acender 3 de {nome_prisma(s['nome'])}",
+             'descricao': f"para o nível {s['proximo']} · ~10 s",
              'rodar': f'trecho "{s["nome"]}"'} for s in r['skills'] if not s['na_meta'] and s['nome'] not in abertos][:1]
     bts += [bt_feixe(f) for f in lista if f['estado'] == 'sugerido']
     return bts or [BT_PAINEL]
@@ -300,13 +350,25 @@ ESTADO_IC = {'conquistado': '✦', 'em_andamento': '◐', 'na_fila': '➤', 'sug
 
 def feixe_linha(f: dict) -> str:
     extra = f" · nota {f.get('nota')}/4 · +{f.get('lm_ganho')} lm" if f.get('estado') == 'conquistado' else ''
-    tent = f" · tentativa {f.get('tentativas') + 1}" if f.get('tentativas') and f.get('estado') != 'conquistado' else ''
+    tent = f" · {f.get('tentativas') + 1}ª tentativa" if f.get('tentativas') and f.get('estado') != 'conquistado' else ''
     sk = f.get('skill_plano') or f.get('skill', '')
-    return (f"{ESTADO_IC.get(f.get('estado'), '○')} `#{f['id']}` **{f.get('titulo', '')}** · {f.get('tipo', '')} · "
-            f"{curto(sk)} · {f.get('duracao_min', '?')} min · **{f.get('valor_lm', '?')} lm**{extra}{tent}")
+    return (f"{ESTADO_IC.get(f.get('estado'), '○')} **{f.get('titulo', '')}** · {f.get('tipo', '')} · "
+            f"{nome_prisma(sk)} · {f.get('duracao_min', '?')} min · {f.get('valor_lm', '?')} lm{extra}{tent} `#{f['id']}`")
 
 
-def oferecer(lista: list[dict], pergunta: str = 'Qual avanço você quer fazer agora?') -> None:
+def origem_tag(a: dict) -> str:
+    """Origem da centelha (o mesmo rótulo do painel): da sessão, da triagem ou da entrega."""
+    o = str(a.get('origem') or '').lower()
+    if a.get('entrega_id') or (o == 'entrega' and not a.get('da_triagem')):
+        return 'da entrega'
+    if a.get('da_triagem') or o in ('rota', 'triagem', 'entrega'):
+        return 'da triagem'
+    if o in ('sessão', 'sessao', 'guardada', 'lampejo', 'cartao'):
+        return 'da sessão'
+    return ''
+
+
+def oferecer(lista: list[dict], pergunta: str = 'Próximo passo?') -> None:
     botoes([bt_feixe(a) for a in lista if a.get('estado') not in ('conquistado', 'descartado')] or [BT_PAINEL], pergunta)
 
 
@@ -315,51 +377,64 @@ def linha_rota(plan: dict, state: dict | None = None) -> dict:
     ini, fim = pipeline.rotulos(state or pipeline.load_state())
     luz = '━' * round(20 * r['pct'] / 100)
     print(f"**Trajetória** {ini} {luz}◉{'─' * (20 - len(luz))} {fim} · **{r['niveis_feitos']} de {r['niveis_total']} níveis** · "
-          f"{r['lm_total']} lm · {r['luz_propria']}% luz própria")
+          f"{numero(r['lm_total'])} lm · {r['luz_propria']}% própria")
     return r
+
+
+def falta_txt(s: dict) -> str:
+    """Só o que falta para subir (a regra inteira fica no painel, em "Como subir de nível")."""
+    if s.get('pronto'):
+        return 'pronto para subir'
+    falta = []
+    if s['lm'] < s['limiar']:
+        falta.append(f"{s['limiar'] - s['lm']} lm")
+    if s['luz_propria'] < int(jogo.MIN_PROPRIA * 100):
+        falta.append(f"luz própria ({s['luz_propria']}% de {int(jogo.MIN_PROPRIA * 100)}%)")
+    if s.get('feixes', 0) < jogo.MIN_FEIXES_DEGRAU:
+        falta.append(plural(jogo.MIN_FEIXES_DEGRAU - s.get('feixes', 0), 'centelha'))
+    return 'falta ' + ' · '.join(falta) if falta else 'pronto para subir'
 
 
 def rota_texto(plan: dict, state: dict | None = None) -> None:
     r = linha_rota(plan, state)
     with trajetoria.abrir() as con:
         leit_map = {s['nome']: leituras.obter(con, 'prisma', s['nome']) for s in r['skills']}
-    for idx, s in enumerate(r['skills']):
-        rotulo_p = f"{s['nome']} (prisma · skill)" if idx == 0 else s['nome']
+    for s in r['skills']:
         esp = espectro_txt(s['nivel'])
         if s['na_meta']:
-            print(f"   ✦ {rotulo_p} · `{esp}` nível {s['nivel']}/{s['meta']} · na meta")
+            print(f"   ✦ {nome_prisma(s['nome'])} `{esp}` {s['nivel']} de {s['meta']} · na meta")
             continue
-        pronto = ' · **nível pronto para subir**' if s['pronto'] else f" · falta: {' · '.join(s['falta'])}"
-        print(f"   {rotulo_p} · `{esp}` nível {s['nivel']} → meta {s['meta']}  `{bar(min(s['lm'], s['limiar']), s['limiar'], 10)}` "
-              f"{s['lm']}/{s['limiar']} lm · luz própria {s['luz_propria']}%{pronto}")
+        falta = f"**{falta_txt(s)}**" if s['pronto'] else falta_txt(s)
+        print(f"   {nome_prisma(s['nome'])} `{esp}` {s['nivel']} → {s['meta']} · {s['lm']}/{s['limiar']} lm · {falta}")
         print('      ' + leitura_txt(leit_map.get(s['nome'])))
 
 
 def base_resumo(alvo_tipo: str | None, base: dict | None) -> str:
-    """Os fatos que fundamentaram uma leitura, em uma linha (o que vai depois de "com base em")."""
+    """Os fatos que fundamentaram uma leitura, em uma linha (o que vai depois de "base:")."""
     b = base if isinstance(base, dict) else {}
     if alvo_tipo == 'prisma':
         lm = b.get('lumens') or {}
-        return (f"nível {b.get('nivel', '?')}/{b.get('meta', '?')}, {lm.get('total', 0)} lm "
-                f"({lm.get('propria', 0)} de luz própria), {len(b.get('avancos_conquistados') or [])} avanço(s) "
-                f"conquistado(s) e {b.get('entregas_total', 0)} entrega(s) do prisma")
+        return (f"nível {b.get('nivel', '?')} de {b.get('meta', '?')}, {lm.get('total', 0)} lm "
+                f"({lm.get('propria', 0)} própria), "
+                f"{plural(len(b.get('avancos_conquistados') or []), 'centelha acesa', 'centelhas acesas')}, "
+                f"{plural(b.get('entregas_total', 0), 'entrega')}")
     if alvo_tipo == 'entrega':
         f = b.get('fatos') or {}
-        return (f"{f.get('commits', 0)} commit(s), {f.get('arquivos', 0)} arquivo(s), {f.get('linhas', 0)} linhas e "
-                f"{len(b.get('prismas') or [])} prisma(s) atravessado(s) da entrega")
+        return (f"{plural(f.get('commits', 0), 'commit')}, {plural(f.get('arquivos', 0), 'arquivo')}, "
+                f"{plural(f.get('linhas', 0), 'linha')}, {plural(len(b.get('prismas') or []), 'prisma')}")
     if alvo_tipo == 'pedido':
-        return (f"o pedido ({b.get('tipo', '')} em {b.get('prisma', '')}) e a trajetória atual "
-                f"({len(b.get('prismas_ativos') or [])} prisma(s) ativo(s))")
+        return (f"o pedido ({b.get('tipo', '')} em {nome_prisma(b.get('prisma', ''))}) e a trajetória atual "
+                f"({plural(len(b.get('prismas_ativos') or []), 'prisma ativo', 'prismas ativos')})")
     return 'os fatos medidos pela Luzia'
 
 
 def bt_leituras() -> dict | None:
-    """'Gerar N leitura(s)' quando há leituras vencidas (ou faltando) e um modelo configurado."""
+    """'Atualizar N leituras' quando há leituras vencidas (ou faltando) e um modelo configurado."""
     if not modelo.pronto():
         return None
     with trajetoria.abrir() as con:
         n = len(leituras.vencidas(con, leituras.ENTREGAS_RELEVANTES))
-    return {'rotulo': f'Gerar {n} leitura(s)', 'descricao': 'renova as leituras vencidas (até 8 por chamada ao modelo)',
+    return {'rotulo': f"Atualizar {plural(n, 'análise')}", 'descricao': 'base mudou · até 8 por chamada',
             'rodar': 'leituras'} if n else None
 
 
@@ -370,48 +445,61 @@ def com_leituras(bts: list[dict]) -> list[dict]:
 
 
 def motivo_sem_leitura() -> str:
-    return ('a Luzia ainda não tem base para uma leitura' if modelo.pronto()
-            else 'leitura indisponível: configure o modelo (`modelo`, ou Ajustes no painel)')
+    return ('sem análise ainda' if modelo.pronto()
+            else 'sem análise: falta configurar o modelo (`modelo`, ou Ajustes no painel)')
 
 
 def leitura_txt(leit: dict | None, base_txt: str | None = None, indisponivel: str = '') -> str:
-    """Toda leitura de IA na tela: texto + "com base em" + modelo + data; sem leitura, diz por quê (nunca vazio)."""
+    """Toda leitura de IA na tela: o texto primeiro e a assinatura curta com base, data e modelo; sem leitura, diz
+    por quê (nunca vazio)."""
     if leit and leit.get('texto') and leit.get('modelo'):
         base_txt = base_txt or base_resumo(leit.get('alvo_tipo'), leit.get('base'))
-        venc = ' · a base mudou desde então' if leit.get('vencida') else ''
-        return (f"_Leitura da Luzia · com base em: {base_txt} · {leit['modelo']} · "
-                f"{str(leit.get('criado_em') or '')[:10]}{venc}:_ {leit['texto']}")
-    return f"_Leitura da Luzia: {indisponivel or motivo_sem_leitura()}._"
+        venc = ' · desatualizada' if leit.get('vencida') else ''
+        data = data_curta(leit.get('criado_em')) or 'data desconhecida'
+        return f"{leit['texto']} _— Análise da Luzia, {data} · base: {base_txt} · {leit['modelo']}{venc}_"
+    motivo = indisponivel or motivo_sem_leitura()
+    if indisponivel and not motivo.lower().startswith('sem análise'):
+        motivo = 'sem análise: ' + motivo.replace('leitura indisponível: ', '').replace('análise indisponível: ', '')
+    return f"_{motivo[:1].upper()}{motivo[1:]}._"
 
 
-NOME_DIMENSAO = {'P1': 'direção no prompt', 'P2': 'coesão da entrega', 'P3': 'aplicação conceitual',
-                 'P4': 'domínio arquitetural'}
-SEM_BASE_DIMENSAO = {'P1': 'sem base — a triagem ainda não leu seus prompts',
-                     'P2': 'sem base — a entrega não tem commits medidos',
-                     'P3': 'sem base — acende quando você explica o conceito num avanço desta entrega',
-                     'P4': 'sem base — acende quando você defende a decisão num avanço desta entrega'}
+NOME_DIMENSAO = {'P1': 'Direção no prompt', 'P2': 'Coesão', 'P3': 'Aplicação de conceito', 'P4': 'Decisão de arquitetura'}
+SEM_BASE_DIMENSAO = {'P1': 'sem base ainda (a triagem não leu seus prompts)',
+                     'P2': 'sem base ainda (a entrega não tem commits medidos)',
+                     'P3': 'falta você explicar',
+                     'P4': 'falta você defender'}
+
+
+def dims_medidas(prop: dict) -> str:
+    ks = [k for k in ('P1', 'P2', 'P3', 'P4') if (prop.get('dimensoes') or {}).get(k)]
+    if not ks:
+        return ''
+    if len(ks) == 4:
+        return 'P1 a P4'
+    return ks[0] if len(ks) == 1 else f"{', '.join(ks[:-1])} e {ks[-1]}"
 
 
 def linhas_propriedade(prop: dict) -> list[str]:
-    """P1–P4 de uma entrega com a base de cada nota (o mesmo que o painel mostra)."""
+    """P1–P4 de uma entrega com a base de cada nota (o mesmo que o painel mostra no detalhe)."""
     indice = prop.get('indice')
-    out = [f"- **Propriedade na entrega:** **{f'{indice}%' if indice is not None else '—'}** · "
-           f"medida em {prop.get('base') or '0 de 4 dimensões'}"]
+    medidas = dims_medidas(prop)
+    out = [f"**{indice}% seu** (medido em {medidas})" if indice is not None and medidas
+           else '**Propriedade:** ainda sem medida']
     for k in ('P1', 'P2', 'P3', 'P4'):
         d = (prop.get('dimensoes') or {}).get(k)
         if d:
-            out.append(f"   - {k} · {NOME_DIMENSAO[k]}: **{d['nota']}** ({d.get('tipo', '')})"
+            out.append(f"- {k} {NOME_DIMENSAO[k]}: **{d['nota']}** ({d.get('tipo', '')})"
                        + (f" — {d['base']}" if d.get('base') else ''))
         else:
-            out.append(f"   - {k} · {NOME_DIMENSAO[k]}: {SEM_BASE_DIMENSAO[k]}")
+            out.append(f"- {k} {NOME_DIMENSAO[k]}: — {SEM_BASE_DIMENSAO[k]}")
     return out
 
 
 def avisar_degraus(plan: dict) -> None:
     for s in jogo.rota(plan)['skills']:
         if s['pronto'] and not s['na_meta']:
-            print(f"\n✦ **{s['nome']}** está pronto para subir para o nível {s['proximo']} "
-                  f"({s['lm']} lm, {s['luz_propria']}% luz própria). Você decide quando.")
+            print(f"\n✦ **{nome_prisma(s['nome'])}** pronto para o nível {s['proximo']} "
+                  f"({s['lm']} lm · {s['luz_propria']}% própria). Você decide quando.")
 
 
 # ------------------------------------------------------------------ painel
@@ -481,24 +569,28 @@ def set_mode(modo: str) -> None:
 
 def roteiro(a: dict) -> None:
     revisita = a.get('estado') == 'conquistado'
-    print(f"## ✦ Luzia · {'revisita do ' if revisita else ''}avanço `#{a['id']}` · **{a.get('valor_lm')} lm**")
-    print(f"**{a.get('titulo', '')}** · {a.get('tipo', '')} · {curto(a.get('skill_plano') or a.get('skill', ''))} · {a.get('duracao_min', '?')} min")
+    print(f"## Luzia · {'Revisita' if revisita else 'Centelha'} `#{a['id']}` · **{a.get('valor_lm')} lm**")
+    print(f"**{a.get('titulo', '')}** · {a.get('tipo', '')} · {nome_prisma(a.get('skill_plano') or a.get('skill', ''))} · {a.get('duracao_min', '?')} min")
     if revisita:
-        print(f"Você levou {a.get('lm_ganho')} de {a.get('valor_lm')} lm (nota {a.get('nota')}/4). Nesta revisita vale só a diferença.")
+        print(f"Você levou {a.get('lm_ganho')} de {a.get('valor_lm')} lm (nota {a.get('nota')}/4). A revisita vale os "
+              f"{(a.get('valor_lm') or 0) - (a.get('lm_ganho') or 0)} restantes.")
     else:
         print('Vale: ' + ' + '.join(f"{c[0]} {c[2]} ({c[1]})" for c in a.get('conta', [])))
     if a.get('da_triagem'):
         print('▸ da triagem')
+    elif origem_tag(a) == 'da sessão':
+        print('▸ da sessão')
     elif a.get('entrega'):
-        print(f"▸ entrega: {a['entrega']}" + (f" · acende {a['dimensao']}" if a.get('dimensao') else ''))
+        print(f"▸ {'Entrega #' + str(a['entrega_id']) if a.get('entrega_id') else 'Entrega: ' + str(a['entrega'])}"
+              + (f" · prova {a['dimensao']}" if a.get('dimensao') else ''))
     print(f"\n**Por quê:** {a.get('por_que', '')}")
     print(f"**Conceitos:** {', '.join(a.get('conceitos', []))}")
-    print('**Como:**')
+    print('**Passo a passo:**')
     for i, p in enumerate(a.get('como', []), 1):
         print(f'{i}. {p}')
-    print(f"**Onde explorar no repositório:** {a.get('onde_explorar', '')}")
+    print(f"**Onde olhar:** {a.get('onde_explorar', '')}")
     print('\n---\nROTEIRO PARA O AGENTE (conduza como a Luzia, sem fazer o trabalho no lugar da pessoa):')
-    print('1. Mostre o avanço acima de forma curta e visual, com o valor em lúmens.')
+    print('1. Mostre a centelha acima de forma curta e visual, com o valor em lúmens.')
     print(f"2. Siga este pedido da pessoa: «{a.get('prompt', '')}»")
     print('3. Faça UMA pergunta por vez e espere a resposta. Se a ação pede explorar o repositório, mostre só 2 lugares.')
     print('4. Avalie a resposta final pela rubrica 0–4: ' + ' · '.join(f'{k} = {v}' for k, v in propriedade.RUBRICA.items())
@@ -510,42 +602,42 @@ def roteiro(a: dict) -> None:
 
 def hoje(plan: dict, state: dict) -> None:
     """Ponto de partida: onde você está agora e os próximos passos em botões."""
-    print('## ✦ Luzia · hoje')
+    print('## Luzia · Hoje')
     r = linha_rota(plan, state)
     lista = acoes.todas(plan)
     hoje_lm = sum(x['lm'] for x in jogo.livro(desde=jogo.agora()[:10]))
     andamento = sum(1 for f in lista if f['estado'] == 'em_andamento')
-    prontas = [curto(s['nome']) for s in r['skills'] if s['pronto'] and not s['na_meta']]
+    prontas = [nome_prisma(s['nome']) for s in r['skills'] if s['pronto'] and not s['na_meta']]
     partes = [f'+{hoje_lm} lm hoje']
     if andamento:
-        partes.append(f"{andamento} avanço{'s' if andamento > 1 else ''} em andamento")
+        partes.append(f'{andamento} em andamento')
     if acoes.fila():
         partes.append(f'{len(acoes.fila())} na fila')
     if prontas:
-        partes.append(f"{', '.join(prontas)} pronta{'s' if len(prontas) > 1 else ''} para subir de nível")
-    print('Agora: ' + ' · '.join(partes))
+        partes.append(f"{', '.join(prontas)} pronto{'s' if len(prontas) > 1 else ''} para subir")
+    print(' · '.join(partes))
     perto = sorted((s for s in r['skills'] if not s['na_meta'] and s['lm']), key=lambda s: (-s['lm'], s['nome']))[:3]
     if perto:
-        print('Mais perto do próximo nível: ' + ' · '.join(
-            f"{curto(s['nome'])} {s['lm']}/{s['limiar']} lm" + ('' if s['feixes'] else ' (falta 1 avanço)') for s in perto))
+        print('Perto de subir: ' + ' · '.join(
+            f"{nome_prisma(s['nome'])} {s['lm']}/{s['limiar']} lm" + ('' if s['feixes'] else ' (falta 1 centelha)') for s in perto))
     else:
-        print('Nenhum lúmen ainda: o primeiro avanço conquistado acende a trajetória.')
-    botoes(com_leituras(proximos_botoes(plan) + [BT_PAINEL]), 'Por onde seguimos?')
+        print('Nenhum lúmen ainda. A primeira centelha acende a trajetória.')
+    botoes(com_leituras(proximos_botoes(plan) + [BT_PAINEL]), 'Próximo passo?')
 
 
 def _botoes_pedido(pid: int, p: dict) -> list[dict]:
     prop = p.get('proposta') or {}
-    bts = [{'rotulo': f'Aceitar pedido #{pid}', 'descricao': f"aplicar mudança em {curto(p['prisma'], 24)}",
+    bts = [{'rotulo': f'Aceitar pedido #{pid}', 'descricao': f"aplica a mudança em {nome_prisma(p['prisma'])}",
             'rodar': f'pedido aceitar {pid}'}]
     if p.get('tipo') == 'dividir':
         bts.append({'rotulo': f'Ajustar pedido #{pid}',
-                    'descricao': 'renomear uma habilidade ou mover um avanço para outra',
+                    'descricao': 'renomear uma habilidade ou mover uma centelha para outra',
                     'rodar': f'pedido ajustar {pid}'})  # sem valores: a Luzia pergunta o que mudar
     if p.get('tipo') in ('incluir', 'mudar_meta'):  # arquivar e reativar não têm nível nem meta a ajustar
         bts.append({'rotulo': f'Ajustar pedido #{pid}',
-                    'descricao': f"mudar nível ou meta (proposta: nível {prop.get('nivel_partida', 1)} → meta {prop.get('meta', 3)})",
+                    'descricao': f"proposta: {prop.get('nivel_partida', 1)} → meta {prop.get('meta', 3)}",
                     'rodar': f'pedido ajustar {pid}'})  # sem valores: a Luzia pergunta o novo nível e a nova meta
-    bts.append({'rotulo': f'Recusar pedido #{pid}', 'descricao': 'arquivar pedido sem mudar a trajetória',
+    bts.append({'rotulo': f'Recusar pedido #{pid}', 'descricao': 'a trajetória fica como está',
                 'rodar': f'pedido recusar {pid}'})
     return bts
 
@@ -562,22 +654,22 @@ def _print_proposta(p: dict) -> None:
         return
     if p.get('tipo') == 'dividir':
         partes = proposta.get('partes') or []
-        print(f"- **Proposta da Luzia:** {len(partes)} prisma(s) de uma habilidade só, cada um herda o "
+        print(f"- **Proposta da Luzia:** {len(partes)} prismas de uma habilidade só, cada um herda o "
               f"**nível {proposta.get('nivel_partida')} → meta {proposta.get('meta')}/5**; o prisma antigo é arquivado "
               'com os lúmens dele (o progresso do nível novo conta a partir do aceite)')
         for x in partes:
             print(f"  - **{x['nome']}** · nível {x['nivel']} → meta {x['meta']} · palavras: {', '.join(x.get('palavras', [])[:6])}")
         for a in proposta.get('avancos') or []:
-            print(f"  - Avanço `#{a['id']}` {a.get('titulo', '')} ({a.get('estado', '')}) → **{a['para']}**"
+            print(f"  - Centelha `#{a['id']}` {a.get('titulo', '')} ({a.get('estado', '')}) → **{a['para']}**"
                   + (' (você moveu)' if a.get('movido') else ''))
         return
     ganho = int(proposta.get('ganho_niveis') or 0)
     print(f"- **Proposta da Luzia:** nível **{proposta.get('nivel_partida')} → meta {proposta.get('meta')}/5**"
-          f" · a trajetória {'ganha' if ganho >= 0 else 'perde'} {abs(ganho)} nível(is)")
+          f" · a trajetória {'ganha' if ganho >= 0 else 'perde'} {plural(abs(ganho), 'nível', 'níveis')}")
     if p.get('tipo') in ('incluir', 'mudar_meta'):
         print('- **Análise do pedido:** ' + leitura_txt(p.get('leitura'), indisponivel=proposta.get('leitura_indisponivel', '')))
     for a in (proposta.get('acoes') or [])[:3]:
-        print(f"  - Avanço inicial sugerido: **{a.get('titulo', '')}** ({a.get('tipo', '')})")
+        print(f"  - Centelha inicial sugerida: **{a.get('titulo', '')}** ({a.get('tipo', '')})")
 
 
 def _mover_de(itens: list[str] | None) -> dict[str, str]:
@@ -605,13 +697,13 @@ def cmd_dividir(args, plan: dict, todos: bool = False) -> None:
                 lista = [pedidos.propor(con, p['id'])]
         except (ValueError, RuntimeError) as e:
             print(f'Não foi possível dividir: {e}.')
-            botoes([BT_TRAJETORIA, BT_PAINEL], 'Como seguimos com a sua trajetória?')
+            botoes([BT_TRAJETORIA, BT_PAINEL], 'Próximo passo?')
             return
     if not lista:
         print('Todos os seus prismas já são de uma habilidade só (ou já têm um pedido de divisão em aberto).')
         botoes([BT_TRAJETORIA, BT_PAINEL])
         return
-    print('## ✦ Luzia · um prisma por habilidade')
+    print('## Luzia · Dividir prismas')
     bts: list[dict] = []
     for p in lista:
         print(f"\n**Pedido `#{p['id']}`** · dividir **{p['prisma']}** (estado: **{p['estado']}**)")
@@ -620,7 +712,7 @@ def cmd_dividir(args, plan: dict, todos: bool = False) -> None:
         _print_proposta(p)
         if len(bts) < 4:
             bts.extend(b for b in _botoes_pedido(p['id'], p) if 'Recusar' not in b['rotulo'])
-    botoes(bts[:4] + [BT_PAINEL], 'Aceitar a divisão proposta ou ajustar antes?')
+    botoes(bts[:4] + [BT_PAINEL], 'Decide o pedido?')
 
 
 def cmd_pedido(args, restantes: list[str], plan: dict) -> None:
@@ -635,7 +727,7 @@ def cmd_pedido(args, restantes: list[str], plan: dict) -> None:
             abertos = [x for x in pedidos.listar(con)  # o pedido que já está aberto para este prisma, se for o caso
                        if x['estado'] in ('aberto', 'proposto') and str(e).endswith(f"prisma {x['prisma']}")]
             bts = _botoes_pedido(abertos[0]['id'], abertos[0]) if abertos else []
-            botoes(bts + [BT_TRAJETORIA, BT_PAINEL], 'Como seguimos com a sua trajetória?')
+            botoes(bts + [BT_TRAJETORIA, BT_PAINEL], 'Decide o pedido?')
 
 
 def _pedido(con, sub: str, extras: list[str], args) -> None:
@@ -644,16 +736,16 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
             print('Informe o tipo e o prisma: `pedido abrir <incluir|arquivar|reativar|mudar_meta> "<prisma>" --motivo "..."`')
             botoes([BT_TRAJETORIA, BT_PAINEL])
             return
-        tipo, nome_prisma = extras[0], extras[1]
+        tipo, nome_pedido = extras[0], extras[1]
         motivo = args.motivo if args.motivo != 'nao_faz_sentido' else ''
-        p = pedidos.abrir(con, tipo, nome_prisma, motivo)
+        p = pedidos.abrir(con, tipo, nome_pedido, motivo)
         if tipo in ('incluir', 'mudar_meta', 'dividir'):
             p = pedidos.propor(con, p['id'], nivel=args.nivel, meta=args.meta)
-        print(f"✦ **Pedido `#{p['id']}` aberto** · **{p['tipo']}** em **{p['prisma']}** (estado: **{p['estado']}**)")
+        print(f"✦ **Pedido `#{p['id']}` aberto** · {p['tipo']} · **{nome_prisma(p['prisma'])}** · {p['estado']}")
         if p.get('motivo'):
             print(f"- **Motivo:** {p['motivo']}")
         _print_proposta(p)
-        botoes(_botoes_pedido(p['id'], p), 'Como você quer decidir este pedido?')
+        botoes(_botoes_pedido(p['id'], p), 'Decide o pedido?')
         return
 
     if sub == 'ajustar':
@@ -664,7 +756,7 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
             if not args.partes and not mover:  # pergunta o que mudar em vez de refazer a mesma proposta
                 nomes = ' '.join(f'"{x["nome"]}"' for x in (atual.get('proposta') or {}).get('partes') or [])
                 print(f"O que você quer mudar na divisão de {atual['prisma']}? Diga os nomes das habilidades ou para "
-                      f"qual delas vai um avanço, e a Luzia roda `pedido ajustar {pid} --partes {nomes}` "
+                      f"qual delas vai uma centelha, e a Luzia roda `pedido ajustar {pid} --partes {nomes}` "
                       f'ou `pedido ajustar {pid} --mover <avanço>="<habilidade>"`.')
                 _print_proposta(atual)
                 botoes([b for b in _botoes_pedido(pid, atual) if 'Ajustar' not in b['rotulo']],
@@ -673,12 +765,12 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
             p = pedidos.propor(con, pid, partes=args.partes or None, mover=mover)
             print(f"✦ **Pedido `#{pid}` ajustado** · dividir **{p['prisma']}** (estado: **{p['estado']}**)")
             _print_proposta(p)
-            botoes(_botoes_pedido(pid, p), 'Aceitar esta nova divisão ou ajustar de novo?')
+            botoes(_botoes_pedido(pid, p), 'Decide o pedido?')
             return
         if atual is not None and atual['estado'] in ('aberto', 'proposto'):
             if atual['tipo'] not in ('incluir', 'mudar_meta'):
                 print(f"O pedido `#{pid}` ({atual['tipo']}) não tem nível nem meta a ajustar: aceite ou recuse.")
-                botoes(_botoes_pedido(pid, atual), 'Como você quer decidir este pedido?')
+                botoes(_botoes_pedido(pid, atual), 'Decide o pedido?')
                 return
             if args.nivel is None and args.meta is None:  # nunca reenvia os mesmos valores: pergunta os novos
                 prop = atual.get('proposta') or {}
@@ -691,91 +783,96 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
         p = pedidos.propor(con, pid, nivel=args.nivel, meta=args.meta)
         print(f"✦ **Pedido `#{pid}` ajustado** · **{p['prisma']}** (estado: **{p['estado']}**)")
         _print_proposta(p)
-        botoes(_botoes_pedido(pid, p), 'Aceitar esta nova proposta ou ajustar de novo?')
+        botoes(_botoes_pedido(pid, p), 'Decide o pedido?')
         return
 
     if sub == 'aceitar':
         pid = _id_pedido(extras, sub)
         p = pedidos.aceitar(con, pid)
         plan = pipeline.load_state().get('plano', {})
-        print(f"★ **Pedido `#{pid}` aceito** — trajetória atualizada com **{p['tipo']}** em **{p['prisma']}**.")
-        botoes([BT_TRAJETORIA, *proximos_botoes(plan)[:2]], 'Qual é o próximo passo na nova trajetória?')
+        print(f"✦ **Pedido `#{pid}` aceito** · trajetória v{p.get('versao', '?')} criada ({p['tipo']} · "
+              f"{nome_prisma(p['prisma'])}).")
+        botoes([BT_TRAJETORIA, *proximos_botoes(plan)[:2]], 'Próximo passo?')
         return
 
     if sub == 'recusar':
         pid = _id_pedido(extras, sub)
         pedidos.recusar(con, pid)
-        print(f"Pedido `#{pid}` recusado — sua trajetória permanece inalterada.")
+        print(f"Pedido `#{pid}` recusado. A trajetória fica como está.")
         botoes([BT_TRAJETORIA, BT_PAINEL])
         return
 
     lista = pedidos.listar(con)
     if not lista:
-        print('Nenhum pedido de mudança registrado na sua trajetória.')
+        print('Nenhum pedido de mudança.')
         botoes([BT_TRAJETORIA, BT_PAINEL])
         return
-    print('## ✦ Luzia · pedidos de mudança da trajetória')
+    print('## Luzia · Pedidos')
     bts: list[dict] = []
     for p in lista[:5]:
-        print(f"- Pedido `#{p['id']}` · **{p['tipo']}** em **{p['prisma']}** — **{p['estado']}** ({p.get('motivo', '')})")
+        print(f"- `#{p['id']}` · {p['tipo']} · **{nome_prisma(p['prisma'])}** · {p['estado']}"
+              + (f" ({p['motivo']})" if p.get('motivo') else ''))
         if p['estado'] in ('aberto', 'proposto') and not bts:
             bts.extend(_botoes_pedido(p['id'], p))
-    botoes(bts or [BT_TRAJETORIA, BT_PAINEL])
+    botoes(bts or [BT_TRAJETORIA, BT_PAINEL], 'Decide o pedido?' if bts else 'Próximo passo?')
 
 
-BT_IDENTIDADE = {'rotulo': 'Conferir identidade do git', 'descricao': 'nomes e e-mails que a Luzia usa para achar seus commits',
+BT_IDENTIDADE = {'rotulo': 'Conferir e-mails do git', 'descricao': 'nomes e e-mails dos seus commits',
                  'rodar': 'identidade'}
 
 
 def linhas_diagnostico(diag: dict, aviso: str = '') -> list[str]:
     """Por que não apareceu entrega: só fatos (repositório, identidades, janela), sem leitura de IA."""
     ids = diag.get('identidades') or []
-    janela = (f"desde {diag['janela_desde']} · última leitura {diag['ultima_leitura']} · "
-              f"{diag.get('commits_seus', 0)} commit(s) seu(s) encontrado(s)") if diag.get('janela_desde') else 'ainda não lida'
+    janela = (f"desde {data_curta(diag['janela_desde'])} · lida em {data_curta(diag['ultima_leitura'])} · "
+              f"{plural(diag.get('commits_seus', 0), 'commit seu', 'commits seus')}") if diag.get('janela_desde') else 'ainda não lida'
     return [
-        f"- **Repositório autorizado:** {'configurado' if diag.get('repo_configurado') else 'não configurado (campo `repo` em private/entrada.json)'}"
+        f"- **Repositório:** {'configurado' if diag.get('repo_configurado') else 'não configurado (campo `repo` em private/entrada.json)'}"
         + (f' · {aviso}' if aviso else ''),
-        f"- **Identidades do git:** {', '.join(ids) if ids else 'nenhuma (campo `author` em private/entrada.json, ou `identidade adicionar`)'}",
+        f"- **E-mails do git:** {', '.join(ids) if ids else 'nenhum (campo `author` em private/entrada.json, ou `identidade adicionar`)'}",
         f'- **Janela:** {janela}',
     ]
 
 
 def cmd_entregas(args, state: dict) -> None:
-    """Entregas detectadas no git (só fatos); sem entrega, um diagnóstico curto. Nunca as tarefas montadas pela IA."""
+    """Entregas detectadas no git, uma linha cada (a leitura fica no detalhe); sem entrega, um diagnóstico curto.
+    Nunca as tarefas montadas pela IA."""
     dias = args.ampliar if args.ampliar > 0 else 90
     jogo.sincronizar(state.get('plano', {}))
     with trajetoria.abrir() as con:
         res = entregas.atualizar(con, dias=dias)
         lista = entregas.listar(con)
-        leit_map = {str(e['id']): leituras.obter(con, 'entrega', str(e['id'])) for e in lista[:10]}
+        todos = jogo.avancos(con) if lista else []
+        props = {e['id']: (entregas.detalhe(con, e['id'], incluir_leitura=False, todos_avancos=todos) or {}).get('propriedade') or {}
+                 for e in lista[:10]}
         diag = None if lista else entregas.diagnostico(con)
 
-    print('## ✦ Luzia · suas entregas e propriedade sobre o código')
+    print('## Luzia · Entregas')
     bts: list[dict] = []
-    ampliar = {'rotulo': f'Ampliar janela ({max(180, dias * 2)} dias)', 'descricao': 'buscar entregas mais antigas no git',
-               'rodar': f'entregas --ampliar {max(180, dias * 2)}'}
+    dias_amp = max(180, dias * 2)
+    ampliar = {'rotulo': f'Buscar {dias_amp} dias', 'descricao': 'entregas mais antigas',
+               'rodar': f'entregas --ampliar {dias_amp}'}
     if not lista:
-        print('Nenhuma entrega detectada no git.')
+        print('Nenhuma entrega encontrada.')
         for linha in linhas_diagnostico(diag, res.get('aviso', '')):
             print(linha)
-        botoes([ampliar, BT_IDENTIDADE, BT_PAINEL], 'Quer ampliar a janela ou conferir sua identidade do git?')
+        botoes([ampliar, BT_IDENTIDADE, BT_PAINEL], 'Próximo passo?')
         return
     for e in lista[:10]:
         fatos = e.get('fatos', {})
-        prismas_nomes = ', '.join(f"{p['prisma']}" for p in e.get('prismas', [])) or 'nenhum prisma mapeado'
-        print(
-            f"\n▸ **Entrega `#{e['id']}` · {e['titulo']}** ({e['fonte']})\n"
-            f"   Fatos: {fatos.get('inicio', '')[:10]} a {fatos.get('fim', '')[:10]} "
-            f"({fatos.get('duracao_dias', 1)}d) · {fatos.get('commits', 0)} commit(s) · "
-            f"{fatos.get('arquivos', 0)} arquivo(s) · {fatos.get('linhas', 0)} linhas\n"
-            f"   Prismas atravessados: {prismas_nomes}"
-        )
-        print('   ' + leitura_txt(leit_map.get(str(e['id']))))
+        prop = props.get(e['id']) or {}
+        idx = prop.get('indice')
+        nomes = [nome_prisma(p['prisma']) for p in e.get('prismas', [])]
+        partes = [f"{idx}% seu" if idx is not None else 'sem medida',
+                  plural(fatos.get('duracao_dias', 1), 'dia')]
+        if nomes:
+            partes.append(', '.join(nomes[:3]) + (f' +{len(nomes) - 3}' if len(nomes) > 3 else ''))
+        print(f"▸ **#{e['id']} {e['titulo']}** · " + ' · '.join(partes))
         if len(bts) < 2:
-            bts.append({'rotulo': f"Ver entrega #{e['id']}", 'descricao': curto(e['titulo'], 40), 'rodar': f"entrega {e['id']}"})
+            bts.append({'rotulo': f"Ver #{e['id']}", 'descricao': titulo_curto(e['titulo'], 40), 'rodar': f"entrega {e['id']}"})
     bts.append(ampliar)
     bts.append(BT_PAINEL)
-    botoes(com_leituras(bts), 'Qual entrega você quer inspecionar?')
+    botoes(com_leituras(bts), 'Qual entrega?')
 
 
 def cmd_leituras(todas: bool = False) -> None:
@@ -783,28 +880,29 @@ def cmd_leituras(todas: bool = False) -> None:
     with trajetoria.abrir() as con:
         vencidas = leituras.vencidas(con, None if todas else leituras.ENTREGAS_RELEVANTES)
         mais_antigas = 0 if todas else len(leituras.vencidas(con)) - len(vencidas)
-    print('## ✦ Luzia · leituras com base')
-    bts = [BT_TRAJETORIA, {'rotulo': 'Ver entregas', 'descricao': 'entregas do git com a leitura de cada uma',
+    print('## Luzia · Análises')
+    bts = [BT_TRAJETORIA, {'rotulo': 'Ver entregas', 'descricao': 'quanto de cada entrega é seu',
                            'rodar': 'entregas'}, BT_PAINEL]
     if not vencidas:
-        print('Todas as leituras estão em dia com os fatos.')
+        print('Todas as análises estão em dia.')
     elif not modelo.pronto():
-        print(f'{len(vencidas)} leitura(s) vencida(s) ou faltando · '
-              'leitura indisponível: configure o modelo (`modelo`, ou Ajustes no painel).')
+        print(f"{plural(len(vencidas), 'análise desatualizada', 'análises desatualizadas')} · "
+              'sem análise: falta configurar o modelo (`modelo`, ou Ajustes no painel).')
     else:
         pipeline.load_env()
         with trajetoria.abrir() as con:
             n = leituras.gerar(con, vencidas)
         if n:
             resto = len(vencidas) - n
-            print(f'✦ {n} leitura(s) renovada(s), cada uma com a base, o modelo e a data.'
-                  + (f' {resto} ficou(aram) para depois (o modelo não respondeu a um lote): rode `leituras` de novo.' if resto > 0 else ''))
+            print(f"✦ {plural(n, 'análise atualizada', 'análises atualizadas')}, cada uma com base, modelo e data."
+                  + (f" {plural(resto, 'ficou', 'ficaram')} para depois (o modelo não respondeu a um lote): rode `analises` de novo."
+                     if resto > 0 else ''))
         else:
-            print(f'Leitura indisponível: o modelo não respondeu e nada foi gravado '
-                  f'({len(vencidas)} leitura(s) seguem vencidas; os fatos continuam na tela).')
+            print(f"O modelo não respondeu e nada foi gravado "
+                  f"({plural(len(vencidas), 'análise segue desatualizada', 'análises seguem desatualizadas')}).")
     if mais_antigas > 0:
-        print(f'Há mais {mais_antigas} leitura(s) de entregas antigas: `leituras --todas` renova também essas.')
-    botoes(bts, 'O que você quer ver agora?')
+        print(f"Mais {plural(mais_antigas, 'análise', 'análises')} de entregas antigas: `analises --todas` atualiza também.")
+    botoes(bts, 'Próximo passo?')
 
 
 def cmd_identidade(args, restantes: list[str]) -> None:
@@ -818,15 +916,15 @@ def cmd_identidade(args, restantes: list[str]) -> None:
                 print(f'Não foi possível acrescentar: {e}.')
                 botoes([BT_IDENTIDADE, BT_PAINEL], 'Quer tentar de novo?')
                 return
-            print('✦ Identidade acrescentada. A próxima leitura das entregas refaz a janela inteira.')
+            print('✦ Adicionado. A próxima leitura das entregas refaz a janela inteira.')
         diag = entregas.diagnostico(con)
-    print('## ✦ Luzia · identidade do git')
+    print('## Luzia · Identidade')
     for linha in linhas_diagnostico(diag):
         print(linha)
     print('\nPara acrescentar um nome ou e-mail que você usa nos commits: '
           '`identidade adicionar "<nome ou e-mail>"`.')
-    botoes([{'rotulo': 'Ler entregas de novo', 'descricao': 'detectar entregas com estas identidades', 'rodar': 'entregas'},
-            BT_PAINEL], 'Quer ler suas entregas de novo?')
+    botoes([{'rotulo': 'Ler entregas de novo', 'descricao': 'com estes e-mails', 'rodar': 'entregas'},
+            BT_PAINEL], 'Próximo passo?')
 
 
 def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
@@ -835,49 +933,52 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
         det = entregas.detalhe(con, entrega_id)
     if not det:
         print(f'Entrega `#{entrega_id}` não encontrada.')
-        botoes([{'rotulo': 'Ver entregas', 'descricao': 'listar entregas detectadas', 'rodar': 'entregas'}, BT_PAINEL])
+        botoes([{'rotulo': 'Ver entregas', 'descricao': 'lista de entregas', 'rodar': 'entregas'}, BT_PAINEL])
         return
     fatos = det['fatos']
-    print(f"## ✦ Luzia · Entrega `#{det['id']}` · {det['titulo']} ({det['fonte']})")
+    print(f"## Luzia · Entrega #{det['id']}")
+    print(f"**{det['titulo']}** ({det['fonte']})")
     if det.get('ids'):
         print('- **PR/ticket:** ' + ' · '.join(f'#{i}' for i in det['ids']))
-    print(f"- **Período:** {fatos['inicio'][:10]} a {fatos['fim'][:10]} ({fatos['duracao_dias']} dia(s))")
-    print(f"- **Volume:** {fatos['commits']} commit(s) · {fatos['arquivos']} arquivo(s) · {fatos['linhas']} linhas · áreas: {', '.join(fatos['areas']) or 'n/d'}")
+    print(f"- **Período:** {periodo_curto(fatos['inicio'], fatos['fim'])} ({plural(fatos['duracao_dias'], 'dia')})")
+    print(f"- **Volume:** {plural(fatos['commits'], 'commit')} · {plural(fatos['arquivos'], 'arquivo')} · "
+          f"+{numero(fatos['linhas'])} linhas · áreas: {', '.join(fatos['areas']) or 'n/d'}")
     if det['prismas']:
-        print('- **Prismas atravessados:** ' + ', '.join(
-            f"{p['prisma']} ({', '.join(p['termos'])})" for p in det['prismas']
+        print('- **Prismas:** ' + ', '.join(
+            nome_prisma(p['prisma']) + (f" (termos: {', '.join(p['termos'])})" if p.get('termos') else '') for p in det['prismas']
         ))
     prop = det.get('propriedade') or {}
+    print()
     for linha in linhas_propriedade(prop):
         print(linha)
     print('\n' + leitura_txt(det.get('leitura')))
 
     if det['avancos_feitos']:
-        print('\n**Avanços feitos para esta entrega**')
+        print('\n**Feitos para esta entrega**')
         for a in det['avancos_feitos']:
-            print(f'   {feixe_linha(a)}' + (f" → acende {a['dimensao']}" if a.get('dimensao') else ''))
+            print(f'   {feixe_linha(a)}' + (f" → prova {a['dimensao']}" if a.get('dimensao') else ''))
     if det['avancos_uteis']:
-        print('\n**Avanços úteis abertos nos mesmos prismas**')
-        for a in det['avancos_uteis']:
+        print('\n**Centelhas que ajudam**')
+        for a in det['avancos_uteis'][:3]:
             print(f'   {feixe_linha(a)}')
     if det['lumens_ligados']:
         soma_lm = sum(int(l['lm']) for l in det['lumens_ligados'])
-        print(f"\n**Lúmens ligados ({len(det['lumens_ligados'])} registro(s) · {soma_lm} lm)**")
+        print(f"\n**Lúmens no período · {soma_lm} lm** ({plural(len(det['lumens_ligados']), 'registro')})")
         for l in det['lumens_ligados'][:5]:
-            print(f"- {l['quando'][:10]} · {l['prisma']} · +{l['lm']} lm ({l['luz']} · {l['fonte']})")
+            print(f"- +{l['lm']} {nome_prisma(l['prisma'])} · {l['luz']} · {l['fonte']} · {data_curta(l['quando'])}")
 
     dims = prop.get('dimensoes') or {}
     lacunas = [d for d in ('P3', 'P4') if not dims.get(d)]
     abertos = [a for a in det['avancos_feitos'] if a.get('dimensao') in lacunas and a.get('estado') in ABERTOS]
     bts = [bt_feixe(a) for a in abertos[:2]]
     if lacunas and {a['dimensao'] for a in abertos} < set(lacunas):
-        bts.append({'rotulo': 'Acender avanços para esta entrega',
-                    'descricao': f"2 avanços que acendem {' e '.join(lacunas)} (o modelo leva ~10 s)",
+        bts.append({'rotulo': f"Provar {' e '.join(lacunas)}",
+                    'descricao': '2 centelhas curtas ligadas a esta entrega · ~10 s',
                     'rodar': f"acender-entrega {det['id']}"})
     bts += [bt_feixe(a) for a in det['avancos_uteis'][:2]]
-    bts.append({'rotulo': 'Voltar às entregas', 'descricao': 'ver lista de entregas', 'rodar': 'entregas'})
+    bts.append({'rotulo': 'Ver entregas', 'descricao': 'lista de entregas', 'rodar': 'entregas'})
     bts.append(BT_PAINEL)
-    botoes(bts, 'Quer praticar um avanço ligado a esta entrega?')
+    botoes(bts, 'Próximo passo?')
 
 
 PERGUNTA_FOCO = 'Por que esta decisão e não uma alternativa?'
@@ -906,7 +1007,7 @@ def cmd_foco(args) -> None:
         return
     if situacao == 'fora_de_foco':
         print('✦ Luzia · fora de foco: nada foi observado. Para voltar, `modo ativo`.')
-        botoes([{'rotulo': 'Voltar ao foco', 'descricao': 'em foco, com lampejos', 'rodar': 'modo ativo'}, BT_TRAJETORIA])
+        botoes([{'rotulo': 'Voltar ao foco', 'descricao': 'em foco, com centelhas da sessão', 'rodar': 'modo ativo'}, BT_TRAJETORIA])
         return
     try:
         if args.prompt_arquivo:
@@ -935,7 +1036,7 @@ def cmd_foco(args) -> None:
         for a in achados:
             print(f"[Luzia · em foco · luz própria] A pessoa DIRIGIU o prisma \"{a['skill']}\" neste pedido "
                   f"(+{a['lm']} lm de luz própria). Responda normalmente e, no FIM, em UMA linha: "
-                  f"\"✦ Luzia · {a['skill']}: você dirigiu isto, +{a['lm']} lm de luz própria.\"")
+                  f"\"✦ Luzia · {nome_prisma(a['skill'])}: você dirigiu isto · +{a['lm']} lm própria\"")
         botoes(saida_botoes)
         return
     a = next((x for x in achados if x['lampejo']), achados[0])
@@ -947,40 +1048,40 @@ def cmd_foco(args) -> None:
         return
     print(f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica o prisma {skill} ({nivel}). '
           f'Isso rendeu +{lm} lm de luz REFLETIDA para a pessoa: quem aplicou foi o agente. Termine a tarefa normalmente e, no '
-          'FIM da resposta, mostre este lampejo em no máximo 3 linhas:')
-    print(f'✦ Lampejo da Luzia · {skill} reconhecido nesta mudança · +{lm} lm (luz refletida)')
+          'FIM da resposta, mostre esta centelha da sessão em no máximo 3 linhas:')
+    print(f'✦ Centelha da sessão · {nome_prisma(skill)} · +{lm} lm refletida')
     print('<1 linha: onde o conceito aparece concretamente nesta mudança>')
-    print(f'▸ Em 1 frase: {PERGUNTA_FOCO} · vira luz própria: até +30 lm')
+    print(f'▸ Em 1 frase: {PERGUNTA_FOCO} (até +30 lm própria)')
     print(f'Depois ofereça os botões. Responder agora: espere a frase da pessoa, avalie pela {observer.RUBRICA_LAMPEJO}, dê '
           'retorno em 1 linha e rode o botão trocando <0-4> pela nota e o resumo (1 linha do que a pessoa explicou). '
           'Guardar para depois: rode o botão como está. Se trocar a pergunta por uma mais concreta, use a mesma nos dois.')
     botoes([
-        {'rotulo': 'Responder agora', 'descricao': 'explique em 1 frase: vira luz própria, até +30 lm',
+        {'rotulo': 'Responder agora', 'descricao': 'até +30 lm própria · 1 frase',
          'rodar': f'lampejo --skill "{skill}" --pergunta "{PERGUNTA_FOCO}" --nota <0-4> --resumo "<1 linha do que a pessoa explicou>"'},
-        {'rotulo': 'Guardar para depois', 'descricao': 'vira um avanço no painel e em /luzia:hoje',
+        {'rotulo': 'Guardar', 'descricao': 'vira uma centelha guardada no painel e em Hoje',
          'rodar': f'guardar --skill "{skill}" --pergunta "{PERGUNTA_FOCO}"'},
-    ], 'Quer responder ao lampejo agora?')
+    ], 'Responder agora?')
 
 
 def cmd_acesso(valor: str, restantes: list[str]) -> None:
     """Sessões do painel. O chat roda como a pessoa no sistema, então `career-map` já entra logado; aqui ela vê quantas
     sessões estão abertas e pode encerrar todas (`acesso sair-de-todos`, só depois do sim explícito no botão)."""
     from . import acesso
-    print('## ✦ Luzia · acesso ao painel')
+    print('## Luzia · Acesso')
     if (valor or '').strip().lower() == 'sair-de-todos':
         if restantes[:1] == ['confirmar']:
             n = acesso.encerrar_todas()
-            print(f'✦ {n} sessão(ões) encerrada(s). Para voltar, abra o painel pelo chat (`career-map`).')
+            print(f"✦ {plural(n, 'sessão encerrada', 'sessões encerradas')}. Para voltar, abra o painel pelo chat (`career-map`).")
             botoes([BT_PAINEL], 'Quer abrir o painel de novo?')
             return
         print('Encerrar todas as sessões tira o painel de todos os navegadores em que ele está aberto. '
               'Para voltar, basta abrir o painel pelo chat. Seus dados não mudam.')
-        botoes([{'rotulo': 'Sim, sair de todos', 'descricao': 'encerra todas as sessões do painel',
+        botoes([{'rotulo': 'Sair de todos', 'descricao': 'encerra todas as sessões do painel',
                  'rodar': 'acesso sair-de-todos confirmar'}, BT_PAINEL], 'Quer encerrar todas as sessões do painel?')
         return
     n = acesso.sessoes_ativas()
-    print(f'{n} sessão(ões) do painel aberta(s). Abrir o painel pelo chat (`career-map`) já entra; a sessão dura 30 '
-          'dias sem uso e renova a cada uso. "Sair", no painel, encerra só aquele navegador.')
+    print(f"{plural(n, 'sessão aberta', 'sessões abertas')} no painel. Abrir pelo chat (`career-map`) já entra; a sessão "
+          'dura 30 dias sem uso. "Sair", no painel, encerra só aquele navegador.')
     botoes([BT_PAINEL, {'rotulo': 'Sair de todos', 'descricao': 'encerra todas as sessões do painel',
                         'rodar': 'acesso sair-de-todos'}], 'Quer abrir o painel ou encerrar as sessões?')
 
@@ -998,7 +1099,7 @@ def abrir_painel() -> None:
         start_panel()
         estado, info = identidade_do_painel()
     if estado != 'ok':
-        print('## ✦ Luzia · não abri o painel')
+        print('## Luzia · Painel não abriu')
         print(f'Algo que não é o seu painel da Luzia está respondendo em {PAINEL} (outro programa, ou um painel antigo '
               'da Luzia que não sabe se identificar). Por segurança, não gerei o link de entrada. Feche esse programa '
               '(ou reinicie o computador) e peça o painel de novo.')
@@ -1010,16 +1111,17 @@ def abrir_painel() -> None:
     except Exception:
         aberto = False
     if aberto:
-        print(f'## ✦ Luzia · painel aberto em {PAINEL} (já entra com a sua sessão)')
+        print('## Luzia · Painel aberto')
+        print(f'{PAINEL}, já com a sua sessão.')
     else:
-        print('## ✦ Luzia · não consegui abrir o navegador daqui')
+        print('## Luzia · Navegador não abriu')
         print(f'Abra este link no navegador desta máquina. Ele vale 2 minutos e funciona uma vez só: {url}')
     botoes([BT_TRAJETORIA, BT_PAINEL])
 
 
 def cmd_privacidade(valor: str, restantes: list[str]) -> None:
     """Interruptor do envio ao modelo: `privacidade mascarar-modelo on|off` (o mesmo de Ajustes no painel)."""
-    print('## ✦ Luzia · privacidade no envio ao modelo')
+    print('## Luzia · Privacidade')
     escolha = (restantes[0] if restantes else '').strip().lower()
     if (valor or '').strip().lower() == 'mascarar-modelo' and escolha in ('on', 'off'):
         pipeline.definir_mascarar_modelo(escolha == 'on')
@@ -1031,7 +1133,7 @@ def cmd_privacidade(valor: str, restantes: list[str]) -> None:
     if ligado:
         print('Mascarar antes de enviar ao modelo: **ligado**. E-mails, URLs, números de PR/ticket, hashes e os colegas '
               'do git viram marcadores antes de sair da máquina; empresa, produtos e clientes, só os listados em '
-              f'`private/termos.txt` ({termos} termo(s)).')
+              f'`private/termos.txt` ({plural(termos, "termo")}).')
     else:
         print('Mascarar antes de enviar ao modelo: **desligado** (padrão). O modelo recebe os fatos reais, como você '
               'os vê no painel e no chat.')
@@ -1052,8 +1154,8 @@ def cmd_privacidade(valor: str, restantes: list[str]) -> None:
 COMANDOS = [
     'hoje', 'triage', 'trajetoria', 'next-level', 'rota',
     'entregas', 'entrega', 'acender-entrega', 'feedback-progress', 'feedback-skills-opportunities', 'identidade',
-    'leituras', 'foco', 'agente',
-    'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
+    'leituras', 'analises', 'foco', 'agente',
+    'avancos', 'centelhas', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido', 'dividir', 'dividir-todos',
     'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo', 'acesso', 'privacidade',
 ]
@@ -1089,26 +1191,29 @@ def main() -> None:
     ap.add_argument('--arquivos', nargs='+', default=[], help='foco: caminhos editados; o código é lido do git diff e nunca gravado')
     ap.add_argument('--cwd', default='', help='foco: pasta do projeto da pessoa (a CLI roda de dentro do plugin)')
     ap.add_argument('--sessao', default='', help='foco: id da sessão do agente (padrão: um id diário por pasta)')
+    ap.add_argument('--verbose', action='store_true', help='mostra o rodapé técnico (tempo, memória e tokens das chamadas)')
     args, restantes = ap.parse_known_args()
+    global VERBOSE
+    VERBOSE = bool(args.verbose)
 
     entrada_path = Path(args.entrada)
     rotulo = args.rotulo or f'cmd-{args.comando}'
 
     if args.comando == 'modo':
         bts_foco = [
-            {'rotulo': 'Em foco, com lampejos', 'descricao': 'observa e mostra lampejos no chat', 'rodar': 'modo ativo'},
-            {'rotulo': 'Em foco, em silêncio', 'descricao': 'soma lúmens sem interromper', 'rodar': 'modo passivo'},
-            {'rotulo': 'Fora de foco', 'descricao': 'só responde quando chamada', 'rodar': 'modo sob_demanda'},
+            {'rotulo': 'Em foco', 'descricao': 'soma lúmens e mostra centelhas da sessão', 'rodar': 'modo ativo'},
+            {'rotulo': 'Em silêncio', 'descricao': 'soma lúmens sem interromper', 'rodar': 'modo passivo'},
+            {'rotulo': 'Fora de foco', 'descricao': 'só age quando você chama', 'rodar': 'modo sob_demanda'},
         ]
         if args.valor in MODOS:
             set_mode(args.valor)
             nome_foco = observer.NOMES_FOCO.get(args.valor, args.valor)
-            print(f'✦ Foco da Luzia ajustado para **{nome_foco}** (`{args.valor}`).')
+            print(f'✦ Foco: **{nome_foco}** (`{args.valor}`).')
         else:
             cfg = observer.config()
             nome_foco = observer.NOMES_FOCO.get(cfg['modo'], cfg['modo'])
-            print(f"✦ Foco atual da Luzia: **{nome_foco}** (`{cfg['modo']}`).")
-        botoes(bts_foco, 'Qual foco da Luzia você prefere agora?')
+            print(f"✦ Foco agora: **{nome_foco}** (`{cfg['modo']}`).")
+        botoes(bts_foco, 'Qual foco?')
         return
 
     if args.comando == 'modelo' and args.valor == 'usar':
@@ -1151,7 +1256,7 @@ def main() -> None:
 
     if args.comando == 'modelo':
         s = modelo.status()
-        print('## ✦ Luzia · modelo')
+        print('## Luzia · Modelo')
         print(f"**{s['nome_provedor']}** · `{s['modelo']}`" + (f" · {s['base_url']}" if s.get('base_url') else ''))
         print(f"chave: {'configurada' if s['chave_configurada'] else 'FALTANDO'} · "
               f"SDK: {'instalado' if s['sdk_instalado'] else 'falta: pip install ' + s['pip']}")
@@ -1190,7 +1295,7 @@ def main() -> None:
             return
         state = pipeline.load_state()
         plan = state.get('plano', {})
-        print('## ✦ Luzia · triagem')
+        print('## Luzia · Triagem')
         base_tri = base_triagem(rec.get('mascarar_modelo', False))
         for rotulo_tri, campo in (('Onde você está', 'onde_esta'), ('Aonde quer chegar', 'aonde_quer_chegar')):
             texto = (plan.get(campo) or {}).get('resumo', '')
@@ -1199,27 +1304,27 @@ def main() -> None:
         print()
         rota_texto(plan, state)
         primeiros = [a for a in acoes.todas(plan) if a['origem'] == 'rota']
-        print('\n**Primeiros avanços:**')
+        print('\n**Primeiras centelhas:**')
         for a in primeiros[:3]:
             print(feixe_linha(a))
         footer(rec, hits)
-        botoes([{'rotulo': 'Ajustar meu nível no painel', 'descricao': 'a trajetória parte do nível que você declara',
-                 'rodar': 'career-map'}] + [bt_feixe(a) for a in primeiros], 'Quer ajustar seu nível ou já começar?')
+        botoes([{'rotulo': 'Declarar meu nível', 'descricao': 'no painel · a trajetória parte dele',
+                 'rodar': 'career-map'}] + [bt_feixe(a) for a in primeiros], 'Próximo passo?')
         return
 
     if args.comando == 'feedback-skills-opportunities':
         resp, rec, hits = daily_call(entrada_path, rotulo)
         plan = pipeline.load_state().get('plano', {})
         sessao = [a for a in acoes.todas(plan) if a['origem'] == 'sessão']
-        print('## ✦ Luzia · oportunidades nesta sessão')
+        print('## Luzia · Oportunidades')
         if resp.get('resumo_sessao'):
             print(leitura_txt({'texto': resp['resumo_sessao'], 'modelo': rec.get('modelo'), 'criado_em': rec.get('quando')},
-                              f"{rec.get('eventos_sessao', 0)} evento(s) mascarado(s) da sessão e o seu plano") + '\n')
+                              f"{plural(rec.get('eventos_sessao', 0), 'evento mascarado', 'eventos mascarados')} da sessão e o seu plano") + '\n')
         for a in sessao:
             print(feixe_linha(a))
             print(f"   ↳ {a.get('gatilho', '')}")
         footer(rec, hits)
-        oferecer(sessao, 'Quer aproveitar alguma agora?')
+        oferecer(sessao, 'Próximo passo?')
         return
 
     state = pipeline.load_state()
@@ -1237,28 +1342,29 @@ def main() -> None:
         cmd_identidade(args, restantes)
         return
 
-    if args.comando == 'leituras':
+    if args.comando in ('leituras', 'analises'):
         cmd_leituras(args.todas)
         return
 
     if args.comando == 'acender-entrega':
         if not str(args.valor).isdigit():
             print('Informe o número da entrega: `acender-entrega <id>`')
-            botoes([{'rotulo': 'Ver entregas', 'descricao': 'listar entregas detectadas', 'rodar': 'entregas'}, BT_PAINEL])
+            botoes([{'rotulo': 'Ver entregas', 'descricao': 'lista de entregas', 'rodar': 'entregas'}, BT_PAINEL])
             return
         res = acender_entrega(int(args.valor), rotulo)
-        voltar = {'rotulo': f'Ver entrega #{args.valor}', 'descricao': 'fatos, propriedade e avanços ligados',
+        voltar = {'rotulo': f'Ver #{args.valor}', 'descricao': 'fatos, propriedade e centelhas',
                   'rodar': f'entrega {args.valor}'}
         if res.get('erro'):
-            print(f"◐ Não acendi avanços para a entrega `#{args.valor}`: {res['erro']}.")
+            print(f"◐ Não acendi centelhas para a entrega `#{args.valor}`: {res['erro']}.")
             botoes([*[bt_feixe(a) for a in res.get('avancos', [])][:2], voltar, BT_PAINEL], 'Como seguimos?')
             return
         det = res['entrega']
-        print(f"## ✦ Luzia · 2 avanços acesos para a Entrega `#{det['id']}` · {det['titulo']}")
+        print(f"## Luzia · 2 centelhas para a entrega #{det['id']}")
+        print(f"**{det['titulo']}**")
         for a in res['avancos']:
-            print(f"{feixe_linha(a)} → acende {a.get('dimensao')}")
+            print(f"{feixe_linha(a)} → prova {a.get('dimensao')}")
         footer(res['record'])
-        botoes([bt_feixe(a) for a in res['avancos']] + [voltar], 'Qual avanço desta entrega você quer fazer?')
+        botoes([bt_feixe(a) for a in res['avancos']] + [voltar], 'Próximo passo?')
         return
 
     if args.comando == 'entrega':
@@ -1293,8 +1399,8 @@ def main() -> None:
                 botoes(proximos_botoes(plan))
                 return
         nv_int = int(nv_arg)
-        print(f"✦ **{skill}** declarado no **nível {nv_int}** `{espectro_txt(nv_int)}` (ponto de partida registrado).")
-        botoes(proximos_botoes(plan), 'Qual é o próximo passo na sua trajetória?')
+        print(f"✦ **{nome_prisma(skill)}** no nível {nv_int} `{espectro_txt(nv_int)}` (ponto de partida).")
+        botoes(proximos_botoes(plan), 'Próximo passo?')
         return
 
     if args.comando == 'hoje':
@@ -1309,33 +1415,34 @@ def main() -> None:
             ver_motivo = versoes[-1]['origem'] if versoes else 'triagem'
             arquivados = [p for p in trajetoria.prismas(con, incluir_arquivados=True) if p['estado'] == 'arquivado']
             lista_pedidos = pedidos.listar(con)
-        print(f"## ✦ Luzia · sua trajetória até {pipeline.rotulos(state)[1]} · v{ver_atual} ({ver_motivo})")
+        ini, fim = pipeline.rotulos(state)
+        print(f"## Luzia · Trajetória · {ini} → {fim} · v{ver_atual}" + (f' ({ver_motivo})' if ver_motivo != 'triagem' else ''))
         rota_texto(plan, state)
         cfg = load_cfg(entrada_path) if entrada_path.exists() else {}
         rit = jogo.ritmo(plan, cfg.get('horizonte', ''))
-        print(f"\n_Calibragem: para chegar em ~{rit['meses']} meses, uns **{rit['feixes_semana']} avanço{'s' if rit['feixes_semana'] > 1 else ''} por semana**. "
-              'É só referência: o que move a trajetória é o que você conquista._')
+        print(f"\n_Ritmo: {plural(rit['feixes_semana'], 'centelha')} por semana leva até {fim} em ~{rit['meses']} meses. "
+              'É só referência._')
         por_skill: dict[str, list] = {}
         for a in todas:
             if a['estado'] != 'conquistado':
                 por_skill.setdefault(a.get('skill_plano') or a.get('skill', ''), []).append(a)
         for skill, lista in por_skill.items():
-            print(f'\n**{skill}**')
+            print(f'\n**{nome_prisma(skill)}**')
             for a in lista[:3]:
                 print(f'   {feixe_linha(a)}')
         if arquivados:
-            print('\n**Prismas arquivados (lúmens e histórico preservados)**')
+            print(f'\n**Arquivados ({len(arquivados)})** · lúmens preservados')
             for p in arquivados:
-                print(f"   - {p['nome']} · `{espectro_txt(p['nivel'])}` nível {p['nivel']}/{p['meta']}")
+                print(f"   - {nome_prisma(p['nome'])} `{espectro_txt(p['nivel'])}` {p['nivel']} de {p['meta']}")
         if lista_pedidos:
-            print('\n**Pedidos de mudança na trajetória**')
+            print('\n**Pedidos**')
             for p in lista_pedidos[:5]:
-                print(f"   - Pedido `#{p['id']}` · **{p['tipo']}** em **{p['prisma']}** — estado: **{p['estado']}**")
+                print(f"   - `#{p['id']}` · {p['tipo']} · **{nome_prisma(p['prisma'])}** · {p['estado']}")
         avisar_degraus(plan)
-        botoes(com_leituras(proximos_botoes(plan)), 'Por onde seguimos?')
+        botoes(com_leituras(proximos_botoes(plan)), 'Próximo passo?')
         return
 
-    if args.comando in ('avancos', 'acoes'):
+    if args.comando in ('avancos', 'centelhas', 'acoes'):
         jogo.sincronizar(plan)
         est_f = args.estado or None
         pri_raw = args.prisma or args.skill or (args.valor if args.valor else None)
@@ -1343,34 +1450,34 @@ def main() -> None:
         tip_f = args.tipo or None
         with trajetoria.abrir() as con:
             lista = jogo.avancos(con, estado=est_f, prisma=pri_f, tipo=tip_f)
-        filtros_txt = ', '.join(f'{k}={v}' for k, v in (('estado', est_f), ('prisma', pri_f), ('tipo', tip_f)) if v)
-        print(f"## ✦ Luzia · seus avanços{f' ({filtros_txt})' if filtros_txt else ''}")
+        filtros_txt = ' · '.join(v for v in (est_f and est_f.replace('_', ' '), pri_f and nome_prisma(pri_f), tip_f) if v)
+        print(f"## Luzia · Centelhas{f' ({filtros_txt})' if filtros_txt else ''}")
         if filtros_txt:
             if not lista:
-                print('Nenhum avanço encontrado para este filtro.')
+                print('Nada com esses filtros.')
             for a in lista:
                 print(feixe_linha(a))
         else:
-            for estado, nome in (('em_andamento', 'Em andamento'), ('na_fila', 'Na fila'), ('sugerido', 'Sugeridos'),
-                                 ('conquistado', 'Conquistados'), ('descartado', 'Descartados')):
+            for estado, nome in (('em_andamento', 'Em andamento'), ('na_fila', 'Na fila'), ('sugerido', 'Sugeridas'),
+                                 ('conquistado', 'Acesas'), ('descartado', 'Descartadas')):
                 grupo = [a for a in lista if a.get('estado') == estado]
                 if grupo:
-                    print(f'\n**{nome}** ({len(grupo)})')
+                    print(f'\n**{nome} · {len(grupo)}**')
                     for a in grupo:
                         print(feixe_linha(a))
         bts = [bt_feixe(a) for a in lista if a.get('estado') in ('em_andamento', 'na_fila', 'sugerido')][:2]
-        bts.append({'rotulo': 'Filtrar sugeridos', 'descricao': 'mostrar apenas avanços sugeridos', 'rodar': 'avancos --estado sugerido'})
-        botoes(bts, 'Qual avanço agora?')
+        bts.append({'rotulo': 'Ver só sugeridas', 'descricao': 'filtra a lista', 'rodar': 'centelhas --estado sugerido'})
+        botoes(bts, 'Próximo passo?')
         return
 
     if args.comando == 'fila':
         lista = [a for a in (acoes.find(plan, f['id']) for f in acoes.fila()) if a]
-        print('## ✦ Luzia · avanços que você mandou do painel')
+        print('## Luzia · Fila')
         if not lista:
-            print('Nenhum avanço na fila. No painel, clique em "Enviar para o agente" num avanço.')
+            print('Nada na fila. No painel, toque em "Acender no seu agente" numa centelha.')
         for a in lista:
             print(feixe_linha(a))
-        botoes([bt_feixe(a) for a in lista] + ([BT_PAINEL] if not lista else []), 'Começamos qual?')
+        botoes([bt_feixe(a) for a in lista] + ([BT_PAINEL] if not lista else []), 'Próximo passo?')
         return
 
     if args.comando in ('acender', 'trecho'):
@@ -1378,54 +1485,54 @@ def main() -> None:
             res = gerar_trecho(args.valor or args.prisma or args.skill, rotulo)
         except Exception as e:  # sem modelo, sem chave ou sem internet: mensagem clara e botões, nada gravado
             arquivos.registrar_erro('cli acender', e)
-            res = {'erro': f'não deu para acender avanços sem o modelo ({modelo.resumo_erro(e)})'}
+            res = {'erro': f'não deu para acender centelhas sem o modelo ({modelo.resumo_erro(e)})'}
         if res.get('erro'):
             print(f"◐ {res['erro']}.")
             botoes(proximos_botoes(plan))
             return
-        print(f"## ✦ Luzia · 3 avanços novos acesos para {curto(res['skill'])}")
+        print(f"## Luzia · {plural(len(res['feixes']), 'centelha nova', 'centelhas novas')} · {nome_prisma(res['skill'])}")
         for f in res['feixes']:
             print(feixe_linha(f))
         footer(res['record'])
-        oferecer(res['feixes'], 'Qual avanço novo você quer fazer?')
+        oferecer(res['feixes'], 'Próximo passo?')
         return
 
     if args.comando == 'guardar':
         skill = jogo.skill_de(args.valor or args.prisma or args.skill, plan)
         jogo.usar_lampejo(skill, 'guardado')
         f = acoes.guardar(skill, args.pergunta or f'Oportunidade observada em {skill}')
-        print(f"➤ Guardado como avanço `#{f['id']}`: aparece no painel e em /luzia:hoje.")
-        botoes([bt_feixe({**f, 'valor_lm': 30}), *proximos_botoes(plan)[:2]], 'Quer fazer este avanço agora?')
+        print(f"➤ Guardada como centelha `#{f['id']}`: aparece no painel e em Hoje.")
+        botoes([bt_feixe({**f, 'valor_lm': 30}), *proximos_botoes(plan)[:2]], 'Próximo passo?')
         return
 
     a = acoes.find(plan, args.valor) if args.valor else None
 
     if args.comando == 'enviar':
         if not a:
-            print(f'Avanço {args.valor} não encontrado.')
+            print(f'Centelha {args.valor} não encontrada.')
             botoes(proximos_botoes(plan))
             return
         if not jogo.enfileirar(a['id']):
-            print(f"`#{a['id']}` não pode ir para a fila: já foi conquistado (e revisitado) ou está descartado.")
+            print(f"`#{a['id']}` não pode ir para a fila: já foi acesa (e revisitada) ou está descartada.")
             botoes(proximos_botoes(plan))
             return
         acoes.enfileirar(a['id'], a.get('titulo', ''))
-        print(f"➤ `#{a['id']}` na fila: a Luzia oferece na próxima mensagem do seu agente.")
-        botoes([bt_feixe(a), BT_PAINEL], 'Quer fazer este avanço agora?')
+        print(f"➤ `#{a['id']}` na fila: a Luzia oferece na sua próxima mensagem.")
+        botoes([bt_feixe(a), BT_PAINEL], 'Próximo passo?')
         return
 
     if args.comando in ('prompt', 'fazer', 'revisitar'):
         if not a:
-            print(f'Avanço {args.valor} não encontrado.')
+            print(f'Centelha {args.valor} não encontrada.')
             botoes(proximos_botoes(plan))
             return
         if (args.comando == 'revisitar' or a.get('estado') == 'conquistado') and not jogo.pode_revisitar(a):
-            print(f"`#{a['id']}` já foi conquistado. Só dá para revisitar uma vez um avanço com nota 2 ou 3.")
+            print(f"`#{a['id']}` já foi acesa. Só dá para revisitar uma vez uma centelha com nota 2 ou 3.")
             botoes(proximos_botoes(plan, {a['id']}))
             return
         if not jogo.iniciar(a['id'], args.onde or ('revisita' if a.get('estado') == 'conquistado' else '')):
-            print(f"`#{a['id']}` está descartado.")
-            botoes([{'rotulo': 'Restaurar este avanço', 'descricao': 'volta para os sugeridos', 'rodar': f"restaurar {a['id']}"}])
+            print(f"`#{a['id']}` está descartada.")
+            botoes([{'rotulo': 'Restaurar', 'descricao': 'volta para as sugeridas', 'rodar': f"restaurar {a['id']}"}])
             return
         acoes.desenfileirar(a['id'])
         acoes.registrar_evento(a['id'], 'iniciada', skill=a.get('skill'), origem=a.get('origem'))
@@ -1434,10 +1541,10 @@ def main() -> None:
         else:
             roteiro(a)
             botoes([
-                {'rotulo': 'Descartar este avanço', 'descricao': 'não faz sentido para a minha trajetória', 'rodar': f"descartar {a['id']} --motivo nao_faz_sentido"},
-                {'rotulo': 'Já domino este tema', 'descricao': 'descartar por já dominar', 'rodar': f"descartar {a['id']} --motivo ja_domino"},
+                {'rotulo': 'Descartar', 'descricao': 'não faz sentido para mim', 'rodar': f"descartar {a['id']} --motivo nao_faz_sentido"},
+                {'rotulo': 'Já domino', 'descricao': 'descarta por já dominar', 'rodar': f"descartar {a['id']} --motivo ja_domino"},
                 BT_PAINEL,
-            ], 'Responda à pergunta da Luzia no chat, ou escolha:')
+            ], 'Responda no chat, ou escolha:')
         return
 
     if args.comando == 'registrar':
@@ -1451,49 +1558,49 @@ def main() -> None:
             botoes(proximos_botoes(plan))
             return
         if res.get('tente_de_novo'):
-            print(f"◐ Nota {args.nota}/4 ({propriedade.RUBRICA[max(0, min(4, args.nota))]}): ainda não. "
-                  f"O avanço `#{a['id']}` continua aberto: tente de novo agora ou depois, vale o mesmo.")
+            print(f"◐ Nota {args.nota}/4 ({propriedade.RUBRICA[max(0, min(4, args.nota))]}). Ainda não; tente de novo. "
+                  f"`#{a['id']}` continua aberto e vale o mesmo.")
             botoes([bt_feixe(a, 'Tentar de novo: '), *proximos_botoes(plan, {a['id']})[:2]])
             return
         acoes.registrar_evento(a['id'], 'concluida', nota=args.nota, resumo=args.resumo[:200], skill=a.get('skill'),
                                entrega=a.get('entrega'), dimensao=a.get('dimensao'), origem=a.get('origem'))
         r = jogo.rota(plan)
         s = next((x for x in r['skills'] if x['nome'] == (a.get('skill_plano') or a.get('skill'))), None)
-        print(f"✦ Avanço conquistado · `#{a['id']}` · nota {args.nota}/4 · **+{res['ganho']} lm**"
-              + (f" · {curto(s['nome'])} {s['lm']}/{s['limiar']} lm" if s else '') + f" · trajetória {r['niveis_feitos']}/{r['niveis_total']} níveis")
+        print(f"✦ **+{res['ganho']} lm** · nota {args.nota}/4 · centelha acesa `#{a['id']}`"
+              + (f" · {nome_prisma(s['nome'])} {s['lm']}/{s['limiar']} lm" if s else '') + f" · {r['niveis_feitos']} de {r['niveis_total']} níveis")
         if a.get('entrega_id'):
             with trajetoria.abrir() as con:
                 det = entregas.detalhe(con, a['entrega_id'], incluir_leitura=False)
             if det:
                 idx = det['propriedade'].get('indice')
-                print(f"▸ Entrega `#{det['id']}` · {det['titulo']}: propriedade agora "
-                      f"**{f'{idx}%' if idx is not None else '—'}** · medida em {det['propriedade'].get('base')}")
+                print(f"▸ Entrega #{det['id']}: propriedade agora "
+                      f"**{f'{idx}% seu' if idx is not None else '—'}** (medido em {dims_medidas(det['propriedade']) or '—'})")
         avisar_degraus(plan)
-        revisita = [{'rotulo': 'Revisitar agora', 'descricao': f"buscar o restante: {res['feixe']['lm_ganho']} de {res['feixe']['valor_lm']} lm",
+        revisita = [{'rotulo': 'Revisitar agora', 'descricao': f"vale +{res['feixe']['valor_lm'] - res['feixe']['lm_ganho']} lm",
                      'rodar': f"fazer {a['id']}"}] if res.get('pode_revisitar') else []
-        botoes(proximos_botoes(plan, {a['id']})[:2] + revisita, 'E agora?')
+        botoes(proximos_botoes(plan, {a['id']})[:2] + revisita, 'Próximo passo?')
         return
 
     if args.comando == 'descartar':
         if not a:
-            print(f'Avanço {args.valor} não encontrado.')
+            print(f'Centelha {args.valor} não encontrada.')
             botoes(proximos_botoes(plan))
             return
         motivo_k = args.motivo if args.motivo in jogo.MOTIVOS else 'nao_faz_sentido'
         jogo.descartar(a['id'], motivo_k)
         acoes.desenfileirar(a['id'])
-        print(f"✕ `#{a['id']}` descartado ({jogo.MOTIVOS[motivo_k]}). A Luzia leva isso em conta nas próximas sugestões.")
-        botoes([{'rotulo': 'Desfazer', 'descricao': 'o avanço volta para os sugeridos', 'rodar': f"restaurar {a['id']}"}]
+        print(f"✕ Descartada ({jogo.MOTIVOS[motivo_k].lower()}). `#{a['id']}`")
+        botoes([{'rotulo': 'Desfazer', 'descricao': 'a centelha volta para as sugeridas', 'rodar': f"restaurar {a['id']}"}]
                + proximos_botoes(plan, {a['id']}))
         return
 
     if args.comando == 'restaurar':
         if not a:
-            print(f'Avanço {args.valor} não encontrado.')
+            print(f'Centelha {args.valor} não encontrada.')
             botoes(proximos_botoes(plan))
             return
         jogo.restaurar(a['id'])
-        print(f"○ `#{a['id']}` voltou para os sugeridos.")
+        print(f"○ `#{a['id']}` voltou para as sugeridas.")
         botoes([bt_feixe({**a, 'estado': 'sugerido'})])
         return
 
@@ -1501,23 +1608,23 @@ def main() -> None:
         skill = jogo.skill_de(args.valor or args.prisma or args.skill, plan)
         res = jogo.subir(skill, plan)
         if res.get('erro'):
-            print(f"◐ {curto(skill)}: {res['erro']}.")
+            print(f"◐ {nome_prisma(skill)}: {res['erro']}.")
             botoes(proximos_botoes(plan))
             return
         r = res['rota']
-        print(f"✦ **{skill}** subiu para o nível {res['para']}. Trajetória: **{r['niveis_feitos']} de {r['niveis_total']} níveis**.")
+        print(f"✦ **{nome_prisma(skill)}** no nível {res['para']} · trajetória **{r['niveis_feitos']} de {r['niveis_total']} níveis**.")
         if res.get('marco'):
-            print(f"◆ Marco {res['marco']['n']} de 3 alcançado. Dossiê de evidências salvo em `{res['marco']['dossie']}` (local).")
+            print(f"✦ Marco {res['marco']['n']} de 3 · dossiê gerado em `{res['marco']['dossie']}` (local).")
         s = next((x for x in r['skills'] if x['nome'] == skill), {})
-        prox = [] if s.get('na_meta') else [{'rotulo': f'Acender avanços de {curto(skill)}'[:48],
-                                             'descricao': f"3 avanços para o nível {s.get('proximo')} (o modelo leva ~10 s)",
+        prox = [] if s.get('na_meta') else [{'rotulo': f'Acender 3 de {nome_prisma(skill)}',
+                                             'descricao': f"para o nível {s.get('proximo')} · ~10 s",
                                              'rodar': f'trecho "{skill}"'}]
-        botoes(prox + proximos_botoes(plan), 'Acendemos os próximos avanços?')
+        botoes(prox + proximos_botoes(plan), 'Próximo passo?')
         return
 
     if args.comando == 'dossie':
         caminho = jogo.dossie(plan)
-        print(f'## ✦ Luzia · dossiê de evidências\nSalvo em `{caminho}` (local, fora do git).')
+        print(f'## Luzia · Dossiê\nSalvo em `{caminho}` (local, fora do git).')
         print(caminho.read_text(encoding='utf-8'))
         botoes(proximos_botoes(plan)[:2] + [BT_PAINEL])
         return
@@ -1531,12 +1638,12 @@ def main() -> None:
         skill = jogo.skill_de(alvo_sk, plan)
         if args.acao == 'guardar' or (args.nota is None and args.pergunta):
             jogo.usar_lampejo(skill, 'guardado')
-            f = acoes.guardar(skill, args.pergunta or f'Pergunta do lampejo sobre {skill}')
-            print(f"➤ Lampejo guardado como avanço `#{f['id']}`: aparece no painel e em /luzia:hoje.")
+            f = acoes.guardar(skill, args.pergunta or f'Pergunta da sessão sobre {nome_prisma(skill)}')
+            print(f"➤ Centelha da sessão guardada `#{f['id']}`: aparece no painel e em Hoje.")
             botoes([bt_feixe({**f, 'valor_lm': 30}), *proximos_botoes(plan)[:2]])
             return
         if args.nota is None:
-            print('Informe `--nota 0-4` para converter o lampejo em luz própria.')
+            print('Informe `--nota 0-4` para converter a centelha da sessão em luz própria.')
             botoes(proximos_botoes(plan))
             return
         res = jogo.converter(skill, args.nota, (args.pergunta or args.resumo or '')[:60])
@@ -1547,10 +1654,10 @@ def main() -> None:
         nota, lm = res['nota'], res['lm']
         acoes.registrar_evento(acoes.aid('cartao', args.pergunta or skill), 'concluida', nota=nota, resumo=args.resumo[:200],
                                skill=skill, origem='cartao')
-        print(f"✦ Luz própria: nota {nota}/4 · **+{lm} lm** em {curto(skill)}" if lm else
-              f"◐ Nota {nota}/4: ainda luz refletida. Virou um avanço guardado para você tentar com calma.")
+        print(f"✦ **+{lm} lm** própria · nota {nota}/4 · {nome_prisma(skill)}" if lm else
+              f"◐ Nota {nota}/4. Ainda refletida; virou uma centelha guardada para tentar com calma.")
         if not lm:
-            acoes.guardar(skill, args.pergunta or f'Pergunta do lampejo sobre {skill}')
+            acoes.guardar(skill, args.pergunta or f'Pergunta da sessão sobre {nome_prisma(skill)}')
         avisar_degraus(plan)
         botoes([b for b in proximos_botoes(plan) if b['rodar'].startswith('subir')] or proximos_botoes(plan))
         return

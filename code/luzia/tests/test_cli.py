@@ -220,15 +220,17 @@ def test_vocabulario_sem_termos_antigos(privado, monkeypatch):
         assert achado is None, f'Termo antigo "{achado.group(0)}" encontrado na saída visível:\n{texto}'
 
     v_traj = visivel(rodar(monkeypatch, 'trajetoria'))
-    assert v_traj.count('(prisma · skill)') == 1 and not re.search(r'\bPrisma [^(s]', v_traj)
+    assert '(prisma · skill)' not in v_traj and not re.search(r'\bPrisma [^(s]', v_traj)
+    assert 'DDD `' in v_traj and 'Domain-Driven Design' not in v_traj  # nome curto; o completo fica no painel
     assert '▰' in v_traj or '▱' in v_traj
 
     v_modo = visivel(rodar(monkeypatch, 'modo'))
-    assert 'em foco, com lampejos' in v_modo.lower()
+    assert 'em foco' in v_modo.lower() and 'lampejo' not in v_modo.lower()
 
     # Verifica também o lampejo do observador e a linha de status
     cartao = observer.cartao_refletida(DDD, 'Como isolar o domínio?')
-    assert '✦ Lampejo da Luzia · Domain-Driven Design (DDD)' in cartao and 'Prisma Domain' not in cartao
+    assert '✦ Centelha da sessão · DDD · +10 lm refletida' in cartao and 'Prisma Domain' not in cartao
+    assert 'lampejo' not in cartao.split('lampejo --skill')[0].lower()  # o comando interno pode manter o nome
     assert RE_TERMOS_ANTIGOS.search(cartao) is None
 
     linha_st = statusline.linha({'workspace': {'current_dir': str(privado)}})
@@ -282,10 +284,11 @@ def test_entrega_detalhe_mostra_p1_a_p4_com_base(privado, monkeypatch):
     s = rodar(monkeypatch, 'entrega', str(eid))
     v = visivel(s)
     assert 'None' not in v and 'n/d%' not in v
-    assert re.search(r'P1 · direção no prompt: \*\*65\*\* \(inferido · geral\)', v), v
-    assert re.search(r'P2 · coesão da entrega: \*\*100\*\* \(calculado\) — 100 − 0 \(4 arquivos\)', v), v
-    assert 'P3 · aplicação conceitual: sem base' in v and 'P4 · domínio arquitetural: sem base' in v
-    assert re.search(r'Propriedade na entrega:\*\* \*\*82%\*\* · medida em 2 de 4 dimensões', v), v
+    assert re.search(r'P1 Direção no prompt: \*\*65\*\* \(inferido · geral\)', v), v
+    assert re.search(r'P2 Coesão: \*\*100\*\* \(calculado\) — 100 − 0 \(4 arquivos\)', v), v
+    assert 'P3 Aplicação de conceito: — falta você explicar' in v and 'P4 Decisão de arquitetura: — falta você defender' in v
+    assert '**82% seu** (medido em P1 e P2)' in v, v
+    assert '(s)' not in v and '2 commits' in v and '4 arquivos' in v  # plural de verdade
     assert tem_rodape_botoes(s)
 
 
@@ -308,7 +311,7 @@ def test_pedido_mostra_analise_com_base_modelo_e_data(privado, monkeypatch):
                  ('pedido', 'ajustar', '1', '--nivel', '2', '--meta', '4')):
         v = visivel(rodar(monkeypatch, *argv))
         linha = next(l for l in v.splitlines() if 'Partida no nível' in l)
-        assert 'com base em' in linha and 'gemini/gemini-2.5-flash' in linha and '2026-11-12' in linha, linha
+        assert '— Análise da Luzia, 12 nov' in linha and 'base: ' in linha and 'gemini/gemini-2.5-flash' in linha, linha
 
 
 def test_pedido_erros_no_chat_terminam_em_botoes(privado, monkeypatch):
@@ -338,7 +341,7 @@ def test_pedido_sem_modelo_nao_trava_a_pessoa(privado, monkeypatch):
     monkeypatch.setattr(pipeline, 'run_plan', sem_modelo)
     s = rodar(monkeypatch, 'pedido', 'abrir', 'incluir', 'Observabilidade', '--nivel', '2', '--meta', '4')
     v = visivel(s)
-    assert 'proposto' in v and 'nível **2 → meta 4/5**' in v and 'leitura indisponível' in v
+    assert 'proposto' in v and 'nível **2 → meta 4/5**' in v and 'Sem análise: análise indisponível' not in v and 'Sem análise' in v
     assert any(b['rodar'] == 'pedido aceitar 1' for b in botoes_de(s))
     s = rodar(monkeypatch, 'pedido', 'abrir', 'incluir', 'Observabilidade')  # tentar de novo explica, não trava
     assert 'já existe um pedido em aberto' in visivel(s) and tem_rodape_botoes(s)
@@ -359,13 +362,14 @@ def test_toda_leitura_impressa_tem_base_modelo_e_data(privado, monkeypatch):
             con.execute("INSERT INTO leitura (alvo_tipo, alvo_id, texto, base_json, base_hash, modelo, criado_em) "
                         "VALUES ('entrega', ?, 'Entrega focada no domínio.', ?, ?, 'gemini/teste', '2026-11-11T09:00:00')",
                         (str(eid), json.dumps(b), leituras.hash_base(b)))
-    for argv in (('entregas',), ('entrega', str(eid))):
-        v = visivel(rodar(monkeypatch, *argv))
-        linha = next(l for l in v.splitlines() if 'Entrega focada no domínio.' in l)
-        assert 'com base em: 2 commit(s), 4 arquivo(s), 90 linhas e 1 prisma(s)' in linha, linha
-        assert 'gemini/teste · 2026-11-11' in linha, linha
-    v = visivel(rodar(monkeypatch, 'trajetoria'))  # prisma sem leitura: diz por quê, nunca fica vazio
-    assert 'leitura indisponível: configure o modelo' in v
+    v = visivel(rodar(monkeypatch, 'entrega', str(eid)))
+    linha = next(l for l in v.splitlines() if 'Entrega focada no domínio.' in l)
+    assert 'base: 2 commits, 4 arquivos, 90 linhas, 1 prisma' in linha, linha
+    assert '— Análise da Luzia, 11 nov' in linha and 'gemini/teste' in linha, linha
+    v = visivel(rodar(monkeypatch, 'entregas'))  # a lista: uma linha por entrega, a análise só no detalhe
+    assert f'**#{eid} Separa agregado de agendamento** · ' in v and 'Entrega focada no domínio.' not in v
+    v = visivel(rodar(monkeypatch, 'trajetoria'))  # prisma sem análise: diz por quê, nunca fica vazio
+    assert 'Sem análise: falta configurar o modelo' in v
 
 
 # ------------------------------------------------------------------ entregas: sem atalho para as tarefas da IA (A2)
@@ -374,10 +378,10 @@ def test_sem_entrega_git_mostra_diagnostico_e_nunca_tarefas_da_ia(privado, monke
     for argv in (('entregas',), ('feedback-progress',), ('feedback-progress', '--rotulo', 'feedback-progress')):
         s = rodar(monkeypatch, *argv)
         v = visivel(s)
-        assert 'Nenhuma entrega detectada' in v, v
+        assert 'Nenhuma entrega encontrada' in v, v
         assert 'cadastro de exemplo' not in v and 'cobertura do relatório' not in v  # tarefas_recentes (IA) fora
-        assert 'Repositório autorizado' in v and 'não consegui ler o histórico git' in v
-        assert 'Identidades do git:** Pessoa Teste' in v and 'Janela:** ainda não lida' in v
+        assert 'Repositório:**' in v and 'não consegui ler o histórico git' in v
+        assert 'E-mails do git:** Pessoa Teste' in v and 'Janela:** ainda não lida' in v
         rodar_bts = [b['rodar'] for b in botoes_de(s)]
         assert 'entregas --ampliar 180' in rodar_bts and 'identidade' in rodar_bts, rodar_bts
 
@@ -436,14 +440,14 @@ def test_acender_entrega_liga_avancos_e_acende_p3(privado, monkeypatch):
     assert p3['titulo'] == 'Explicar o agregado desta entrega'  # a primeira é sempre a P3
 
     s = rodar(monkeypatch, 'acender-entrega', str(eid))  # já há P3 e P4 abertos: não chama o modelo de novo
-    assert 'já tem avanços P3 e P4 abertos' in visivel(s) and len(chamadas) == 1 and tem_rodape_botoes(s)
+    assert 'já tem centelhas P3 e P4 abertas' in visivel(s) and len(chamadas) == 1 and tem_rodape_botoes(s)
 
     rodar(monkeypatch, 'fazer', p3['id'])
     s = rodar(monkeypatch, 'registrar', p3['id'], '--nota', '4', '--resumo', 'Explicou as invariantes do agregado')
     assert 'propriedade agora' in visivel(s)
     v = visivel(rodar(monkeypatch, 'entrega', str(eid)))
-    assert 'P3 · aplicação conceitual: **100** (evidência)' in v and 'Explicou as invariantes do agregado' in v
-    assert 'P4 · domínio arquitetural: sem base' in v
+    assert 'P3 Aplicação de conceito: **100** (evidência)' in v and 'Explicou as invariantes do agregado' in v
+    assert 'P4 Decisão de arquitetura: — falta você defender' in v
 
 
 def test_acender_entrega_sem_modelo_nao_grava_nada(privado, monkeypatch):
@@ -472,8 +476,9 @@ def test_leituras_pelo_chat(privado, monkeypatch):
     from luzia import leituras, modelo
     monkeypatch.setattr(modelo, 'pronto', lambda: False)
     s = rodar(monkeypatch, 'leituras')
-    assert 'leitura indisponível: configure o modelo' in visivel(s) and tem_rodape_botoes(s)
+    assert 'sem análise: falta configurar o modelo' in visivel(s) and tem_rodape_botoes(s)
     assert all(b['rodar'] != 'leituras' for b in botoes_de(rodar(monkeypatch, 'hoje')))
+    assert '## Luzia · Análises' in visivel(rodar(monkeypatch, 'analises'))  # apelido de `leituras`
 
     monkeypatch.setattr(modelo, 'pronto', lambda: True)
     with trajetoria.abrir() as con:
@@ -481,7 +486,7 @@ def test_leituras_pelo_chat(privado, monkeypatch):
     assert n == 3  # os 3 prismas do plano, ainda sem leitura
     for cmd in ('hoje', 'trajetoria'):
         bts = botoes_de(rodar(monkeypatch, cmd))
-        assert {'rotulo': 'Gerar 3 leitura(s)', 'rodar': 'leituras'}.items() <= next(
+        assert {'rotulo': 'Atualizar 3 análises', 'rodar': 'leituras'}.items() <= next(
             b for b in bts if b['rodar'] == 'leituras').items(), (cmd, bts)
 
     monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('sem internet')))
@@ -491,10 +496,10 @@ def test_leituras_pelo_chat(privado, monkeypatch):
     chamadas = []
     _leituras_falsas(monkeypatch, chamadas)
     s = rodar(monkeypatch, 'leituras')
-    assert '3 leitura(s) renovada(s)' in visivel(s) and len(chamadas) == 1  # um lote, uma chamada
-    assert 'Todas as leituras estão em dia' in visivel(rodar(monkeypatch, 'leituras'))
+    assert '3 análises atualizadas' in visivel(s) and len(chamadas) == 1  # um lote, uma chamada
+    assert 'Todas as análises estão em dia' in visivel(rodar(monkeypatch, 'leituras'))
     v = visivel(rodar(monkeypatch, 'trajetoria'))
-    assert f'Leitura de prisma:{DDD}.' in v and 'gemini/teste · 2026-11-12' in v
+    assert f'Leitura de prisma:{DDD}. _— Análise da Luzia, 12 nov · base: ' in v and 'gemini/teste' in v
     assert all(b['rodar'] != 'leituras' for b in botoes_de(rodar(monkeypatch, 'hoje')))
 
 
@@ -510,17 +515,18 @@ def test_erros_do_motor_ja_nascem_no_vocabulario_novo(privado, monkeypatch):
     ]
     for m in mensagens:
         assert RE_TERMOS_ANTIGOS.search(m) is None, m
-    assert '1 avanço conquistado' in mensagens
+    assert '1 centelha acesa' in mensagens
     saida = visivel(rodar(monkeypatch, 'registrar', fid, '--nota', '3', '--resumo', 'x'))
-    assert RE_TERMOS_ANTIGOS.search(saida) is None and 'avanço' in saida
+    assert RE_TERMOS_ANTIGOS.search(saida) is None and 'centelha' in saida
     assert not hasattr(cli, '_vocab_novo')
 
 
-def test_trajetoria_compacta_a_falta_e_nomeia_skill_so_na_primeira_vez(privado, monkeypatch):
+def test_trajetoria_compacta_a_falta_e_usa_o_nome_curto(privado, monkeypatch):
     saida = visivel(rodar(monkeypatch, 'trajetoria'))
-    assert saida.count('(prisma · skill)') == 1 and saida.count('skill)') == 1
-    falta = [l for l in saida.splitlines() if ' falta: ' in l]
-    assert falta and all('conquistar 1' not in l and len(l) < 230 for l in falta), falta
+    assert '(prisma · skill)' not in saida and 'skill)' not in saida
+    falta = [l for l in saida.splitlines() if ' · falta ' in l]
+    assert falta and all('conquistar 1' not in l and len(l) < 120 for l in falta), falta
+    assert any(l.strip().startswith('DDD `') and '1 → 4' in l and '/150 lm · falta ' in l for l in falta), falta
 
 
 def test_acender_sem_modelo_no_chat_nao_quebra_nem_grava(privado, monkeypatch):

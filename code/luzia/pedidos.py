@@ -205,7 +205,7 @@ def _propor_dividir(con: sqlite3.Connection, r: sqlite3.Row, partes: list[str] |
     for a, p in (mover or {}).items():
         p = _limpar(p)
         if a not in ids:
-            raise ValueError(f'o avanço {a} não é do prisma {antigo}')
+            raise ValueError(f'a centelha {a} não é do prisma {antigo}')
         if p not in nomes:
             raise ValueError(f'a parte {p} não está nesta divisão ({", ".join(nomes)})')
         movidos[a] = p
@@ -307,7 +307,7 @@ def propor(con: sqlite3.Connection, pedido_id: int, nivel: int | None = None, me
     except Exception as e:  # sem modelo, sem chave ou sem internet: a proposta sai dos valores da própria pessoa
         arquivos.registrar_erro('pedidos.propor', e)
         res, rec, dados_llm = None, {}, {}
-        indisponivel = f'leitura indisponível: {modelo.resumo_erro(e)}'
+        indisponivel = f'análise indisponível: {modelo.resumo_erro(e)}'
 
     if tipo == 'mudar_meta':
         nv_final = nv_atual

@@ -38,8 +38,8 @@ CLI = arquivos.CLI
 
 AGENTES = ('claude-code', 'codex', 'cursor', 'antigravity', 'outro')
 NOMES_FOCO = {
-    'ativo': 'em foco, com lampejos',
-    'passivo': 'em foco, em silêncio',
+    'ativo': 'em foco',
+    'passivo': 'em silêncio',
     'sob_demanda': 'fora de foco',
 }
 
@@ -227,15 +227,15 @@ def cartao_refletida(skill: str, pergunta: str = '<a pergunta>', nivel: str = 'l
         return (f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica o prisma {skill} ({nivel}). '
                 f'Rendeu +{lm} lm de luz REFLETIDA para a pessoa, a confirmar (o banco estava ocupado; a Luzia confirma na próxima '
                 'gravação). Termine a tarefa normalmente e, no FIM, em UMA linha, sem fazer perguntas: '
-                f'"✦ Luzia · {skill} reconhecido nesta mudança · +{lm} lm (luz refletida, a confirmar)."')
+                f'"✦ Centelha da sessão · {prismas.nome_curto(skill)} · +{lm} lm refletida (a confirmar)"')
     return (
         f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica o prisma {skill} ({nivel}). Isso rendeu '
         f'+{lm} lm de luz REFLETIDA para a pessoa: quem aplicou foi o agente. Termine a tarefa normalmente. No FIM da resposta, '
-        'mostre este lampejo em no máximo 3 linhas:\n'
-        f'✦ Lampejo da Luzia · {skill} reconhecido nesta mudança · +{lm} lm (luz refletida)\n'
+        'mostre esta centelha da sessão em no máximo 3 linhas:\n'
+        f'✦ Centelha da sessão · {prismas.nome_curto(skill)} · +{lm} lm refletida\n'
         '<1 linha: onde o conceito aparece concretamente nesta mudança>\n'
-        f'▸ Em 1 frase: {pergunta} · vira luz própria: até +30 lm\n'
-        'Depois, use AskUserQuestion com "Responder agora" e "Guardar para depois". Responder: espere a frase, avalie pela '
+        f'▸ Em 1 frase: {pergunta} (até +30 lm própria)\n'
+        'Depois, use AskUserQuestion com "Responder agora" e "Guardar". Responder: espere a frase, avalie pela '
         f'{RUBRICA_LAMPEJO}, dê retorno em 1 linha e rode: {CLI} lampejo --skill "{skill}" --pergunta "<a pergunta>" '
         f'--nota <0-4> --resumo "<1 linha do que a pessoa explicou>". Guardar: rode {CLI} lampejo --skill "{skill}" '
         '--pergunta "<a pergunta>".'
@@ -252,7 +252,7 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
         for r in reconhecer_em(event.get('prompt', ''), 'prompt', sid, modo, 'prompt', 'prompt', gaps):
             if modo == 'ativo':
                 partes.append(f'[Luzia · em foco · luz própria] A pessoa DIRIGIU o prisma "{r["skill"]}" neste pedido (+{r["lm"]} lm de luz própria). '
-                              f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · {r["skill"]}: você dirigiu isto, +{r["lm"]} lm de luz própria."')
+                              f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · {prismas.nome_curto(r["skill"])}: você dirigiu isto · +{r["lm"]} lm própria"')
     try:  # espera curta: o hook não pode travar a sessão; sem a fila, o resto do aviso sai igual
         pend = [f for f in acoes.fila(banco.ESPERA_CURTA_MS) if sid not in f.get('oferecida_em', [])]
     except Exception as e:
@@ -265,8 +265,8 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
         except Exception as e:  # o aviso sai mesmo se o banco estiver ocupado; o erro fica registrado
             arquivos.registrar_erro('observer fila', e)
         partes.append(
-            f'[Luzia · fila] A pessoa enviou do painel o avanço #{item["id"]} ("{item.get("titulo", "")}"). Responda primeiro ao '
-            'que ela pediu. No FIM, em uma linha começando com "✦ Luzia:", lembre o avanço e use AskUserQuestion com '
+            f'[Luzia · fila] A pessoa enviou do painel a centelha #{item["id"]} ("{item.get("titulo", "")}"). Responda primeiro ao '
+            'que ela pediu. No FIM, em uma linha começando com "✦ Luzia:", lembre a centelha e use AskUserQuestion com '
             '"Abrir em sessão nova", "Fazer aqui" e "Depois". Sessão nova: rode '
             f'`{CLI} prompt {item["id"]} --onde "sessão nova"` e abra uma sessão/agente novo com esse texto pela ferramenta do seu '
             f'harness (se não houver, faça aqui). Fazer aqui: rode `{CLI} fazer {item["id"]} --onde aqui` e siga o roteiro.'
@@ -321,9 +321,9 @@ def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
     if prontas:
         partes.append(f"{', '.join(prontas)} pronto para subir de nível")
     if andamento:
-        partes.append(f'avanço em andamento: "{andamento[0].get("titulo", "")}"')
+        partes.append(f'centelha em andamento: "{andamento[0].get("titulo", "")}"')
     if fila:
-        partes.append(f'{len(fila)} avanço(s) na fila do painel')
+        partes.append(f"{len(fila)} {'centelha' if len(fila) == 1 else 'centelhas'} na fila do painel")
     if partes:
         saida('SessionStart', f"[Luzia · em foco · início] {'; '.join(partes)}. Não interrompa o que a pessoa pedir. No FIM da sua "
                               'primeira resposta, em UMA linha: "✦ Luzia (em foco): <resumo curto disso> · /luzia:hoje para continuar."')

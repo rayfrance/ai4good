@@ -66,9 +66,9 @@ def _editar(repo, conteudo='class Pedido : Aggregate { }\n'):
 def test_foco_arquivos_reconhece_luz_refletida_e_oferece_o_lampejo(privado, repo, monkeypatch):
     _editar(repo)
     saida = rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', 's1')
-    assert f'✦ Lampejo da Luzia · {DDD}' in saida and '+10 lm (luz refletida)' in saida
+    assert '✦ Centelha da sessão · DDD · +10 lm refletida' in saida
     bts = botoes_de(saida)
-    assert [b['rotulo'] for b in bts] == ['Responder agora', 'Guardar para depois']
+    assert [b['rotulo'] for b in bts] == ['Responder agora', 'Guardar']
     assert bts[0]['rodar'].startswith('lampejo --skill') and '--nota' in bts[0]['rodar']
     assert bts[1]['rodar'].startswith('guardar --skill')
     assert [(r['prisma'], r['lm'], r['luz']) for r in _consulta('SELECT * FROM lumen')] == [(DDD, 10, 'refletida')]
@@ -92,7 +92,7 @@ def test_foco_prompt_reconhece_luz_propria(privado, repo, monkeypatch, tmp_path)
     prompt = tmp_path / 'prompt.txt'
     prompt.write_text('modele o Aggregate de pedido separando o subdomínio', encoding='utf-8')
     saida = rodar(monkeypatch, 'foco', '--prompt-arquivo', prompt, '--cwd', repo, '--sessao', 's2')
-    assert f'o prisma "{DDD}"' in saida and f'Luzia · {DDD}: você dirigiu' in saida and '+20 lm de luz própria' in saida
+    assert f'o prisma "{DDD}"' in saida and 'Luzia · DDD: você dirigiu' in saida and '+20 lm própria' in saida
     assert [(r['lm'], r['luz'], r['fonte']) for r in _consulta('SELECT * FROM lumen')] == [(20, 'propria', 'passivo-prompt')]
     assert _consulta('SELECT 1 FROM lampejo') == []  # o prompt dirigido não abre lampejo
     assert 'LUZIA_BOTOES=' in saida
@@ -102,13 +102,13 @@ def test_foco_uma_vez_por_prisma_por_sessao_e_teto_do_dia(privado, repo, monkeyp
     _editar(repo)
     rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', 's3')
     repetido = rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', 's3')
-    assert 'Lampejo da Luzia' not in repetido and 'LUZIA_BOTOES=' in repetido
+    assert 'Centelha da sessão' not in repetido and 'LUZIA_BOTOES=' in repetido
     assert len(_consulta('SELECT 1 FROM lumen')) == 1
     for sessao in ('s4', 's5', 's6'):  # 4 sessões × 10 lm = 40; a quinta não rende
         rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', sessao)
     ultimo = rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', 's7')
     assert sum(r['lm'] for r in _consulta('SELECT lm FROM lumen')) == 40
-    assert 'Lampejo da Luzia' not in ultimo
+    assert 'Centelha da sessão' not in ultimo
 
 
 def test_foco_sem_sessao_usa_um_id_diario_por_pasta(privado, repo, monkeypatch):
@@ -121,14 +121,14 @@ def test_foco_sem_sessao_usa_um_id_diario_por_pasta(privado, repo, monkeypatch):
 def test_foco_arquivo_novo_sem_commit_tambem_e_lido_pelo_git_diff(privado, repo, monkeypatch):
     (repo / 'Novo.cs').write_text('class Novo : Aggregate { }\n', encoding='utf-8')
     saida = rodar(monkeypatch, 'foco', '--arquivos', 'Novo.cs', '--cwd', repo, '--sessao', 's8')
-    assert 'Lampejo da Luzia' in saida
+    assert 'Centelha da sessão' in saida
 
 
 def test_foco_em_silencio_registra_sem_lampejo(privado, repo, monkeypatch):
     _modo(privado, 'passivo')
     _editar(repo)
     saida = rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', 's9')
-    assert 'Lampejo da Luzia' not in saida and 'em silêncio' in saida
+    assert 'Centelha da sessão' not in saida and 'em silêncio' in saida
     assert len(_consulta('SELECT 1 FROM lumen')) == 1 and _consulta('SELECT 1 FROM lampejo') == []
 
 
@@ -167,10 +167,10 @@ def test_botoes_do_foco_chamam_guardar_e_converter(privado, repo, monkeypatch):
     _editar(repo, 'class Pedido : Aggregate { int x; }' + chr(10))  # outra sessão, outro lampejo
     botoes_de(rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', 'se'))
     guardar = rodar(monkeypatch, *shlex.split(bts[1]['rodar']))
-    assert 'Lampejo guardado' in guardar or 'Guardado' in guardar
+    assert 'Guardada como centelha' in guardar
     converter = bts[0]['rodar'].replace('<0-4>', '4').replace('<1 linha do que a pessoa explicou>', 'separei o agregado')
     saida = rodar(monkeypatch, *shlex.split(converter))
-    assert 'Luz própria' in saida and '+30 lm' in saida
+    assert '** própria' in saida and '+30 lm' in saida
     assert sorted(r['estado'] for r in _consulta('SELECT estado FROM lampejo')) == ['convertido', 'guardado']
 
 
@@ -181,4 +181,4 @@ def test_foco_roda_como_a_cli_real(privado, repo):
                        cwd=CODE, capture_output=True, env={**os.environ, 'LUZIA_PRIVATE': str(privado)})
     saida = r.stdout.decode('utf-8')
     assert r.returncode == 0, r.stderr.decode('utf-8', 'replace')
-    assert 'Lampejo da Luzia' in saida and 'LUZIA_BOTOES=' in saida
+    assert 'Centelha da sessão' in saida and 'LUZIA_BOTOES=' in saida

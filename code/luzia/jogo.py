@@ -452,7 +452,7 @@ def conquistar(fid: str, nota: int, resumo: str, plan: dict) -> dict:
     cat = sincronizar(plan)
     f = cat.get(fid)
     if not f:
-        return {'erro': 'avanço não encontrado'}
+        return {'erro': 'centelha não encontrada'}
     nota = max(0, min(4, int(nota)))
     skill = f.get('skill_plano') or f.get('skill', '')
     alvo = int(round(f['valor_lm'] * MULT.get(nota, 0)))
@@ -460,11 +460,11 @@ def conquistar(fid: str, nota: int, resumo: str, plan: dict) -> dict:
     revisita = f.get('estado') == 'conquistado' or int(f.get('lm_ganho') or 0) > 0
     if revisita:
         if not pode_revisitar({**f, 'estado': 'conquistado'}):
-            return {'erro': 'este avanço já foi revisitado ou já tem nota máxima'}
+            return {'erro': 'esta centelha já foi revisitada ou já tem nota máxima'}
         if not f.get('revisita_aberta'):
             return {'erro': f'abra a revisita antes de registrar (/luzia:fazer {fid})'}
     elif f.get('estado') != 'em_andamento':
-        return {'erro': f'este avanço ainda não foi iniciado: comece por /luzia:fazer {fid}'}
+        return {'erro': f'esta centelha ainda não foi iniciada: comece por /luzia:fazer {fid}'}
     if nota < 2:  # tente de novo: o feixe (ou a revisita) continua aberto e a próxima tentativa vale o mesmo
         with trajetoria.abrir() as con, banco.transacao(con):
             con.execute('UPDATE avanco SET tentativas = tentativas + 1 WHERE id = ?', (fid,))
@@ -479,7 +479,7 @@ def conquistar(fid: str, nota: int, resumo: str, plan: dict) -> dict:
             vivo = con.execute('SELECT estado, lm_ganho, revisitas, revisita_aberta FROM avanco WHERE id = ?', (fid,)).fetchone()
             visto = (f.get('estado'), int(f.get('lm_ganho') or 0), int(f.get('revisitas') or 0), 1 if f.get('revisita_aberta') else 0)
             if vivo is None or tuple(vivo) != visto:  # outro processo mexeu no avanço entre a leitura e a gravação
-                return {'erro': 'este avanço mudou enquanto você registrava: confira o estado e tente de novo'}
+                return {'erro': 'esta centelha mudou enquanto você registrava: confira o estado e tente de novo'}
             if ganho:
                 _lumen(con, skill, ganho, 'propria', 'feixe', fid)
             _atualizar_estado(con, fid, 'conquistado', campos)
@@ -592,7 +592,7 @@ def converter(skill: str, nota: int, ref: str = '') -> dict:
     lm = round(PASSIVO['conversao'] * MULT.get(nota, 0))
     with trajetoria.abrir() as con, banco.transacao(con):
         if not _fechar_lampejo(con, skill, 'convertido' if nota >= 2 else 'guardado'):
-            return {'erro': 'não há lampejo aberto da Luzia para esta skill: a conversão vale uma vez por lampejo'}
+            return {'erro': 'não há centelha da sessão aberta para este prisma: a conversão vale uma vez por centelha'}
         if lm:
             _lumen(con, skill, lm, 'propria', 'passivo-conversao', ref)
     return {'lm': lm, 'nota': nota}
@@ -653,7 +653,7 @@ def progresso_skill(skill: str, d: dict | None = None) -> dict:
     if share < MIN_PROPRIA:
         falta.append(f'luz própria ≥ {int(MIN_PROPRIA * 100)}% (agora {round(100 * share)}%)')
     if feixes < MIN_FEIXES_DEGRAU:
-        falta.append('1 avanço conquistado')
+        falta.append('1 centelha acesa')
     return {'lm': total, 'propria': propria, 'refletida': total - propria, 'luz_propria': round(100 * share),
             'limiar': LIMIAR_DEGRAU, 'feixes': feixes, 'falta': falta, 'pronto': not falta}
 

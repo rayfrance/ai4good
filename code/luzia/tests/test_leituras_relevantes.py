@@ -80,9 +80,9 @@ def test_botao_do_chat_conta_o_que_vai_gerar_e_todas_inclui_o_resto(privado, mon
     _entregas(40)
     chamadas = []
     _modelo(monkeypatch, chamadas)
-    assert cli.bt_leituras()['rotulo'] == 'Gerar 13 leitura(s)'
+    assert cli.bt_leituras()['rotulo'] == 'Atualizar 13 análises'
     saida = _rodar(monkeypatch, 'leituras')
-    assert '13 leitura(s) renovada(s)' in saida and sum(len(c) for c in chamadas) == 13
-    assert 'leituras --todas' in saida and '30' in saida
+    assert '13 análises atualizadas' in saida and sum(len(c) for c in chamadas) == 13
+    assert 'analises --todas' in saida and '30' in saida
     saida = _rodar(monkeypatch, 'leituras', '--todas')
-    assert '30 leitura(s) renovada(s)' in saida
+    assert '30 análises atualizadas' in saida

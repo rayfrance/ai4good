@@ -60,7 +60,7 @@ def _feixes():
 
 # ------------------------------------------------------------------ lote 1 · revisita paga só uma vez
 def test_registrar_sem_iniciar_e_recusado(plan, sugeridos):
-    assert jogo.conquistar(sugeridos[0], 4, 't', plan).get('erro', '').startswith('este avanço ainda não foi iniciado')
+    assert jogo.conquistar(sugeridos[0], 4, 't', plan).get('erro', '').startswith('esta centelha ainda não foi iniciada')
 
 
 def test_nota_3_rende_75_por_cento(plan, sugeridos):
@@ -101,7 +101,7 @@ def test_depois_da_revisita_nao_volta_para_a_fila_nem_reabre(plan, sugeridos):
 def test_terceiro_registro_e_recusado(plan, sugeridos):
     f1 = sugeridos[0]
     _revisitado(plan, f1)
-    assert 'já foi revisitado' in jogo.conquistar(f1, 4, 't', plan).get('erro', '')
+    assert 'já foi revisitada' in jogo.conquistar(f1, 4, 't', plan).get('erro', '')
 
 
 def test_livro_de_lumens_soma_o_valor_do_feixe(plan, sugeridos):
@@ -166,7 +166,7 @@ def test_160_lm_so_passivos_nao_sobem_degrau(plan):
     _passivos_160(sk2)
     p = jogo.progresso_skill(sk2)
     assert not p['pronto']
-    assert '1 avanço conquistado' in p['falta']
+    assert '1 centelha acesa' in p['falta']
 
 
 def test_com_um_feixe_conquistado_o_degrau_fica_pronto(plan):
@@ -278,7 +278,7 @@ def test_depois_de_subir_o_primeiro_botao_acende_o_proximo_trecho(plan, monkeypa
     sk = plan['skills'][0]['nome']
     jogo.lancar(sk, 160, 'propria', 'feixe', 'teste')
     s = rodar(monkeypatch, 'subir', sk)
-    assert 'subiu para o nível' in s
+    assert '** no nível 2' in s
     assert botoes_de(s)[0]['rodar'] == f'trecho "{sk}"'
 
 
@@ -315,7 +315,7 @@ def test_registrar_nota_3_oferece_revisitar_agora(plan, monkeypatch):
     f = next(x for x in acoes.todas(plan) if x['estado'] == 'sugerido')
     rodar(monkeypatch, 'fazer', f['id'])
     s = rodar(monkeypatch, 'registrar', f['id'], '--nota', '3', '--resumo', 'teste')
-    assert 'Avanço conquistado' in s
+    assert 'centelha acesa' in s
     assert any(x['rotulo'] == 'Revisitar agora' for x in botoes_de(s))
 
 

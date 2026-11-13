@@ -22,6 +22,7 @@ A pessoa **sempre** desenvolve com IA. A Luzia cuida do uso educado da IA: propr
 | "quero incluir Mensageria", "arquivar X", "reativar X", "mudar a meta de X" | `LUZIA pedido abrir <incluir\|arquivar\|reativar\|mudar_meta> "<prisma>" --motivo "<motivo>"`; depois `pedido aceitar <n>` ou `pedido recusar <n>`. Para **ajustar** (`pedido ajustar <n>`), pergunte à pessoa o novo nível (0–5) e a nova meta (1–5) e só então rode com `--nivel` e `--meta`; arquivar e reativar não têm o que ajustar |
 | "meus avanços", "o que está na fila", "só os de DDD", "os conquistados" | `LUZIA avancos [--estado sugerido\|na_fila\|em_andamento\|conquistado\|descartado] [--prisma "<prisma>"] [--tipo <tipo>]` · `LUZIA fila` |
 | "quero fazer o #a3f2" | `LUZIA fazer <id>` (siga o roteiro; ao final `registrar`) |
+| "separar meus prismas", "um prisma por habilidade", "dividir X" | `LUZIA dividir "<prisma>"` ou `LUZIA dividir-todos` (sem modelo); mostre as habilidades, o nível e a meta herdados e para onde vai cada avanço. Para **ajustar**, pergunte o que mudar e rode `pedido ajustar <n> --partes "<A>" "<B>"` ou `--mover <avanço>="<habilidade>"`; depois `pedido aceitar <n>`. Um prisma é **uma habilidade só**: nunca proponha incluir um nome que junta assuntos |
 | "acende mais avanços de DDD" | `LUZIA acender "<prisma>"` |
 | "minhas entregas", "o que eu entreguei", "olha mais para trás" | `LUZIA entregas [--ampliar DIAS]` · detalhe: `LUZIA entrega <id>` |
 | "não achou minhas entregas", "meu nome no git é outro" | `LUZIA identidade` e `LUZIA identidade adicionar "<nome ou e-mail>"` |

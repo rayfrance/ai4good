@@ -17,19 +17,23 @@ Nome real primeiro; a metáfora de luz só onde explica algo.
 | termo | o que é | substitui |
 |:--|:--|:--|
 | **Trajetória** | o caminho do nível atual até a meta (ex.: Júnior 3 → Plena) | rota |
-| **Prisma** | uma skill da trajetória (ex.: "Prisma DDD") | skill (na experiência) |
+| **Prisma** | **uma única habilidade** da trajetória (ex.: DDD, SQL, React); nunca um nome que junta assuntos | skill (na experiência) |
 | **Nível** | 0 a 5 em cada prisma; subir de nível é o que antes era "degrau" | degrau |
 | **Avanço** | ação curta (5 a 30 min) de um prisma; tipos: explicar, praticar, estudar, explorar | feixe |
 | **Lúmen (lm)** | a pontuação | — |
 | **Luz própria / refletida** | lúmens que vieram de você / do que o agente fez | — |
 | **Propriedade** | quanto de uma **entrega** é seu (P1–P4), fora do jogo | — |
 | **Foco** | a Luzia observando a sessão com intenção ("a Luzia está em foco") | observador |
-| **Lampejo** | o cartão curto que a Luzia mostra no chat quando percebe um conceito na mudança ("Lampejo da Luzia · Prisma DDD"); pode virar luz própria uma vez | cartão |
+| **Lampejo** | o cartão curto que a Luzia mostra no chat quando percebe um conceito na mudança ("Lampejo da Luzia · DDD"); pode virar luz própria uma vez | cartão |
 
 Modos do foco: **em foco, com lampejos** (era "ativo"), **em foco, em silêncio** (era "passivo"), **fora de foco** (era "sob demanda").
 
 Regras de uso:
-- Sempre "Prisma DDD" (nome junto), nunca "um prisma" solto. Na primeira aparição de cada tela/comando: "prisma (skill)".
+- **Um prisma = uma habilidade** (13/11/2026, decidido com a Rayane): nada de prismas como "Testes e Qualidade / SQL",
+  "Arquitetura .NET / Clean Architecture" ou "Front-end (JS / Razor / React)". Nomes compostos antigos se dividem por um
+  pedido `dividir` (seção 6).
+- Rótulos mostram só o nome do prisma, **sem a palavra "Prisma" na frente** (o título da seção, do filtro ou do cartão já
+  diz que são prismas). "prisma" fica nos títulos de seção e na primeira explicação de cada tela/comando: "prisma (skill)".
 - **Dossiê e textos formais** (para líder, PDI) usam "skill", "nível" e "ação", não o vocabulário do jogo.
 - "Trecho" deixa de existir: "acender 3 avanços novos".
 - Visual: cada prisma mostra os níveis 0–5 como **faixas de um espectro que acendem** (nível 3 = 3 faixas acesas). As cores das faixas seguem a paleta da Luzia (roxo → lilás → laranja → areia); a escolha exata é do construtor. O prisma refrata, não reflete: não desenhar reflexo.
@@ -79,7 +83,7 @@ A troca vale em toda superfície visível: painel, saídas da CLI, comandos, ski
 | perfil | rótulos da trajetória (onde está, aonde vai), horizonte, modo do observador, agente, repositórios autorizados |
 | prisma | nome, palavras-chave, nível atual, meta, estado (ativo/arquivado), origem (triagem ou pedido), base de nível, data do último nível |
 | trajetoria_versao | número, data, origem (triagem ou pedido), foto dos prismas e metas daquela versão |
-| pedido_mudanca | tipo (incluir prisma, arquivar, reativar, mudar meta), alvo, motivo da pessoa, proposta da Luzia (nível de partida, meta, palavras, avanços iniciais), leitura ligada, estado (aberto → proposto → aceito/recusado), datas |
+| pedido_mudanca | tipo (incluir prisma, arquivar, reativar, mudar meta, dividir), alvo, motivo da pessoa, proposta da Luzia (nível de partida, meta, palavras, avanços iniciais), leitura ligada, estado (aberto → proposto → aceito/recusado), datas |
 | avanco | id curto estável, prisma, tipo, título, por quê, conceitos, como, onde explorar, prompt, duração, valor e conta, origem (triagem, entrega, sessão, acender, cartão), entrega ligada (opcional), dimensão P3/P4 (opcional), estado, nota, lm ganho, tentativas, revisita |
 | avanco_evento | avanço, quando, evento (sugerido, enviado, iniciado, tente de novo, conquistado, revisitado, descartado com motivo, restaurado), onde, nota, resumo |
 | lumen | quando, prisma, lm, luz (própria/refletida), fonte (avanço, passivo-prompt, passivo-refletida, conversão), referência (avanço, cartão, sessão, entrega) |
@@ -106,6 +110,15 @@ Fluxo (igual no chat e no painel):
 3. Botões: **Aceitar**, **Ajustar** (a pessoa muda nível/meta e a Luzia refaz a proposta), **Recusar**.
 4. Aceito: nova versão da trajetória; prisma criado ou atualizado; avanços entram no catálogo.
 5. Nada se perde: lúmens, avanços conquistados e níveis já subidos continuam. Prisma arquivado guarda tudo e pode ser reativado.
+7. **Dividir** (13/11/2026): um prisma composto vira um prisma por habilidade. A divisão é determinística
+   (`code/luzia/prismas.py`: mapa revisável dos nomes atuais + regra genérica " / ", " e " e parênteses com lista), sem
+   modelo. A proposta mostra as habilidades, o nível e a meta herdados e para qual habilidade vai cada avanço (palavras de
+   cada parte no título e nos conceitos); "Ajustar" renomeia uma parte ou move um avanço. Aceito: cada parte vira prisma
+   ativo com o nível atual e a meta do antigo (registro `pedido` no livro de níveis), os avanços mudam de prisma, o antigo
+   é arquivado (não pode ser reativado) e nasce uma versão nova da trajetória. Os lúmens antigos ficam no prisma
+   arquivado (o livro só acrescenta): o total de lúmens não muda e o progresso do nível novo conta a partir do aceite.
+   Alternativa não adotada: realocar os lúmens por avanço de origem. As entregas recalculam `entrega_prisma` na próxima
+   leitura. No chat: `dividir "<prisma>"` e `dividir-todos`; no painel: "Separar em habilidades" no cartão do prisma.
 6. O pedido (data, motivo, análise, decisão) entra no dossiê como evidência de que a pessoa dirige a própria carreira.
 
 ## 7. Entregas

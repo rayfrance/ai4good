@@ -6,14 +6,15 @@ Decidido com a Rayane em 12/11/2026 (persistência, trajetória, prismas e leitu
 Nome real primeiro; a metáfora de luz só onde explica algo.
 
 - **Trajetória**: o caminho do nível atual até a meta (ex.: Júnior 3 até Plena), versionado e ajustável por pedido formal de mudança.
-- **Prisma (skill)**: uma competência da trajetória (sempre com o nome junto, ex.: *Prisma Domain-Driven Design (DDD)*). Cada prisma exibe os níveis 0–5 em um espectro de 5 faixas que acendem.
+- **Prisma (skill)**: **uma única habilidade** da trajetória (ex.: *Domain-Driven Design (DDD)*, *SQL*, *React*), nunca um nome que junta assuntos. Nos rótulos aparece só o nome, sem "Prisma" na frente: o título da seção ou do filtro já diz que são prismas. Cada prisma exibe os níveis 0–5 em um espectro de 5 faixas que acendem.
+- **Dividir um prisma composto** (`dividir "<prisma>"`, `dividir-todos` ou "Separar em habilidades" no painel): pedido de mudança formal, sem modelo. Cada habilidade herda o nível e a meta do antigo; cada avanço vai para a habilidade que ele trata (você confere, renomeia uma parte ou move um avanço antes de aceitar); o antigo é arquivado com os lúmens dele, e o nível novo conta a partir do aceite.
 - **Nível**: de 0 a 5 em cada prisma; a soma dos avanços de nível forma a trajetória até a meta.
 - **Avanço**: ação curta (5 a 30 min) apontada para um prisma; tipos com ícone e cor: `praticar`, `explicar`, `estudar`, `explorar`.
 - **Lúmen (lm)**: a pontuação obtida com evidência de domínio.
 - **Luz própria / Luz refletida**: a parcela dos lúmens que veio de você (dirigiu, explicou, conquistou) versus o que o agente aplicou sozinho.
 - **Propriedade** (fora do jogo, nas Entregas): quanto de uma **entrega** é seu, medido de P1 a P4 com base visível.
 - **Foco**: a Luzia observando a sessão com intenção (*Em foco, com lampejos*, *Em foco, em silêncio* ou *Fora de foco*).
-- **Lampejo**: cartão curto no chat quando a Luzia em foco percebe um conceito na mudança do agente (`✦ Lampejo da Luzia · Prisma <nome>`); pode virar luz própria uma vez.
+- **Lampejo**: cartão curto no chat quando a Luzia em foco percebe um conceito na mudança do agente (`✦ Lampejo da Luzia · <nome>`); pode virar luz própria uma vez.
 
 > Nos **dossiês e textos formais** (para líder ou PDI), a Luzia usa linguagem formal ("skill", "nível", "ação", "pontos de evidência", "autoria própria"), sem o vocabulário do jogo.
 

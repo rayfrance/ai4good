@@ -278,3 +278,56 @@ def test_chave_de_ticket_no_titulo_de_commit_e_removida(repo):
     repo.commit('feat: ABC-1234 ajusta agregado', 'src/A.cs', quando=_dias(3))
     titulos = [e['titulo'] for e in entregas.detectar(repo.pasta, [EU], _desde())]
     assert titulos[-1] == 'feat: ajusta agregado'
+
+
+@pytest.mark.parametrize('bruto, esperado, id_', [
+    ('Bug 14988: corrigir layout do mapa ao aplicar zoom', 'corrigir layout do mapa ao aplicar zoom', '14988'),
+    ('Task 123 - ajustar filtro', 'ajustar filtro', '123'),
+    ('User Story 45 cria cadastro', 'cria cadastro', '45'),
+    ('PBI 7: nova regra', 'nova regra', '7'),
+    ('feature #9: exporta relatorio', 'exporta relatorio', '9'),
+    ('TAREFA 12 - revisa tela', 'revisa tela', '12'),
+    ('Item 3: limpa codigo', 'limpa codigo', '3'),
+    ('AB#321 ajusta agregado', 'ajusta agregado', '321'),
+    ('ajusta agregado #55', 'ajusta agregado', '55'),
+    ('ajusta agregado PR 88', 'ajusta agregado', '88'),
+    ('ajusta agregado !99', 'ajusta agregado', '99'),
+    ('corrige erro 20481 no login', 'corrige erro no login', '20481'),
+])
+def test_limpar_ids_padroes(bruto, esperado, id_):
+    titulo, ids = entregas.limpar_ids(bruto)
+    assert titulo == esperado
+    assert ids == [id_]
+
+
+def test_limpar_ids_mantem_numeros_do_texto_e_tag():
+    assert entregas.limpar_ids('[Módulo X] Bug 14988: ajusta 3 telas para v2')[0] == '[Módulo X] ajusta 3 telas para v2'
+    assert entregas.tag_inicial('[Módulo X] ajusta') == '[Módulo X]'
+    assert entregas.tag_inicial('ajusta [x]') is None
+
+
+def test_entrega_azure_tira_numero_do_titulo_e_guarda_em_ids(repo):
+    repo.git('checkout', '-q', '-b', 'feat')
+    repo.commit('feat: mapa', 'src/M.cs', quando=_dias(6))
+    repo.git('checkout', '-q', 'main')
+    repo.git('merge', '--no-ff', '-m', 'Merged PR 123: Bug 14988: corrigir layout do mapa ao aplicar zoom', 'feat',
+             quando=_dias(4))
+    repo.commit('Task 77 - ajusta 3 telas v2', 'src/T.cs', quando=_dias(2))
+    achadas = entregas.detectar(repo.pasta, [EU], _desde())
+    pr = next(e for e in achadas if e['fonte'] == 'merge-pr')
+    assert pr['titulo'] == 'corrigir layout do mapa ao aplicar zoom'
+    assert pr['ids_privados'] == ['123', '14988']
+    solto = next(e for e in achadas if e['fonte'] == 'commit' and e['ids_privados'])
+    assert solto['titulo'] == 'ajusta 3 telas v2' and solto['ids_privados'] == ['77']
+
+
+def test_titulo_guardado_e_limpo_na_proxima_atualizacao(con, repo, privado):
+    repo.commit('feat: algo', 'src/A.cs', quando=_dias(3))
+    _entrada(privado, repo)
+    entregas.atualizar(con)
+    con.execute("UPDATE entrega SET titulo = 'Bug 14988: algo antigo 3 telas', ids_privados_json = '[]'")
+    con.commit()
+    entregas.atualizar(con)
+    r = con.execute('SELECT titulo, ids_privados_json FROM entrega').fetchone()
+    assert r['titulo'] == 'algo antigo 3 telas'
+    assert '14988' in json.loads(r['ids_privados_json'])

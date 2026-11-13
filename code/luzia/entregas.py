@@ -197,11 +197,44 @@ def _commit(reg: dict) -> dict:
             'linhas': sum(n for _, n in reg['arqs']), 'areas': _areas(caminhos), 'caminhos': caminhos}
 
 
-def _limpar(texto: str) -> str:
-    """Tira números de PR/ticket do texto (eles só podem existir em `ids_privados`)."""
-    texto = RE_CHAVE_TICKET.sub('', RE_IDS.sub('', texto))
+RE_ITEM = re.compile(r'(?<![\w#])(?:user[ \t]+story|bug|task|pbi|feature|tarefa|item)[ \t]*#?[ \t]*(\d+)[ \t]*(?:[:\-–—][ \t]*)?',
+                     re.IGNORECASE)
+RE_NUMERO_ID = re.compile(r'(?<![\w#!])(?:(?:AB)?#|!)(\d+)|\b(?:PR|Pull Request)[ \t]*#?(\d+)|(?<![\w.,-])(\d{4,})(?![\w.,-])',
+                          re.IGNORECASE)
+RE_TAG_INICIAL = re.compile(r'^\s*(\[[^\]\n]{1,60}\])')
+
+
+def tag_inicial(titulo: str) -> str | None:
+    """A etiqueta entre colchetes no início ("[Módulo X] ..."): texto de produto, não id; o `Redactor` a mascara
+    se o termo estiver em `termos.txt`."""
+    m = RE_TAG_INICIAL.match(titulo or '')
+    return m.group(1) if m else None
+
+
+def limpar_ids(texto: str) -> tuple[str, list[str]]:
+    """(texto sem referências a itens de trabalho, ids removidos sem repetição). Números pequenos que fazem parte
+    do texto ("3 telas", "v2") ficam."""
+    ids: list[str] = []
+
+    def _item(m: re.Match) -> str:
+        ids.append(m.group(1))
+        return ''
+
+    def _num(m: re.Match) -> str:
+        ids.append(next(g for g in m.groups() if g))
+        return ''
+
+    texto = RE_ITEM.sub(_item, texto)
+    texto = RE_NUMERO_ID.sub(_num, texto)
+    texto = RE_CHAVE_TICKET.sub('', texto)
     texto = re.sub(r'\(\s*\)', '', texto)
-    return re.sub(r'[ \t]{2,}', ' ', texto).strip(' \t:-')
+    texto = re.sub(r'[ \t]{2,}', ' ', texto).strip(' \t:-')
+    return texto, list(dict.fromkeys(ids))
+
+
+def _limpar(texto: str) -> str:
+    """Tira números de PR/ticket/item do texto (eles só podem existir em `ids_privados`)."""
+    return limpar_ids(texto)[0]
 
 
 def _chave(prefixo: str, semente: str) -> str:
@@ -211,7 +244,9 @@ def _chave(prefixo: str, semente: str) -> str:
 def _entrega(chave: str, titulo: str, fonte: str, regs: list[dict], ids: list[str]) -> dict:
     regs = sorted(regs, key=lambda r: r['data'])
     ids_tk = [i for r in regs for i in RE_TICKET.findall(r['mensagem'])]
-    return {'chave': chave, 'titulo': _limpar(titulo) or 'Entrega', 'inicio': regs[0]['data'], 'fim': regs[-1]['data'],
+    titulo, ids_titulo = limpar_ids(titulo)
+    ids = ids + ids_titulo
+    return {'chave': chave, 'titulo': titulo or 'Entrega', 'inicio': regs[0]['data'], 'fim': regs[-1]['data'],
             'commits': [_commit(r) for r in regs], 'fonte': fonte,
             'ids_privados': list(dict.fromkeys(ids + (ids_tk if fonte == 'merge-pr' else [])))}
 
@@ -327,6 +362,20 @@ def _repo_configurado() -> Path | None:
     return repo if repo and repo.exists() else None
 
 
+def _limpar_titulos_guardados(con: sqlite3.Connection, redator: Redactor) -> None:
+    """Títulos já gravados por versões antigas ganham a limpeza de ids; os números vão para `ids_privados`."""
+    for r in con.execute('SELECT id, titulo, ids_privados_json FROM entrega').fetchall():
+        if not r['titulo']:
+            continue
+        limpo, ids = limpar_ids(r['titulo'])
+        limpo = redator.redact(limpo or 'Entrega')
+        if limpo == r['titulo'] and not ids:
+            continue
+        antes = json.loads(r['ids_privados_json'] or '[]')
+        con.execute('UPDATE entrega SET titulo = ?, ids_privados_json = ? WHERE id = ?',
+                    (limpo, json.dumps(list(dict.fromkeys(antes + ids))), r['id']))
+
+
 def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
     """Detecta e grava as entregas. Primeira execução: últimos `dias`; depois só o que é novo.
 
@@ -364,6 +413,7 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
     prismas = trajetoria.prismas(con)
 
     with banco.transacao(con):
+        _limpar_titulos_guardados(con, redator)
         tocadas: set[int] = set()
         antigas: dict[int, int] = {}
         for e in achadas:
@@ -375,6 +425,8 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
                 eid = cur.lastrowid
             else:
                 eid = linha['id']
+                con.execute('UPDATE entrega SET titulo = ? WHERE id = ? AND titulo IS NOT ?',
+                            (redator.redact(e['titulo']), eid, redator.redact(e['titulo'])))
             for c in e['commits']:
                 antes = con.execute('SELECT entrega_id FROM commit_ WHERE hash = ?', (c['hash'],)).fetchone()
                 if antes is None or antes['entrega_id'] != eid:

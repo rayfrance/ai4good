@@ -38,8 +38,12 @@ def resolver(texto: str) -> str:
 def comandos() -> int:
     destino = CLAUDE / 'commands' / 'luzia'
     destino.mkdir(parents=True, exist_ok=True)
+    fontes = sorted((HERE / 'commands').glob('*.md'))
+    for velho in destino.glob('*.md'):  # comando que saiu da Luzia (ex.: senha.md) não fica quebrado no agente
+        if velho.name not in {md.name for md in fontes}:
+            velho.unlink()
     n = 0
-    for md in sorted((HERE / 'commands').glob('*.md')):
+    for md in fontes:
         (destino / md.name).write_text(resolver(md.read_text(encoding='utf-8')), encoding='utf-8')
         n += 1
     for skill in ('luzia-mentor', 'luzia-observador'):

@@ -110,7 +110,7 @@ def test_link_expirado_devolve_401_e_e_consumido(servidor, monkeypatch):
 def test_muitos_links_errados_devolvem_429(servidor):
     for i in range(acesso.LIMITE_LINKS):
         assert servidor.pedir('POST', '/api/acesso/link', {'token': f'errado-{i}-' + 'z' * 30})[0] == 401
-    c, r, cab = servidor.pedir('POST', '/api/acesso/link', {'token': acesso.emitir_link()})
+    c, r, cab = servidor.pedir('POST', '/api/acesso/link', {'token': 'mais-um-errado-' + 'z' * 30})
     assert c == 429 and r['segundos'] > 0 and 'retry-after' in {n.lower() for n, _ in cab}
 
 
@@ -256,10 +256,16 @@ def _botoes(saida):
     return json.loads(linha.split('=', 1)[1])
 
 
+def _painel_de_teste(servidor, monkeypatch):
+    server.publicar_identidade()
+    monkeypatch.setattr(cli, 'PAINEL', f'http://127.0.0.1:{servidor.port}')
+    monkeypatch.setattr(cli, '_sem_tela', lambda: False)
+
+
 def test_career_map_abre_o_navegador_com_link_no_fragmento_e_nao_imprime_o_token(servidor, monkeypatch):
     import webbrowser
     abertos = []
-    monkeypatch.setattr(cli, 'panel_up', lambda: True)
+    _painel_de_teste(servidor, monkeypatch)
     monkeypatch.setattr(webbrowser, 'open', lambda url, *a, **k: abertos.append(url) or True)
     saida = _cli(monkeypatch, 'career-map')
     assert len(abertos) == 1
@@ -271,12 +277,12 @@ def test_career_map_abre_o_navegador_com_link_no_fragmento_e_nao_imprime_o_token
     assert servidor.pedir('POST', '/api/acesso/link', {'token': token})[0] == 200  # o link do navegador entra
 
 
-def test_career_map_sem_navegador_imprime_o_link_uma_vez_com_aviso(privado, monkeypatch):
+def test_career_map_sem_navegador_imprime_o_link_uma_vez_com_aviso(servidor, monkeypatch):
     import webbrowser
-    monkeypatch.setattr(cli, 'panel_up', lambda: True)
+    _painel_de_teste(servidor, monkeypatch)
     monkeypatch.setattr(webbrowser, 'open', lambda *a, **k: False)
     saida = _cli(monkeypatch, 'career-map')
-    links = re.findall(r'http://localhost:8501/#entrar=[\w-]+', saida)
+    links = re.findall(r'http://127\.0\.0\.1:\d+/#entrar=[\w-]+', saida)
     assert len(links) == 1 and saida.count(links[0].split('#entrar=')[1]) == 1
     assert '2 minutos' in saida and 'uma vez' in saida
 

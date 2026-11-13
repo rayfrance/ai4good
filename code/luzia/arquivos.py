@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -26,6 +27,16 @@ ESTADO = PRIVATE / 'career_state.json'
 ESTADO_LEGADO = HERE.parents[1] / 'outputs' / 'sem2' / 'career_state.json'
 # Como qualquer agente chama a CLI da Luzia, a partir de onde ela está instalada (sem caminho fixo).
 CLI = f'cd "{HERE.parent.as_posix()}" && python -m luzia.cli'
+
+
+def versao_codigo() -> str:
+    """Impressão digital do código da Luzia (os .py desta pasta): o painel informa a dele no ping autenticado e o
+    `career-map` reinicia um painel que ficou rodando com código de antes de uma atualização."""
+    h = hashlib.sha256()
+    for arq in sorted(HERE.glob('*.py')):
+        h.update(arq.name.encode('utf-8'))
+        h.update(arq.read_bytes())
+    return h.hexdigest()[:16]
 
 
 def registrar_erro(onde: str, erro: BaseException | str) -> None:

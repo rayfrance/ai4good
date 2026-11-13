@@ -1,7 +1,7 @@
 """Entrada no painel herdada do agente: link de uso único e sessões de 30 dias (biblioteca padrão).
 
 - Quem abre o painel pelo chat (`career-map`, em qualquer harness) já roda como a pessoa no sistema: a CLI grava um link
-  de uso único (`secrets.token_urlsafe(32)`) que vale 2 minutos e abre `http://localhost:8501/#entrar=<token>`. O token
+  de uso único (`secrets.token_urlsafe(32)`) que vale 2 minutos e abre `http://127.0.0.1:8501/#entrar=<token>`. O token
   vai no fragmento (o navegador não o manda ao servidor nem no Referer); o painel o tira da barra e o troca por uma
   sessão em `POST /api/acesso/link`. O link é gasto na primeira tentativa, mesmo vencido. Vários podem estar pendentes.
 - Sessão: token aleatório só no cookie `luzia_sessao`; no banco privado fica só o SHA-256 dele, com o último uso. Vale 30
@@ -9,8 +9,10 @@
   servidor. "Sair" encerra a sessão atual; `acesso sair-de-todos` no chat encerra todas.
 - Links e sessões moram no SQLite (`acesso_link`, `acesso_sessao`): a CLI grava o link enquanto o servidor lê e grava
   sessões, e as transações do banco (WAL, BEGIN IMMEDIATE, busy_timeout) já resolvem essa concorrência.
-- Comparação dos hashes em tempo constante (`hmac.compare_digest`, sobre todas as linhas). 10 links errados por minuto
-  travam a rota de entrada (429). Banco ocupado vira `AcessoIndisponivel` (o servidor responde 503) sem apagar nada.
+- Comparação dos hashes em tempo constante (`hmac.compare_digest`, sobre todas as linhas). Passados 10 links errados
+  num minuto, os errados seguintes recebem 429; um link válido sempre entra (o limite vale só para erros: nenhum outro
+  processo local consegue barrar a entrada da pessoa, e adivinhar 256 bits é inviável de qualquer jeito). Banco ocupado
+  ou migração bloqueada vira `AcessoIndisponivel` (o servidor responde 503 com o motivo) sem apagar nada.
 - Nada aqui grava ou devolve um token em claro em log, banco ou resposta.
 """
 
@@ -68,6 +70,8 @@ def _banco() -> Iterator[sqlite3.Connection]:
         con = _abrir()
     except sqlite3.OperationalError as e:
         raise AcessoIndisponivel('o banco da Luzia está ocupado; tente de novo') from e
+    except RuntimeError as e:  # banco.garantir: migração bloqueada ou esquema mais novo que este código
+        raise AcessoIndisponivel(f'o banco da Luzia não abriu: {e}') from e
     try:
         yield con
     except sqlite3.OperationalError as e:
@@ -161,7 +165,7 @@ def sessoes_ativas(agora: float | None = None) -> int:
 class Entrada:
     token: str | None = None
     limitado_s: int = 0
-    indisponivel: bool = False
+    indisponivel: str = ''  # motivo, quando o banco não respondeu
 
 
 class Portaria:
@@ -182,24 +186,23 @@ class Portaria:
         return max(1, int(-(-(self._falhas[0] + JANELA_LINKS_S - agora) // 1)))
 
     def entrar_por_link(self, token) -> Entrada:
-        """Troca um link por uma sessão. Errado, vencido ou já usado: sem sessão (e conta para o limite)."""
+        """Troca um link por uma sessão. Errado, vencido ou já usado: sem sessão; depois de 10 erros no minuto, os
+        erros seguintes recebem `limitado_s`. O link é conferido antes do limite: um link válido sempre entra."""
         with self._trava:
             agora = self.relogio()
-            espera = self._espera(agora)
-            if espera:
-                return Entrada(limitado_s=espera)
             try:
                 ok = _token_ok(token) and consumir_link(token, agora)
-            except AcessoIndisponivel:
-                return Entrada(indisponivel=True)
+            except AcessoIndisponivel as e:
+                return Entrada(indisponivel=str(e))
             if not ok:
+                espera = self._espera(agora)
                 self._falhas.append(agora)
-                return Entrada()
+                return Entrada(limitado_s=espera)
         try:
             _apagar_legado()
             return Entrada(token=abrir_sessao(agora))
-        except AcessoIndisponivel:
-            return Entrada(indisponivel=True)
+        except AcessoIndisponivel as e:
+            return Entrada(indisponivel=str(e))
 
     def valida(self, token, renovar: bool = True) -> bool:
         """Sessão válida? `AcessoIndisponivel` (banco ocupado) sobe sem apagar a sessão."""

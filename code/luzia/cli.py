@@ -14,8 +14,12 @@ O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
+import secrets
+import signal
 import subprocess
 import sys
 import time
@@ -26,7 +30,7 @@ from . import (acoes, arquivos, banco, entregas, jogo, leituras, modelo, observe
                trajetoria, triage)
 from .privacy import Redactor, SemMascara
 
-PAINEL = 'http://localhost:8501'
+PAINEL = 'http://127.0.0.1:8501'  # nunca `localhost`: pode resolver para ::1, fora da porta exclusiva
 MODOS = ('ativo', 'passivo', 'sob_demanda')
 CLI = arquivos.CLI
 
@@ -404,12 +408,26 @@ def avisar_degraus(plan: dict) -> None:
 
 
 # ------------------------------------------------------------------ painel
-def panel_up() -> bool:
+def identidade_do_painel() -> tuple[str, dict]:
+    """('ok', ping) quando quem responde em PAINEL prova o segredo de `private/painel.json` (HMAC de um desafio novo);
+    ('ausente', {}) quando ninguém responde; ('estranho', {}) quando algo responde sem a prova (outro programa na porta,
+    ou um painel de uma versão antiga da Luzia). O segredo nunca sai desta máquina nem vai na pergunta."""
+    desafio = secrets.token_hex(16)
     try:
-        with urllib.request.urlopen(PAINEL + '/api/ping', timeout=2) as r:
-            return r.status == 200
+        with urllib.request.urlopen(f'{PAINEL}/api/ping?desafio={desafio}', timeout=2) as r:
+            resposta = json.loads(r.read().decode('utf-8') or '{}')
     except Exception:
-        return False
+        return 'ausente', {}
+    ident = arquivos.ler_json(arquivos.PRIVATE / 'painel.json', {})
+    segredo = ident.get('segredo') if isinstance(ident, dict) else None
+    prova = resposta.get('prova') if isinstance(resposta, dict) else None
+    try:
+        esperada = hmac.new(bytes.fromhex(segredo), desafio.encode('ascii'), hashlib.sha256).hexdigest()
+    except (TypeError, ValueError):
+        return 'estranho', {}
+    if not isinstance(prova, str) or not hmac.compare_digest(prova, esperada):
+        return 'estranho', {}
+    return 'ok', resposta
 
 
 def start_panel() -> None:
@@ -420,9 +438,34 @@ def start_panel() -> None:
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, creationflags=flags,
     )
     for _ in range(20):
-        if panel_up():
+        if identidade_do_painel()[0] == 'ok':
             return
         time.sleep(0.3)
+
+
+def _encerrar_painel(pid) -> None:
+    """Encerra o painel que provou a identidade mas roda código antigo (o PID veio do ping autenticado). Nunca este
+    processo nem um PID inválido; espera a porta ficar livre."""
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or pid == os.getpid():
+        return
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError as e:
+        arquivos.registrar_erro('cli encerrar painel antigo', e)
+        return
+    for _ in range(20):
+        if identidade_do_painel()[0] == 'ausente':
+            return
+        time.sleep(0.25)
+
+
+def _sem_tela() -> bool:
+    """Sessão remota (SSH) ou POSIX sem servidor gráfico: o navegador "abre" sem ninguém ver; o link vai para o chat."""
+    if os.environ.get('SSH_CONNECTION') or os.environ.get('SSH_TTY'):
+        return True
+    if sys.platform in ('win32', 'darwin'):
+        return False
+    return not (os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'))
 
 
 def set_mode(modo: str) -> None:
@@ -866,11 +909,23 @@ def abrir_painel() -> None:
     navegador não pôde ser aberto (ex.: agente remoto), uma vez e com o aviso de prazo."""
     import webbrowser
     from . import acesso
-    if not panel_up():
+    estado, info = identidade_do_painel()
+    if estado == 'ok' and (info.get('versao') != arquivos.versao_codigo() or info.get('esquema') != banco.ESQUEMA_VERSAO):
+        _encerrar_painel(info.get('pid'))  # painel de antes de uma atualização: reinicia com o código atual
+        estado = 'ausente'
+    if estado == 'ausente':
         start_panel()
+        estado, info = identidade_do_painel()
+    if estado != 'ok':
+        print('## ✦ Luzia · não abri o painel')
+        print(f'Algo que não é o seu painel da Luzia está respondendo em {PAINEL} (outro programa, ou um painel antigo '
+              'da Luzia que não sabe se identificar). Por segurança, não gerei o link de entrada. Feche esse programa '
+              '(ou reinicie o computador) e peça o painel de novo.')
+        botoes([BT_TRAJETORIA, BT_PAINEL], 'Quer tentar abrir o painel de novo?')
+        return
     url = f'{PAINEL}/#entrar={acesso.emitir_link()}'
     try:
-        aberto = bool(webbrowser.open(url))
+        aberto = bool(webbrowser.open(url)) and not _sem_tela()
     except Exception:
         aberto = False
     if aberto:

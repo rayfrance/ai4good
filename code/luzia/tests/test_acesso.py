@@ -68,10 +68,9 @@ def test_token_errado_e_limite_de_tentativas(portaria, relogio):
     for i in range(acesso.LIMITE_LINKS):
         r = portaria.entrar_por_link(f'inventado-{i}-' + 'x' * 30)
         assert r.token is None and r.limitado_s == 0
-    r = portaria.entrar_por_link(bom)  # 11ª tentativa no mesmo minuto: nem confere
+    r = portaria.entrar_por_link('mais-um-errado-' + 'x' * 30)  # 11ª errada no mesmo minuto: 429
     assert r.token is None and r.limitado_s > 0
-    relogio.t += 61
-    assert portaria.entrar_por_link(bom).token  # o link bom não foi gasto pela recusa
+    assert portaria.entrar_por_link(bom).token  # o link bom entra mesmo assim (o limite só vale para erros)
 
 
 def test_sessao_dura_30_dias_sem_uso_e_renova_com_uso(portaria, relogio):

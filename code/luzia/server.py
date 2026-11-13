@@ -3,7 +3,7 @@
 Serve a página `painel/` e uma API JSON montada a partir do banco SQLite, da trajetória,
 dos prismas, dos avanços, das entregas, das leituras e dos pedidos de mudança.
 
-Proteção contra outros sites abertos no navegador: só atende `Host` localhost/127.0.0.1 nesta porta
+Proteção contra outros sites abertos no navegador: só atende `Host` 127.0.0.1 nesta porta
 (barra DNS rebinding) e só aceita POST com `Content-Type: application/json` vindo da própria página
 (um site de fora não consegue mandar esse POST sem permissão de CORS, que este servidor nunca dá).
 
@@ -16,8 +16,14 @@ As proteções acima (Host, Origin/Sec-Fetch-Site, JSON, 64 KB) valem para todas
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import mimetypes
+import os
+import re
+import secrets
+import socket
 from http.cookies import CookieError, SimpleCookie
 import sys
 from datetime import datetime, timedelta
@@ -36,7 +42,8 @@ PORT = 8501
 MODOS = ('ativo', 'passivo', 'sob_demanda')
 AGENTES = observer.AGENTES
 ENTREGAS_NA_TELA = 15
-HOSTS_OK = {f'localhost:{PORT}', f'127.0.0.1:{PORT}'}
+# Só 127.0.0.1: `localhost` pode resolver para ::1, onde outro processo local poderia escutar a mesma porta.
+HOSTS_OK = {f'127.0.0.1:{PORT}'}
 ORIGENS_OK = {f'http://{h}' for h in HOSTS_OK}
 MAX_CORPO = 64 * 1024
 AUTO_LEITURAS_MIN = 10  # leituras automáticas do painel: no máximo uma rodada a cada 10 minutos
@@ -50,8 +57,48 @@ ROTAS_POST = ('/api/nivel', '/api/autoavaliacao', '/api/pedido', '/api/leituras'
               '/api/modelo/testar', '/api/descartar', '/api/restaurar', '/api/subir', '/api/acender', '/api/trecho',
               '/api/iniciar', '/api/privacidade')
 PORTARIA = acesso.Portaria()  # links e sessões no banco privado; só o limite de links errados fica em memória
-COOKIE_ATTRS = 'HttpOnly; SameSite=Strict; Path=/'  # sem Secure: o painel é http://localhost
+COOKIE_ATTRS = 'HttpOnly; SameSite=Strict; Path=/'  # sem Secure: o painel é http://127.0.0.1
 COOKIE_MAX_AGE = acesso.SESSAO_MAX_S
+
+
+# Identidade do painel: o chat só entrega um link de entrada a quem provar este segredo (ver `publicar_identidade`).
+VERSAO = arquivos.versao_codigo()
+SEGREDO: bytes | None = None
+RE_DESAFIO = re.compile(r'^[0-9a-f]{32,128}$')
+
+
+class ServidorPainel(ThreadingHTTPServer):
+    """Servidor do painel com a porta só dele: sem SO_REUSEADDR e, no Windows, com SO_EXCLUSIVEADDRUSE, para que
+    nenhum outro processo local ocupe 127.0.0.1:8501 junto com ele."""
+
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def caminho_identidade() -> Path:
+    return arquivos.PRIVATE / 'painel.json'
+
+
+def publicar_identidade() -> None:
+    """Gera o segredo deste processo e grava em `private/painel.json` (com o PID). Só quem lê a pasta privada da pessoa
+    (o chat dela) confere a prova do `/api/ping?desafio=`; um programa que ocupe a porta não sabe responder."""
+    global SEGREDO
+    SEGREDO = secrets.token_bytes(32)
+    arquivos.gravar_json(caminho_identidade(), {'segredo': SEGREDO.hex(), 'pid': os.getpid(),
+                                                'quando': datetime.now().isoformat(timespec='seconds')})
+
+
+def resposta_ping(desafio: str) -> dict:
+    """Sem desafio (ou sem segredo publicado): só `ok`. Com desafio: a prova HMAC, a versão do código, o esquema e o PID."""
+    if SEGREDO is None or not RE_DESAFIO.match(desafio or ''):
+        return {'ok': True}
+    return {'ok': True, 'prova': hmac.new(SEGREDO, desafio.encode('ascii'), hashlib.sha256).hexdigest(),
+            'versao': VERSAO, 'esquema': banco.ESQUEMA_VERSAO, 'pid': os.getpid()}
 
 
 def repo_cwd() -> str:
@@ -299,20 +346,21 @@ class Handler(BaseHTTPRequestHandler):
         token = self._token()
         try:
             ok = PORTARIA.valida(token, renovar=not automatico)
-        except acesso.AcessoIndisponivel:  # banco ocupado: 503, a sessão continua
-            self._acesso_indisponivel = True
+        except acesso.AcessoIndisponivel as e:  # banco ocupado ou bloqueado: 503 com o motivo, a sessão continua
+            self._acesso_indisponivel = str(e) or True
             return False
         if ok and not automatico:
             self._sessao_renovada = token
         return ok
 
-    def _indisponivel(self) -> None:
-        self._json({'erro': 'a Luzia não conseguiu conferir a sua sessão agora; tente de novo'}, 503,
+    def _indisponivel(self, motivo: str = '') -> None:
+        self._json({'erro': motivo or 'a Luzia não conseguiu conferir a sua sessão agora; tente de novo'}, 503,
                    [('Retry-After', '1')])
 
     def _negar(self) -> None:
-        if getattr(self, '_acesso_indisponivel', False):
-            return self._indisponivel()
+        motivo = getattr(self, '_acesso_indisponivel', False)
+        if motivo:
+            return self._indisponivel(motivo if isinstance(motivo, str) else '')
         self._json({'erro': 'abra o painel pelo seu agente (/luzia:career-map)', 'login': True}, 401)
 
     @staticmethod
@@ -331,18 +379,22 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/acesso/link':
             r = PORTARIA.entrar_por_link(dados.get('token'))
             if r.indisponivel:
-                return self._indisponivel()
+                return self._indisponivel(r.indisponivel)
             if r.limitado_s:
                 return self._json({'erro': f'muitas tentativas: espere {r.limitado_s} s', 'segundos': r.limitado_s},
                                   429, [('Retry-After', str(r.limitado_s))])
             if not r.token:
                 return self._json({'erro': 'este link já foi usado ou venceu: abra o painel pelo seu agente '
                                            '(/luzia:career-map)'}, 401)
+            try:  # a sessão que este navegador trazia é trocada pela nova
+                PORTARIA.fechar(self._token())
+            except acesso.AcessoIndisponivel:
+                pass
             return self._json({'ok': True}, 200, self._cookie_sessao(r.token))
         try:  # /api/acesso/sair: encerra só a sessão deste navegador
             PORTARIA.fechar(self._token())
-        except acesso.AcessoIndisponivel:
-            return self._indisponivel()
+        except acesso.AcessoIndisponivel as e:
+            return self._indisponivel(str(e))
         return self._json({'ok': True}, 200, [('Set-Cookie', f'{acesso.COOKIE}=; Max-Age=0; {COOKIE_ATTRS}')])
 
     def _descartar_o_que_chegou(self) -> None:
@@ -407,12 +459,12 @@ class Handler(BaseHTTPRequestHandler):
         if self._protegida(path, ABERTAS_GET) and not self._sessao_ok():
             return self._negar()
         if path == '/api/ping':
-            return self._json({'ok': True})
+            return self._json(resposta_ping((qs.get('desafio') or [''])[0]))
         if path == '/api/acesso/estado':
             try:
                 return self._json(self._estado_acesso())
-            except acesso.AcessoIndisponivel:
-                return self._indisponivel()
+            except acesso.AcessoIndisponivel as e:
+                return self._indisponivel(str(e))
         if path == '/api/estado':
             return self._api(estado)
         if path == '/api/sessao':
@@ -693,7 +745,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()
+    httpd = ServidorPainel(('127.0.0.1', PORT), Handler)  # porta exclusiva antes de publicar o segredo
+    publicar_identidade()
+    httpd.serve_forever()
 
 
 if __name__ == '__main__':

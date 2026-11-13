@@ -30,7 +30,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
-from luzia import acoes, arquivos, banco, jogo, trajetoria  # noqa: E402
+from luzia import acoes, arquivos, banco, jogo, prismas, trajetoria  # noqa: E402
 
 PRIVATE = arquivos.PRIVATE
 CFG = PRIVATE / 'observer.json'
@@ -43,6 +43,7 @@ NOMES_FOCO = {
     'sob_demanda': 'fora de foco',
 }
 
+# Nomes compostos antigos (a migração e os prismas ainda não divididos usam) + as habilidades isoladas.
 PALAVRAS_PADRAO = {
     'Domain-Driven Design (DDD)': ['Domain', 'Aggregate', 'ValueObject', 'Value Object', 'Entity', 'Repository', 'BoundedContext',
                                    'DomainEvent', 'agregado', 'objeto de valor', 'entidade', 'subdomínio', 'contexto delimitado', 'DDD'],
@@ -52,6 +53,7 @@ PALAVRAS_PADRAO = {
     'Back-end C# / .NET e Integrações': ['HttpClient', 'Controller', 'Integration', 'async Task', 'integração', 'endpoint', 'retry'],
     'Front-end (JS / Razor / React)': ['.cshtml', 'useState', 'fetch(', 'jQuery', 'componente', 'modal', 'razor'],
     'Programação Agêntica e Fluxo com IA': ['CLAUDE.md', 'AGENTS.md', '.claude', 'subagente', 'hook', 'skill', 'plan mode'],
+    **prismas.PALAVRAS_PARTE,
 }
 
 
@@ -88,7 +90,8 @@ def lacunas(plan: dict) -> dict[str, dict]:
         s = next((x for x in plan.get('skills', []) if x['nome'] == nome), {})
         palavras = (do_banco.get(nome) or []) + (s.get('palavras_chave') or []) + PALAVRAS_PADRAO.get(nome, [])
         out[nome] = {'palavras': list(dict.fromkeys(str(w) for w in palavras if w)), 'nivel': v['nivel'], 'meta': v['meta']}
-    return out or {k: {'palavras': p, 'nivel': None, 'meta': None} for k, p in PALAVRAS_PADRAO.items()}
+    return out or {k: {'palavras': p, 'nivel': None, 'meta': None} for k, p in PALAVRAS_PADRAO.items()
+                   if not prismas.composto(k)}  # sem trajetória: só habilidades isoladas
 
 
 def detectar(texto: str, gaps: dict) -> list[str]:

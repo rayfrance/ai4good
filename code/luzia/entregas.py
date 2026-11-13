@@ -369,6 +369,13 @@ def _trocar_titulo(con: sqlite3.Connection, eid: int, novo: str, antigos: dict[s
     con.execute('UPDATE entrega SET titulo = ? WHERE id = ?', (novo, eid))
 
 
+def _assinatura_prismas(con: sqlite3.Connection) -> str:
+    """Hash dos prismas ativos e das palavras deles: se mudar (pedido aceito, divisão), a próxima leitura refaz a
+    janela inteira e `entrega_prisma` é recalculado com os prismas novos (as passagens antigas ficam como história)."""
+    dados = sorted((p['nome'], sorted(map(str, p['palavras']))) for p in trajetoria.prismas(con))
+    return hashlib.sha256(json.dumps(dados, ensure_ascii=False).encode('utf-8')).hexdigest()[:16]
+
+
 def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
     """Detecta e grava as entregas. Primeira execução: últimos `dias`; depois só o que é novo.
 
@@ -391,11 +398,11 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
     janela = janela if isinstance(janela, dict) else {}
     incremental = bool(janela.get('desde') and janela.get('ultima') and alvo.isoformat() >= janela['desde']
                        and janela.get('identidades') == assinatura and int(janela.get('meus') or 0) > 0
-                       and janela.get('titulos') == TITULOS)
+                       and janela.get('titulos') == TITULOS and janela.get('prismas') == _assinatura_prismas(con))
     if incremental:
         busca = datetime.fromisoformat(janela['ultima']) - SOBREPOSICAO
         desde_gravado = janela['desde']
-    else:  # primeira leitura, janela maior, outra identidade, nada casou ou títulos antigos: a janela inteira
+    else:  # primeira leitura, janela maior, outra identidade, nada casou, títulos antigos ou prismas mudaram: tudo
         desde_gravado = min(alvo.isoformat(), janela['desde']) if janela.get('desde') else alvo.isoformat()
         busca = datetime.fromisoformat(desde_gravado)
     try:
@@ -456,7 +463,7 @@ def atualizar(con: sqlite3.Connection, dias: int = 90) -> dict:
         meus = int(con.execute('SELECT COUNT(*) FROM commit_').fetchone()[0])  # só há commits da pessoa
         trajetoria.perfil_gravar(con, 'entregas_desde', {'desde': desde_gravado, 'ultima': agora.isoformat(),
                                                          'identidades': assinatura, 'meus': meus,
-                                                         'titulos': TITULOS})
+                                                         'titulos': TITULOS, 'prismas': _assinatura_prismas(con)})
     return resultado
 
 

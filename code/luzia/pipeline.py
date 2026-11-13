@@ -15,7 +15,7 @@ try:
 except ImportError:
     psutil = None  # type: ignore[assignment]
 
-from . import arquivos, banco, planner, trajetoria, triage
+from . import arquivos, banco, planner, prismas, trajetoria, triage
 from .privacy import Redactor, mascarar_estrutura
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -242,6 +242,7 @@ def _gravar_estado(state: dict) -> None:
 
 
 def save_state(payload: dict, plan: dict, record: dict, hits: dict) -> None:
+    plan = prismas.dividir_plano(plan)  # um prisma = uma habilidade: nome composto do modelo vira as habilidades dele
     anterior = load_state().get('plano', {})
     for chave in ('tarefas_recentes', 'oportunidades_tarefa_atual', '_commits_dia'):
         if chave not in plan and chave in anterior:

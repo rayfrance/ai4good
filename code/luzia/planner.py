@@ -37,11 +37,13 @@ Estilo: visual e curto. Títulos com no máximo 8 palavras; demais textos livres
 Português do Brasil. Se aparecerem marcadores como [EMPRESA/PRODUTO] ou [COLEGA] (mascaramento local), mantenha-os assim.
 Use só as evidências fornecidas. Responda só com o JSON."""
 
-SKILLS_OBRIGATORIAS = (
-    '"Domain-Driven Design (DDD)", "Programação Agêntica e Fluxo com IA", '
-    '"Arquitetura .NET / Clean Architecture", "Back-end C# / .NET e Integrações", '
-    '"Front-end (JS / Razor / React)" e "Testes e Qualidade / SQL"'
-)
+# Um prisma = uma habilidade (13/11/2026): os nomes antigos compostos viraram estas habilidades (prismas.MAPA_DIVISAO).
+NOMES_OBRIGATORIOS = ('Domain-Driven Design (DDD)', 'Programação Agêntica', 'Arquitetura .NET', 'Clean Architecture',
+                      'C# / .NET', 'Integrações', 'JavaScript', 'Razor', 'React', 'Testes e Qualidade', 'SQL')
+SKILLS_OBRIGATORIAS = ', '.join(f'"{n}"' for n in NOMES_OBRIGATORIOS[:-1]) + f' e "{NOMES_OBRIGATORIOS[-1]}"'
+
+REGRA_PRISMA = ('Um prisma (skill) é UMA habilidade só: nunca junte assuntos num nome com "/", " e " ou parênteses com '
+                'lista (ex.: em vez de "Testes e Qualidade / SQL", use "Testes e Qualidade" e "SQL").')
 
 ACAO_SCHEMA = """{
         "titulo": str,
@@ -62,7 +64,8 @@ OPORTUNIDADE_SCHEMA = f"""{{
       "acao": {ACAO_SCHEMA}
     }}"""
 
-REGRAS_ACOES = """Regras das ações:
+REGRAS_ACOES = f"""Regras das ações:
+- {REGRA_PRISMA} O "skill" de cada ação é o nome de uma habilidade só.
 - "como": 2 a 4 passos curtos e concretos.
 - "onde_explorar": o que procurar no repositório atual (padrões, tipos de classe, pastas), sem inventar nomes de arquivo.
 - "prompt": 2 a 5 frases, pronto para colar no Claude Code; termina pedindo que ele faça UMA pergunta por vez.
@@ -99,7 +102,7 @@ TRIAGE_SCHEMA = f"""Devolva exatamente este JSON:
   ],
   "proximo_passo": str
 }}
-Quantidades: 6 skills ({SKILLS_OBRIGATORIAS}); em cada skill, 8 a 12 palavras_chave em inglês E em português que
+Quantidades: {len(NOMES_OBRIGATORIOS)} skills ({SKILLS_OBRIGATORIAS}); {REGRA_PRISMA} em cada skill, 8 a 12 palavras_chave em inglês E em português que
 aparecem em nomes de arquivos, código ou prompts quando a skill está em jogo (ex.: DDD -> "Domain", "Aggregate",
 "ValueObject", "agregado", "objeto de valor", "subdomínio");
 "autoavaliacao" copia a autoavaliação recebida (ou null). "nivel_curto": 1 a 3 palavras (ex.: "Júnior 3", "Plena").

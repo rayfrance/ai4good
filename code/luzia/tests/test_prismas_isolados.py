@@ -193,3 +193,51 @@ def test_dividir_todos_abre_um_pedido_por_prisma_composto(con):
     assert sorted(p['prisma'] for p in lista) == sorted([TESTES, FRONT])
     assert all(p['estado'] == 'proposto' for p in lista)
     assert pedidos.dividir_todos(con) == []  # já há pedido aberto para cada um: nada duplica
+
+
+# ------------------------------------------------------------------ entregas, triagem e acender
+def test_entregas_recalculadas_com_os_prismas_novos(con, privado):
+    from luzia import entregas
+    from luzia.tests.test_entregas import Repo, _dias, _entrada
+    (privado.parent / 'repo-divisao').mkdir()
+    repo = Repo(privado.parent / 'repo-divisao')
+    repo.commit('feat: otimiza JOIN da consulta', 'src/Consulta.sql', quando=_dias(5))
+    _entrada(privado, repo)
+    entregas.atualizar(con)
+    antes = {r[0] for r in con.execute('SELECT prisma FROM entrega_prisma')}
+    assert TESTES in antes and 'SQL' not in antes
+    pedidos.aceitar(con, pedidos.propor(con, pedidos.abrir(con, 'dividir', TESTES)['id'])['id'])
+    entregas.atualizar(con)  # próxima leitura: refaz a janela com os prismas novos
+    termos = {r[0]: json.loads(r[1]) for r in con.execute('SELECT prisma, termos_json FROM entrega_prisma')}
+    assert 'JOIN' in termos['SQL']
+    assert TESTES in termos  # a passagem antiga fica como história do prisma arquivado
+    assert entregas.atualizar(con) == {'novas': 0, 'atualizadas': 0}  # e depois volta a ser incremental
+
+
+def test_triagem_grava_so_prismas_de_uma_habilidade(privado):
+    from luzia import planner
+    nomes = [n.strip(' "') for n in planner.SKILLS_OBRIGATORIAS.replace(' e "', ', "').split('", ')]
+    assert len(nomes) >= 6 and not any(prismas.composto(n) for n in nomes), nomes
+    plano = trajetoria.plano()
+    plano['skills'] = [{'nome': 'Kafka / RabbitMQ', 'luzia_sugere': 1, 'alvo': 3, 'palavras_chave': ['Kafka', 'RabbitMQ']}]
+    pipeline.save_state({}, plano, {'quando': '2026-11-13T10:00:00'}, {})
+    with trajetoria.abrir() as c:
+        ativos = {p['nome'] for p in trajetoria.prismas(c)}
+        gravado = trajetoria.perfil_ler(c, 'plano')
+    assert {'Kafka', 'RabbitMQ'} <= ativos and 'Kafka / RabbitMQ' not in ativos
+    assert [s['nome'] for s in gravado['skills']] == ['Kafka', 'RabbitMQ']
+
+
+def test_acender_grava_os_avancos_no_prisma_pedido(privado, monkeypatch):
+    from luzia import cli, planner
+
+    def falso(payload, **k):
+        acao = {'titulo': 'Revisar um índice composto', 'tipo': 'praticar', 'skill': TESTES, 'dimensao': None,
+                'por_que': 'x', 'conceitos': ['índice'], 'como': ['a', 'b'], 'onde_explorar': 'x', 'prompt': 'x',
+                'duracao_min': 10}
+        assert 'uma habilidade só' in k['schema']
+        return planner.LLMResult({'acoes': [acao]}, '{}', 0.1, 1, 1, 'falso/modelo'), {'quando': '2026-11-13T10:00:00'}
+    monkeypatch.setattr(pipeline, 'run_plan', falso)
+    jogo.sincronizar(trajetoria.plano())
+    res = cli.gerar_trecho(DDD)
+    assert [a['skill'] for a in res['avancos']] == [DDD]

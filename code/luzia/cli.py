@@ -149,6 +149,8 @@ def gerar_trecho(skill: str, rotulo: str = 'cmd-trecho') -> dict:
     novas = [a for a in result.plan.get('acoes', []) if isinstance(a, dict) and a.get('titulo')][:3]
     if not novas:
         return {'erro': 'o modelo não devolveu avanços; tente de novo'}
+    for a in novas:  # o avanço é do prisma pedido, uma habilidade só, mesmo que o modelo escreva outro nome
+        a['skill'] = skill
     trechos = plan.get('trechos', []) + [{'skill': skill, 'para': nv['nivel'] + 1, 'quando': record['quando'], 'acoes': novas}]
     pipeline.update_state({'trechos': trechos}, record)
     plan = pipeline.load_state().get('plano', {})

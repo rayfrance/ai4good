@@ -7,6 +7,7 @@ O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de 
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
 - `foco --prompt-arquivo F | --arquivos P... [--cwd D] [--sessao S]` (foco sem hooks, para Antigravity, Codex e Cursor)
 - `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
+- `senha` (redefine a senha do painel: `senha apagar`, só depois do sim da pessoa)
 """
 
 from __future__ import annotations
@@ -826,6 +827,27 @@ def cmd_foco(args) -> None:
     ], 'Quer responder ao lampejo agora?')
 
 
+def cmd_senha(valor: str) -> None:
+    """Redefinir a senha do painel. O chat/CLI roda como a pessoa no sistema (essa já é a autenticação), então não
+    pede a senha antiga: só o sim explícito (botão), que roda `senha apagar`. Apagar derruba as sessões abertas."""
+    from . import acesso
+    print('## ✦ Luzia · senha do painel')
+    if not acesso.tem_senha():
+        print('Você ainda não tem senha no painel. Ao abrir o painel, a Luzia pede para criar uma '
+              f'(mínimo de {acesso.MIN_SENHA} caracteres); ela fica só nesta máquina, como hash.')
+        botoes([BT_PAINEL], 'Quer abrir o painel para criar a senha?')
+        return
+    if (valor or '').strip().lower() == 'apagar':
+        acesso.apagar_senha()
+        print('✦ Senha apagada e sessões abertas encerradas. Na próxima vez que abrir o painel, crie uma senha nova.')
+        botoes([BT_PAINEL], 'Quer abrir o painel para criar a senha nova?')
+        return
+    print('A senha do painel existe. Apagar encerra as sessões abertas no navegador; no próximo acesso você cria '
+          'outra. Os seus dados (trajetória, avanços, entregas) não mudam.')
+    botoes([{'rotulo': 'Sim, apagar a senha', 'descricao': 'encerra as sessões; o painel pede uma senha nova',
+             'rodar': 'senha apagar'}, BT_PAINEL], 'Quer apagar a senha do painel para criar outra?')
+
+
 # ------------------------------------------------------------------ main
 COMANDOS = [
     'hoje', 'triage', 'trajetoria', 'next-level', 'rota',
@@ -833,7 +855,7 @@ COMANDOS = [
     'leituras', 'foco', 'agente',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido',
-    'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo',
+    'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo', 'senha',
 ]
 
 
@@ -943,6 +965,10 @@ def main() -> None:
 
     if args.comando == 'foco':
         cmd_foco(args)
+        return
+
+    if args.comando == 'senha':
+        cmd_senha(args.valor)
         return
 
     if args.comando == 'career-map':

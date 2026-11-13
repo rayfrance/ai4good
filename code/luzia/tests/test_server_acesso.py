@@ -181,3 +181,56 @@ def test_painel_nao_guarda_sessao_no_navegador_e_nao_busca_dados_antes_do_login(
                         and 'addEventListener' not in ln]
     assert chamadas_no_topo == ['acessoAoIniciar();']  # a única coisa que roda ao abrir é conferir o acesso
     assert 'polling = setInterval' in js and 'clearInterval(polling)' in js
+
+
+# ------------------------------------------------------------------ redefinir pelo chat/CLI (`senha`)
+def _cli(monkeypatch, *argv):
+    import io
+    import sys
+    from contextlib import redirect_stdout
+    from luzia import cli
+    monkeypatch.setattr(sys, 'argv', ['luzia', *argv])
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        cli.main()
+    return buf.getvalue()
+
+
+def _botoes(saida):
+    linha = next(x for x in saida.splitlines() if x.startswith('LUZIA_BOTOES='))
+    return json.loads(linha.split('=', 1)[1])
+
+
+def test_senha_no_cli_pede_confirmacao_antes_de_apagar(servidor, monkeypatch, privado):
+    servidor.entrar(SENHA)
+    saida = _cli(monkeypatch, 'senha')
+    assert acesso.tem_senha() and servidor.pedir('GET', '/api/estado')[0] == 200  # só perguntou
+    assert 'LUZIA_PERGUNTA=' in saida and any(b['rodar'] == 'senha apagar' for b in _botoes(saida))
+    texto = (privado / 'acesso.json').read_text(encoding='utf-8')
+    assert json.loads(texto)['senha']['hash'] not in saida and SENHA not in saida
+
+
+def test_senha_apagar_no_cli_derruba_as_sessoes_e_o_painel_pede_senha_nova(servidor, monkeypatch):
+    servidor.entrar(SENHA)
+    saida = _cli(monkeypatch, 'senha', 'apagar')
+    assert 'apagada' in saida and 'LUZIA_BOTOES=' in saida
+    assert not acesso.tem_senha()
+    assert servidor.pedir('GET', '/api/estado')[0] == 401
+    assert servidor.pedir('GET', '/api/acesso/estado')[1]['senha_criada'] is False
+    nova = 'outra-senha-boa'
+    assert servidor.pedir('POST', '/api/acesso/criar', {'senha': nova, 'confirmacao': nova})[0] == 200
+    assert servidor.pedir('GET', '/api/estado')[0] == 200
+    saida = _cli(monkeypatch, 'senha')
+    assert 'existe' in saida
+
+
+def test_senha_sem_senha_criada_explica_como_criar(privado, monkeypatch):
+    saida = _cli(monkeypatch, 'senha', 'apagar')
+    assert 'ainda não' in saida.lower() and 'LUZIA_BOTOES=' in saida
+    assert acesso.versao() == 0
+
+
+def test_comando_senha_tem_arquivo_com_description_entre_aspas():
+    texto = (Path(server.HERE) / 'commands' / 'senha.md').read_text(encoding='utf-8')
+    assert re.search(r'^description: ".*"$', texto, re.MULTILINE)
+    assert 'python -m luzia.cli senha' in texto and 'LUZIA_BOTOES' in texto

@@ -6,12 +6,17 @@ dos prismas, dos avanços, das entregas, das leituras e dos pedidos de mudança.
 Proteção contra outros sites abertos no navegador: só atende `Host` localhost/127.0.0.1 nesta porta
 (barra DNS rebinding) e só aceita POST com `Content-Type: application/json` vindo da própria página
 (um site de fora não consegue mandar esse POST sem permissão de CORS, que este servidor nunca dá).
+
+Login (`acesso.py`): os arquivos do painel e as rotas `ABERTAS_GET`/`ABERTAS_POST` (ping e acesso) não pedem sessão;
+qualquer outro caminho `/api...`, GET ou POST, listado ou não, devolve 401 JSON sem um cookie `luzia_sessao` válido.
+As proteções acima (Host, Origin/Sec-Fetch-Site, JSON, 64 KB) valem para todas as rotas, inclusive as de acesso.
 """
 
 from __future__ import annotations
 
 import json
 import mimetypes
+from http.cookies import CookieError, SimpleCookie
 import sys
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,7 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from luzia import (acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos,  # noqa: E402
+from luzia import (acesso, acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos,  # noqa: E402
                    pipeline, propriedade, trajetoria)
 
 HERE = Path(__file__).resolve().parent
@@ -33,6 +38,17 @@ HOSTS_OK = {f'localhost:{PORT}', f'127.0.0.1:{PORT}'}
 ORIGENS_OK = {f'http://{h}' for h in HOSTS_OK}
 MAX_CORPO = 64 * 1024
 AUTO_LEITURAS_MIN = 10  # leituras automáticas do painel: no máximo uma rodada a cada 10 minutos
+
+# Rotas da API. Só as ABERTAS dispensam sessão; toda outra `/api...` (inclusive uma que ainda não exista) exige login.
+ABERTAS_GET = ('/api/ping', '/api/acesso/estado')
+ABERTAS_POST = ('/api/acesso/criar', '/api/acesso/entrar', '/api/acesso/sair')
+ROTAS_GET = ('/api/estado', '/api/sessao', '/api/avancos', '/api/entrega')
+ROTAS_POST = ('/api/nivel', '/api/autoavaliacao', '/api/pedido', '/api/leituras', '/api/identidade',
+              '/api/entrega/acender', '/api/entregas/ampliar', '/api/modo', '/api/agente', '/api/enviar', '/api/modelo',
+              '/api/modelo/testar', '/api/descartar', '/api/restaurar', '/api/subir', '/api/acender', '/api/trecho',
+              '/api/iniciar')
+PORTARIA = acesso.Portaria()  # sessões e trava de tentativas: só na memória deste processo
+COOKIE_ATTRS = 'HttpOnly; SameSite=Strict; Path=/'  # sem Secure: o painel é http://localhost
 
 
 def repo_cwd() -> str:
@@ -229,14 +245,77 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
-    def _json(self, data, code: int = 200) -> None:
+    def _cabecalhos_seguros(self) -> None:
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('Referrer-Policy', 'no-referrer')
+
+    def _json(self, data, code: int = 200, cabecalhos: list[tuple[str, str]] | None = None) -> None:
         body = json.dumps(data, ensure_ascii=False).encode('utf-8')
         self.send_response(code)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Cache-Control', 'no-store')
+        self._cabecalhos_seguros()
+        for nome, valor in cabecalhos or []:
+            self.send_header(nome, valor)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    # ------------------------------------------------------------ login
+    def _token(self) -> str | None:
+        bruto = self.headers.get('Cookie') or ''
+        if not bruto or len(bruto) > 4096:
+            return None
+        try:
+            biscoito = SimpleCookie()
+            biscoito.load(bruto)
+        except CookieError:
+            return None
+        m = biscoito.get(acesso.COOKIE)
+        return m.value if m is not None else None
+
+    def _sessao_ok(self) -> bool:
+        return PORTARIA.valida(self._token())
+
+    def _negar(self) -> None:
+        self._json({'erro': 'entre com a sua senha para ver o painel', 'login': True}, 401)
+
+    @staticmethod
+    def _protegida(path: str, abertas: tuple[str, ...]) -> bool:
+        return path.lower().startswith('/api') and path not in abertas
+
+    def _estado_acesso(self) -> dict:
+        return {'senha_criada': acesso.tem_senha(), 'sessao_valida': PORTARIA.valida(self._token(), renovar=False),
+                'travado_s': PORTARIA.travado_s(), 'min_senha': acesso.MIN_SENHA}
+
+    @staticmethod
+    def _cookie_sessao(token: str) -> list[tuple[str, str]]:
+        return [('Set-Cookie', f'{acesso.COOKIE}={token}; {COOKIE_ATTRS}')]
+
+    def _acesso(self, path: str, dados: dict) -> None:
+        """Rotas abertas de acesso: criar a senha, entrar e sair. A senha nunca volta na resposta nem vai ao log."""
+        if path == '/api/acesso/criar':
+            try:
+                acesso.criar_senha(dados.get('senha'), dados.get('confirmacao'))
+            except acesso.SenhaJaExiste:
+                return self._json({'erro': 'a senha já foi criada: entre com ela (para trocar, use "senha" no chat)'}, 409)
+            except ValueError as e:
+                return self._json({'erro': str(e)}, 400)
+            PORTARIA.fechar_todas()
+            return self._json({'ok': True}, 200, self._cookie_sessao(PORTARIA.abrir()))
+        if path == '/api/acesso/entrar':
+            r = PORTARIA.entrar(dados.get('senha'))
+            if r.travado_s:
+                return self._json({'erro': f'muitas tentativas: espere {r.travado_s} s', 'segundos': r.travado_s}, 429,
+                                  [('Retry-After', str(r.travado_s))])
+            if r.sem_senha:
+                return self._json({'erro': 'ainda não há senha: crie a sua primeiro'}, 409)
+            if not r.token:
+                return self._json({'erro': 'senha incorreta', 'restantes': r.restantes}, 401)
+            return self._json({'ok': True}, 200, self._cookie_sessao(r.token))
+        PORTARIA.fechar(self._token())  # /api/acesso/sair
+        return self._json({'ok': True}, 200, [('Set-Cookie', f'{acesso.COOKIE}=; Max-Age=0; {COOKIE_ATTRS}')])
 
     def _drenar(self) -> None:
         try:
@@ -280,8 +359,12 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
+        if self._protegida(path, ABERTAS_GET) and not self._sessao_ok():
+            return self._negar()
         if path == '/api/ping':
             return self._json({'ok': True})
+        if path == '/api/acesso/estado':
+            return self._json(self._estado_acesso())
         if path == '/api/estado':
             return self._api(estado)
         if path == '/api/sessao':
@@ -326,7 +409,7 @@ class Handler(BaseHTTPRequestHandler):
         body = arquivo.read_bytes()
         self.send_response(200)
         self.send_header('Content-Type', mimetypes.guess_type(arquivo.name)[0] or 'application/octet-stream')
-        self.send_header('Cache-Control', 'no-store')
+        self._cabecalhos_seguros()
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -340,14 +423,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'erro': 'tamanho inválido'}, 400)
         if tamanho > MAX_CORPO:
             return self._json({'erro': 'pedido grande demais'}, 413)
+        corpo = self.rfile.read(tamanho) if tamanho > 0 else b''
+        path = self.path.split('?')[0]
+        if self._protegida(path, ABERTAS_POST) and not self._sessao_ok():
+            return self._negar()
         try:
-            dados = json.loads(self.rfile.read(tamanho) or b'{}')
+            dados = json.loads(corpo or b'{}')
             if not isinstance(dados, dict):
                 raise ValueError
         except Exception:
             return self._json({'erro': 'json inválido'}, 400)
         try:
-            self._post(self.path.split('?')[0], dados)
+            if path in ABERTAS_POST:
+                return self._acesso(path, dados)
+            self._post(path, dados)
         except Exception as e:
             arquivos.registrar_erro(f'server POST {self.path.split("?")[0]}', e)
             self._json({'erro': f'não deu certo ({type(e).__name__})'}, 500)

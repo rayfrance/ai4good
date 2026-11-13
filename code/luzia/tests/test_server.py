@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import http.client
 import json
-import threading
 from types import SimpleNamespace
 from urllib.parse import quote
 
@@ -17,40 +16,22 @@ TESTES = 'Testes e Qualidade / SQL'
 
 
 @pytest.fixture
-def api(privado, monkeypatch):
+def api(servidor, monkeypatch):
+    """Painel em thread com a pessoa já autenticada (o login em si é testado em test_server_acesso.py)."""
     plan = pipeline.load_state()['plano']
     jogo.sincronizar(plan)
     monkeypatch.setattr(entregas, 'atualizar', lambda con, dias=90: {'novas': 0, 'atualizadas': 0})
-
-    httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
-    port = httpd.server_address[1]
-    hosts = {f'localhost:{port}', f'127.0.0.1:{port}'}
-    origens = {f'http://{h}' for h in hosts}
-    monkeypatch.setattr(server, 'HOSTS_OK', hosts)
-    monkeypatch.setattr(server, 'ORIGENS_OK', origens)
-
-    t = threading.Thread(target=httpd.serve_forever, daemon=True)
-    t.start()
+    servidor.entrar()
+    port = servidor.port
 
     def req(method: str, path: str, body: dict | None = None, headers: dict | None = None) -> tuple[int, dict]:
-        conn = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
-        hdrs = {'Host': f'127.0.0.1:{port}'}
-        if method == 'POST':
-            hdrs['Content-Type'] = 'application/json'
-            hdrs['Origin'] = f'http://127.0.0.1:{port}'
-        if headers:
-            hdrs.update(headers)
-        raw = json.dumps(body).encode('utf-8') if body is not None else None
-        conn.request(method, path, body=raw, headers=hdrs)
-        resp = conn.getresponse()
-        data = json.loads(resp.read().decode('utf-8') or '{}')
-        conn.close()
-        return resp.status, data
+        return servidor.pedir(method, path, body, headers)[:2]
 
     def bruto(method: str, path: str, corpo: bytes = b'', headers: dict | None = None) -> tuple[int, dict]:
-        """Requisição sem passar pelo json.dumps do teste: corpo e cabeçalhos exatamente como dados."""
+        """Requisição sem passar pelo json.dumps do teste: corpo e cabeçalhos exatamente como dados (com o cookie)."""
         conn = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
-        hdrs = {'Host': f'127.0.0.1:{port}', 'Origin': f'http://127.0.0.1:{port}', **(headers or {})}
+        hdrs = {'Host': f'127.0.0.1:{port}', 'Origin': f'http://127.0.0.1:{port}',
+                'Cookie': f'luzia_sessao={servidor.cookie}', **(headers or {})}
         conn.request(method, path, body=corpo, headers=hdrs)
         resp = conn.getresponse()
         data = json.loads(resp.read().decode('utf-8') or '{}')
@@ -58,9 +39,7 @@ def api(privado, monkeypatch):
         return resp.status, data
 
     req.bruto = bruto
-    yield req
-    httpd.shutdown()
-    httpd.server_close()
+    return req
 
 
 def test_estado_forma_completa(api):

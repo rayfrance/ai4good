@@ -124,3 +124,65 @@ def privado(tmp_path, monkeypatch) -> Path:
     monkeypatch.setattr(pipeline, 'RUNS', tmp_path / 'runs.jsonl')
     monkeypatch.setattr(modelo, 'ENVS', [])
     return pasta
+
+
+class ClientePainel:
+    """Cliente HTTP do painel num servidor em thread: guarda o cookie de sessão como um navegador."""
+
+    def __init__(self, port: int):
+        self.port = port
+        self.cookie: str | None = None
+
+    def pedir(self, method: str, path: str, body=None, headers: dict | None = None, cookie: bool = True,
+              corpo: bytes | None = None):
+        import http.client
+        conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=10)
+        hdrs = {'Host': f'127.0.0.1:{self.port}'}
+        if method == 'POST':
+            hdrs['Content-Type'] = 'application/json'
+            hdrs['Origin'] = f'http://127.0.0.1:{self.port}'
+        if cookie and self.cookie:
+            hdrs['Cookie'] = f'luzia_sessao={self.cookie}'
+        if headers:
+            hdrs.update(headers)
+        raw = corpo if corpo is not None else (json.dumps(body).encode('utf-8') if body is not None else None)
+        conn.request(method, path, body=raw, headers=hdrs)
+        resp = conn.getresponse()
+        texto = resp.read().decode('utf-8')
+        cabecalhos = resp.getheaders()
+        conn.close()
+        try:
+            data = json.loads(texto or '{}')
+        except ValueError:
+            data = {'_texto': texto}
+        for nome, valor in cabecalhos:
+            if nome.lower() == 'set-cookie' and valor.startswith('luzia_sessao='):
+                token = valor.split(';', 1)[0].split('=', 1)[1]
+                self.cookie = token or None
+        return resp.status, data, cabecalhos
+
+    def entrar(self, senha: str = 'senha-de-teste-123') -> None:
+        """Cria a senha (se ainda não existe) e entra: o cookie fica guardado."""
+        c, _, _ = self.pedir('POST', '/api/acesso/criar', {'senha': senha, 'confirmacao': senha})
+        if c != 200:
+            c, r, _ = self.pedir('POST', '/api/acesso/entrar', {'senha': senha})
+            assert c == 200, r
+
+
+@pytest.fixture
+def servidor(privado, monkeypatch):
+    """Servidor do painel em thread, numa porta livre, com portaria nova e PBKDF2 leve (só nos testes)."""
+    import threading
+    from luzia import acesso, server
+    monkeypatch.setattr(acesso, 'ITERACOES', 1000)
+    monkeypatch.setattr(server, 'PORTARIA', acesso.Portaria())
+    httpd = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
+    port = httpd.server_address[1]
+    hosts = {f'localhost:{port}', f'127.0.0.1:{port}'}
+    monkeypatch.setattr(server, 'HOSTS_OK', hosts)
+    monkeypatch.setattr(server, 'ORIGENS_OK', {f'http://{h}' for h in hosts})
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    yield ClientePainel(port)
+    httpd.shutdown()
+    httpd.server_close()

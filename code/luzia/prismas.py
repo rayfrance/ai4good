@@ -1,4 +1,4 @@
-"""Um prisma = uma habilidade (decidido com a Rayane em 13/11/2026): divisão determinística de nomes compostos.
+"""Um prisma = uma habilidade (decisão de produto de 13/11/2026): divisão determinística de nomes compostos.
 
 Nada aqui chama o modelo nem abre o banco. Regras, na ordem:
 1. `MAPA_DIVISAO`: os nomes compostos que a triagem já criou, com a divisão revisada à mão (o mapa manda).

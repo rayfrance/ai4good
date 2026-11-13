@@ -236,7 +236,7 @@ def estado() -> dict:
         'modo': modo_atual,
         'modo_nome': modo_nome,
         'foco_opcoes': observer.NOMES_FOCO,
-        'privacidade': {'mascarar_modelo': pipeline.mascarar_modelo()},
+        'privacidade': {'mascarar_modelo': pipeline.mascarar_modelo(), 'termos': pipeline.termos_configurados()},
         'agente': pipeline.read_json(pipeline.OBSERVER_CFG, {}).get('agente', 'claude-code'),
         'execucao': {
             k: ultima_execucao().get(k)

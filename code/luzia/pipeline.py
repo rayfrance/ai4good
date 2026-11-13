@@ -50,6 +50,13 @@ def definir_mascarar_modelo(ligado: bool) -> None:
         trajetoria.perfil_gravar(con, 'privacidade', {**atual, 'mascarar_modelo': bool(ligado)})
 
 
+def termos_configurados() -> int:
+    """Quantos termos (empresa, produtos, clientes) há em `private/termos.txt`: sem eles, o mascaramento só pega
+    e-mails, URLs, números de ticket/PR, hashes e os colegas do git."""
+    from .privacy import _termos_do_arquivo
+    return len(_termos_do_arquivo(PRIVATE / 'termos.txt'))
+
+
 def _identidades_da_pessoa(cfg: dict) -> list[str]:
     bruto = cfg.get('author') if isinstance(cfg, dict) else None
     ids = [bruto] if isinstance(bruto, str) else [a for a in (bruto or []) if isinstance(a, str)]

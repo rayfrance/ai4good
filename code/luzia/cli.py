@@ -870,13 +870,20 @@ def cmd_privacidade(valor: str, restantes: list[str]) -> None:
     elif valor:
         print('Use `privacidade mascarar-modelo on` ou `privacidade mascarar-modelo off`.')
     ligado = pipeline.mascarar_modelo()
+    termos = pipeline.termos_configurados()
     if ligado:
-        print('Mascarar antes de enviar ao modelo: **ligado**. Empresa, produtos, clientes, colegas, e-mails e números '
-              'de PR/ticket viram marcadores antes de sair da máquina.')
+        print('Mascarar antes de enviar ao modelo: **ligado**. E-mails, URLs, números de PR/ticket, hashes e os colegas '
+              'do git viram marcadores antes de sair da máquina; empresa, produtos e clientes, só os listados em '
+              f'`private/termos.txt` ({termos} termo(s)).')
     else:
         print('Mascarar antes de enviar ao modelo: **desligado** (padrão). O modelo recebe os fatos reais, como você '
               'os vê no painel e no chat.')
-    print('Na tela nada é mascarado: o painel pede a sua senha. Arquivos versionados nunca recebem dados reais.')
+    if not termos:
+        print('◐ Sem termos em `private/termos.txt`: com o mascaramento ligado, nomes de empresa, produto e cliente '
+              'passariam como estão. Liste-os lá, um por linha.')
+    print('O interruptor vale só para as chamadas da própria Luzia ao modelo; o agente do chat (Claude Code, Codex...) '
+          'recebe os dados reais na saída da CLI. Na tela nada é mascarado: o painel pede a sua senha. Arquivos '
+          'versionados nunca recebem dados reais.')
     alterna = ({'rotulo': 'Enviar dados reais', 'descricao': 'desliga o mascaramento no envio ao modelo',
                 'rodar': 'privacidade mascarar-modelo off'} if ligado else
                {'rotulo': 'Mascarar no envio', 'descricao': 'liga o mascaramento antes de cada chamada ao modelo',

@@ -130,13 +130,29 @@ def test_comando_privacidade_no_chat(privado, monkeypatch):
 def test_ajuste_no_painel(servidor):
     servidor.entrar()
     c, st, _ = servidor.pedir('GET', '/api/estado')
-    assert c == 200 and st['privacidade'] == {'mascarar_modelo': False}
+    assert c == 200 and st['privacidade']['mascarar_modelo'] is False
     c, r, _ = servidor.pedir('POST', '/api/privacidade', {'mascarar_modelo': True})
     assert c == 200 and r['mascarar_modelo'] is True and pipeline.mascarar_modelo() is True
-    assert servidor.pedir('GET', '/api/estado')[1]['privacidade'] == {'mascarar_modelo': True}
+    assert servidor.pedir('GET', '/api/estado')[1]['privacidade']['mascarar_modelo'] is True
     for ruim in ('sim', 1, None):
         assert servidor.pedir('POST', '/api/privacidade', {'mascarar_modelo': ruim})[0] == 400
     assert pipeline.mascarar_modelo() is True
     servidor.cookie = None
     assert servidor.pedir('POST', '/api/privacidade', {'mascarar_modelo': False})[0] == 401
     assert pipeline.mascarar_modelo() is True
+
+
+def test_aviso_quando_termos_txt_falta_e_alcance_do_interruptor(servidor, privado, monkeypatch):
+    servidor.entrar()
+    st = servidor.pedir('GET', '/api/estado')[1]
+    assert st['privacidade'] == {'mascarar_modelo': False, 'termos': 0}
+    s = _cli(monkeypatch, 'privacidade')
+    assert 'termos.txt' in s and 'agente do chat' in s
+    (privado / 'termos.txt').write_text('# comentário\nProdutoZeta\nClienteAlfa\n', encoding='utf-8')
+    assert servidor.pedir('GET', '/api/estado')[1]['privacidade']['termos'] == 2
+    s = _cli(monkeypatch, 'privacidade')
+    assert 'sem termos' not in s.lower() and 'agente do chat' in s
+    from luzia import server
+    from pathlib import Path
+    js = (Path(server.PAINEL) / 'luzia.js').read_text(encoding='utf-8')
+    assert 'E.privacidade?.termos' in js and 'termos.txt' in js and 'agente do chat' in js

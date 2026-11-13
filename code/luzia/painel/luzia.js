@@ -803,9 +803,10 @@ function telaAjustes() {
     <div class="titulo"><h2>Privacidade no envio ao modelo</h2><span>na tela você vê tudo real; o painel pede a sua senha</span></div>
     <div class="opcoes">
       ${opcao('privacidade', 'off', ['olho', 'Enviar dados reais', 'padrão: o modelo recebe os fatos como você os vê'], !E.privacidade?.mascarar_modelo)}
-      ${opcao('privacidade', 'on', ['info', 'Mascarar antes de enviar', 'empresa, clientes, colegas e tickets viram marcadores'], !!E.privacidade?.mascarar_modelo)}
+      ${opcao('privacidade', 'on', ['info', 'Mascarar antes de enviar', 'e-mails, tickets e colegas do git viram marcadores; empresa e clientes, se listados em termos.txt'], !!E.privacidade?.mascarar_modelo)}
     </div>
-    <p class="dica">No chat: <b>privacidade mascarar-modelo on</b> ou <b>off</b>. Arquivos versionados nunca recebem dados reais.</p>`;
+    ${E.privacidade?.termos ? '' : '<p class="aviso-topo">Sem termos em private/termos.txt: com o mascaramento ligado, nomes de empresa, produto e cliente passariam como estão. Liste-os lá, um por linha.</p>'}
+    <p class="dica">Vale só para as chamadas da própria Luzia ao modelo; o agente do chat (Claude Code, Codex...) recebe os dados reais na saída da CLI. No chat: <b>privacidade mascarar-modelo on</b> ou <b>off</b>. Arquivos versionados nunca recebem dados reais.</p>`;
 }
 
 // Leituras vencidas com modelo configurado: o painel pede sozinho, em segundo plano, uma vez por carregamento

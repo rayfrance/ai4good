@@ -796,7 +796,13 @@ function telaAjustes() {
     <div class="titulo"><h2>Seu agente</h2><span>a Luzia funciona em qualquer um</span></div>
     <div class="opcoes">${Object.entries(AGENTES).map(([k, [t, d]]) => opcao('agente', k, ['agente', t, d], E.agente === k)).join('')}</div>
     <div class="titulo"><h2>Foco da Luzia na sessão</h2><span>como a Luzia acompanha seu trabalho em tempo real</span></div>
-    <div class="opcoes">${Object.entries(MODOS).map(([k, v]) => opcao('modo', k, v, E.modo === k)).join('')}</div>`;
+    <div class="opcoes">${Object.entries(MODOS).map(([k, v]) => opcao('modo', k, v, E.modo === k)).join('')}</div>
+    <div class="titulo"><h2>Privacidade no envio ao modelo</h2><span>na tela você vê tudo real; o painel pede a sua senha</span></div>
+    <div class="opcoes">
+      ${opcao('privacidade', 'off', ['olho', 'Enviar dados reais', 'padrão: o modelo recebe os fatos como você os vê'], !E.privacidade?.mascarar_modelo)}
+      ${opcao('privacidade', 'on', ['info', 'Mascarar antes de enviar', 'empresa, clientes, colegas e tickets viram marcadores'], !!E.privacidade?.mascarar_modelo)}
+    </div>
+    <p class="dica">No chat: <b>privacidade mascarar-modelo on</b> ou <b>off</b>. Arquivos versionados nunca recebem dados reais.</p>`;
 }
 
 // Leituras vencidas com modelo configurado: o painel pede sozinho, em segundo plano, uma vez por carregamento
@@ -857,7 +863,7 @@ document.addEventListener('click', async (ev) => {
     '[data-acender]', '[data-provedor]', '#m-salvar', '#m-testar', '[data-subir]',
     '[data-tela]', '[data-ir]', '[data-avanco]', '[data-prisma]', '[data-enviar]',
     '[data-copiar]', '[data-descartar]', '[data-restaurar]', '[data-fechar]',
-    '[data-modo]', '[data-agente]', '[data-filtro-estado]', '[data-filtro-prisma]',
+    '[data-modo]', '[data-agente]', '[data-privacidade]', '[data-filtro-estado]', '[data-filtro-prisma]',
     '[data-filtro-tipo]', '#salvar-niveis', '[data-abrir-pedido-form]', '#ped-enviar',
     '[data-pedido-aceitar]', '[data-pedido-ajustar]', '[data-pedido-recusar]',
     '[data-reativar-prisma]', '[data-gerar-leituras]', '[data-ampliar-entregas]',
@@ -1059,6 +1065,10 @@ document.addEventListener('click', async (ev) => {
   } else if (ds.modo) {
     const r = await api('/api/modo', { modo: ds.modo });
     toast(`Foco salvo: ${r.modo_nome || ds.modo}`);
+    carregar();
+  } else if (ds.privacidade) {
+    const r = await api('/api/privacidade', { mascarar_modelo: ds.privacidade === 'on' });
+    toast(r.erro ? `Não salvou: ${r.erro}` : (r.mascarar_modelo ? 'O envio ao modelo agora é mascarado' : 'O modelo agora recebe os dados reais'));
     carregar();
   } else if (ds.agente) {
     await api('/api/agente', { agente: ds.agente });

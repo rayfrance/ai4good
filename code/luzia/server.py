@@ -46,7 +46,7 @@ ROTAS_GET = ('/api/estado', '/api/sessao', '/api/avancos', '/api/entrega')
 ROTAS_POST = ('/api/nivel', '/api/autoavaliacao', '/api/pedido', '/api/leituras', '/api/identidade',
               '/api/entrega/acender', '/api/entregas/ampliar', '/api/modo', '/api/agente', '/api/enviar', '/api/modelo',
               '/api/modelo/testar', '/api/descartar', '/api/restaurar', '/api/subir', '/api/acender', '/api/trecho',
-              '/api/iniciar')
+              '/api/iniciar', '/api/privacidade')
 PORTARIA = acesso.Portaria()  # sessões e trava de tentativas: só na memória deste processo
 COOKIE_ATTRS = 'HttpOnly; SameSite=Strict; Path=/'  # sem Secure: o painel é http://localhost
 
@@ -227,6 +227,7 @@ def estado() -> dict:
         'modo': modo_atual,
         'modo_nome': modo_nome,
         'foco_opcoes': observer.NOMES_FOCO,
+        'privacidade': {'mascarar_modelo': pipeline.mascarar_modelo()},
         'agente': pipeline.read_json(pipeline.OBSERVER_CFG, {}).get('agente', 'claude-code'),
         'execucao': {
             k: ultima_execucao().get(k)
@@ -559,6 +560,13 @@ class Handler(BaseHTTPRequestHandler):
             cfg['modo'] = modo
             arquivos.gravar_json(pipeline.OBSERVER_CFG, cfg)
             return self._json({'ok': True, 'modo': modo, 'modo_nome': observer.NOMES_FOCO.get(modo, modo)})
+
+        if path == '/api/privacidade':
+            ligado = dados.get('mascarar_modelo')
+            if not isinstance(ligado, bool):
+                return self._json({'erro': 'use mascarar_modelo: true ou false'}, 400)
+            pipeline.definir_mascarar_modelo(ligado)
+            return self._json({'ok': True, 'mascarar_modelo': pipeline.mascarar_modelo()})
 
         if path == '/api/agente':
             agente = dados.get('agente')

@@ -7,7 +7,8 @@ O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de 
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
 - `foco --prompt-arquivo F | --arquivos P... [--cwd D] [--sessao S]` (foco sem hooks, para Antigravity, Codex e Cursor)
 - `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
-- `senha` (redefine a senha do painel: `senha apagar`, só depois do sim da pessoa)
+- `senha` (redefine a senha do painel: `senha apagar`, só depois do sim da pessoa),
+  `privacidade [mascarar-modelo on|off]` (mascarar ou não o que vai ao modelo; padrão: desligado)
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from pathlib import Path
 
 from . import (acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos, pipeline, planner, propriedade,
                trajetoria, triage)
-from .privacy import Redactor
+from .privacy import Redactor, SemMascara
 
 PAINEL = 'http://localhost:8501'
 MODOS = ('ativo', 'passivo', 'sob_demanda')
@@ -41,6 +42,9 @@ def load_cfg(entrada_path: Path) -> dict:
 
 
 def make_redactor(cfg: dict) -> Redactor:
+    """Redator da triagem: só mascara com o interruptor `mascarar_modelo` ligado (padrão: envia real)."""
+    if not pipeline.mascarar_modelo():
+        return SemMascara()
     repo = Path(cfg['repo']) if cfg.get('repo') else None
     colleagues = triage.repo_authors(repo) if repo and repo.exists() else []
     return Redactor.from_file(pipeline.PRIVATE / 'termos.txt', extra_colleagues=colleagues)
@@ -850,6 +854,30 @@ def cmd_senha(valor: str) -> None:
              'rodar': 'senha apagar'}, BT_PAINEL], 'Quer apagar a senha do painel para criar outra?')
 
 
+def cmd_privacidade(valor: str, restantes: list[str]) -> None:
+    """Interruptor do envio ao modelo: `privacidade mascarar-modelo on|off` (o mesmo de Ajustes no painel)."""
+    print('## ✦ Luzia · privacidade no envio ao modelo')
+    escolha = (restantes[0] if restantes else '').strip().lower()
+    if (valor or '').strip().lower() == 'mascarar-modelo' and escolha in ('on', 'off'):
+        pipeline.definir_mascarar_modelo(escolha == 'on')
+        print('✦ Ajustado.')
+    elif valor:
+        print('Use `privacidade mascarar-modelo on` ou `privacidade mascarar-modelo off`.')
+    ligado = pipeline.mascarar_modelo()
+    if ligado:
+        print('Mascarar antes de enviar ao modelo: **ligado**. Empresa, produtos, clientes, colegas, e-mails e números '
+              'de PR/ticket viram marcadores antes de sair da máquina.')
+    else:
+        print('Mascarar antes de enviar ao modelo: **desligado** (padrão). O modelo recebe os fatos reais, como você '
+              'os vê no painel e no chat.')
+    print('Na tela nada é mascarado: o painel pede a sua senha. Arquivos versionados nunca recebem dados reais.')
+    alterna = ({'rotulo': 'Enviar dados reais', 'descricao': 'desliga o mascaramento no envio ao modelo',
+                'rodar': 'privacidade mascarar-modelo off'} if ligado else
+               {'rotulo': 'Mascarar no envio', 'descricao': 'liga o mascaramento antes de cada chamada ao modelo',
+                'rodar': 'privacidade mascarar-modelo on'})
+    botoes([alterna, BT_PAINEL], 'Quer mudar o que vai para o modelo?')
+
+
 # ------------------------------------------------------------------ main
 COMANDOS = [
     'hoje', 'triage', 'trajetoria', 'next-level', 'rota',
@@ -857,7 +885,7 @@ COMANDOS = [
     'leituras', 'foco', 'agente',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
     'subir', 'nivel', 'acender', 'trecho', 'pedido',
-    'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo', 'senha',
+    'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo', 'senha', 'privacidade',
 ]
 
 
@@ -971,6 +999,10 @@ def main() -> None:
 
     if args.comando == 'senha':
         cmd_senha(args.valor)
+        return
+
+    if args.comando == 'privacidade':
+        cmd_privacidade(args.valor, restantes)
         return
 
     if args.comando == 'career-map':

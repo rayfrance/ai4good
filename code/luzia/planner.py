@@ -34,7 +34,7 @@ ele a conduza (perguntando, esperando a resposta e só depois explicando), sem f
 Os prompts nunca citam nomes de empresa, clientes ou colegas.
 
 Estilo: visual e curto. Títulos com no máximo 8 palavras; demais textos livres com no máximo 18 palavras.
-Português do Brasil. Termos [EMPRESA/PRODUTO] e [COLEGA] foram anonimizados por LGPD; mantenha-os assim.
+Português do Brasil. Se aparecerem marcadores como [EMPRESA/PRODUTO] ou [COLEGA] (mascaramento local), mantenha-os assim.
 Use só as evidências fornecidas. Responda só com o JSON."""
 
 SKILLS_OBRIGATORIAS = (
@@ -137,7 +137,7 @@ ENTREGA_SCHEMA = f"""Devolva exatamente este JSON:
     {ACAO_SCHEMA}
   ]
 }}
-Exatamente 2 ações para a entrega recebida, feitas só a partir dos fatos dela (título mascarado, período, arquivos,
+Exatamente 2 ações para a entrega recebida, feitas só a partir dos fatos dela (título, período, arquivos,
 linhas, áreas e prismas atravessados com os termos achados):
 1. "dimensao" = "P3", "tipo" = "explicar": a pessoa explica com as próprias palavras o conceito aplicado nesta entrega.
 2. "dimensao" = "P4": a pessoa defende a decisão tomada nesta entrega e as alternativas que tinha.
@@ -186,8 +186,11 @@ class LLMResult:
     model: str
 
 
+INTRO_PADRAO = 'Evidências da triagem da pessoa desenvolvedora:'
+
+
 def build_prompt(payload: dict, schema: str = TRIAGE_SCHEMA, intro: str | None = None) -> str:
-    intro = intro or 'Evidências da triagem da pessoa desenvolvedora (já anonimizadas localmente por LGPD):'
+    intro = intro or INTRO_PADRAO
     return intro + '\n' + json.dumps(payload, ensure_ascii=False, indent=1) + '\n\n' + schema
 
 

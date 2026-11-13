@@ -1,8 +1,8 @@
-"""Anonimização local, antes de qualquer dado sair da máquina.
+"""Mascaramento local do que vai ao modelo de linguagem (LGPD), quando a pessoa liga o interruptor.
 
-Tudo que vai para o modelo de linguagem passa por `Redactor.redact`. A mesma
-função é usada na tela em modo apresentação, para não projetar dados pessoais
-nem nomes da empresa, produto interno, colegas ou clientes (LGPD).
+A proteção da tela é o login do painel (`acesso.py`): a dona dos dados vê tudo real. O envio ao modelo sai real por
+padrão; com `mascarar_modelo` ligado (Ajustes no painel ou `privacidade mascarar-modelo on` no chat), todo payload passa
+por `mascarar_estrutura` em `pipeline.run_plan` antes de sair da máquina. Arquivos versionados nunca recebem dados reais.
 """
 
 from __future__ import annotations
@@ -43,6 +43,20 @@ def _termos_do_arquivo(path: Path | None) -> list[str]:
     termos = [t for t in (ln.strip() for ln in path.read_text(encoding='utf-8').splitlines()) if t and not t.startswith('#')]
     _TERMOS[path] = (marca, termos)
     return list(termos)
+
+
+def mascarar_estrutura(obj, redactor: 'Redactor', manter: frozenset[str] | set[str] = frozenset(), limpar=None):
+    """Cópia de `obj` com todo texto mascarado. Chaves em `manter` com valor de texto ficam como estão (ids e nomes de
+    prisma que a resposta do modelo precisa devolver iguais); dicionários e listas sob elas são mascarados também.
+    `limpar`: função aplicada antes do `redact` (ex.: tirar números de ticket)."""
+    if isinstance(obj, dict):
+        return {k: (v if k in manter and isinstance(v, str) else mascarar_estrutura(v, redactor, manter, limpar))
+                for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [mascarar_estrutura(v, redactor, manter, limpar) for v in obj]
+    if isinstance(obj, str):
+        return redactor.redact(limpar(obj) if limpar else obj)
+    return obj
 
 
 @dataclass
@@ -86,4 +100,11 @@ class Redactor:
             text, n = pattern.subn('[COLEGA]', text)
             if n:
                 self.hits['[COLEGA]'] = self.hits.get('[COLEGA]', 0) + n
+        return text
+
+
+class SemMascara(Redactor):
+    """Redator que não muda nada: o envio ao modelo com o interruptor `mascarar_modelo` desligado (padrão)."""
+
+    def redact(self, text: str) -> str:
         return text

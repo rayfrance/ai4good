@@ -16,7 +16,7 @@ except ImportError:
     psutil = None  # type: ignore[assignment]
 
 from . import arquivos, banco, planner, trajetoria, triage
-from .privacy import Redactor
+from .privacy import Redactor, mascarar_estrutura
 
 ROOT = Path(__file__).resolve().parents[2]
 PRIVATE = arquivos.PRIVATE
@@ -27,6 +27,61 @@ OBSERVER_CFG = PRIVATE / 'observer.json'
 
 def read_json(path: Path, default):
     return arquivos.ler_json(path, default)
+
+
+# ------------------------------------------------------------------ envio ao modelo: real ou mascarado
+# Chaves cujo texto o modelo precisa devolver igual (ids, alvos, nomes de prisma e enums): nunca mascaradas.
+CHAVES_MANTIDAS = frozenset({'alvo', 'id', 'tipo', 'alvo_tipo', 'alvo_id', 'entrega_id', 'pedido_id', 'prisma',
+                             'skill', 'skill_plano', 'nome', 'dimensao', 'estado', 'luz', 'fonte', 'quando', 'data',
+                             'inicio', 'fim'})
+
+
+def mascarar_modelo() -> bool:
+    """Interruptor (fonte única: `perfil('privacidade')`): True mascara o que vai ao modelo. Padrão: desligado."""
+    with trajetoria.abrir() as con:
+        p = trajetoria.perfil_ler(con, 'privacidade')
+    return bool(isinstance(p, dict) and p.get('mascarar_modelo') is True)
+
+
+def definir_mascarar_modelo(ligado: bool) -> None:
+    with trajetoria.abrir() as con, banco.transacao(con):
+        atual = trajetoria.perfil_ler(con, 'privacidade')
+        atual = atual if isinstance(atual, dict) else {}
+        trajetoria.perfil_gravar(con, 'privacidade', {**atual, 'mascarar_modelo': bool(ligado)})
+
+
+def _identidades_da_pessoa(cfg: dict) -> list[str]:
+    bruto = cfg.get('author') if isinstance(cfg, dict) else None
+    ids = [bruto] if isinstance(bruto, str) else [a for a in (bruto or []) if isinstance(a, str)]
+    try:
+        with trajetoria.abrir() as con:
+            guardadas = trajetoria.perfil_ler(con, 'identidades')
+    except Exception:
+        guardadas = None
+    return ids + ([str(i) for i in guardadas] if isinstance(guardadas, list) else [])
+
+
+def redator_modelo() -> Redactor:
+    """Redator do envio ao modelo: `termos.txt` (empresa, produtos, clientes) e os outros autores do repositório
+    autorizado como colegas (a própria pessoa fica de fora)."""
+    cfg = read_json(PRIVATE / 'entrada.json', {})
+    cfg = cfg if isinstance(cfg, dict) else {}
+    repo = Path(cfg['repo']) if cfg.get('repo') else None
+    try:
+        colegas = triage.repo_authors(repo) if repo and repo.exists() else []
+    except (OSError, subprocess.CalledProcessError):
+        colegas = []
+    tokens = {t.casefold() for i in _identidades_da_pessoa(cfg) for t in [i, *i.split()]}
+    return Redactor.from_file(PRIVATE / 'termos.txt', extra_colleagues=[c for c in colegas if c.casefold() not in tokens])
+
+
+def para_o_modelo(payload: dict) -> tuple[dict, bool, int]:
+    """(payload que sai da máquina, mascarou?, itens mascarados). Real com o interruptor desligado."""
+    if not mascarar_modelo():
+        return payload, False, 0
+    from .entregas import _limpar  # tira números de PR/ticket/item antes do Redactor
+    r = redator_modelo()
+    return mascarar_estrutura(payload, r, CHAVES_MANTIDAS, _limpar), True, sum(r.hits.values())
 
 
 def load_state() -> dict:
@@ -223,9 +278,15 @@ def run_plan(
     schema: str | None = None,
     intro: str | None = None,
 ) -> tuple[planner.LLMResult, dict]:
-    """Chama o modelo e devolve a resposta com o registro de custo (sem dados pessoais)."""
+    """Chama o modelo e devolve a resposta com o registro de custo (sem dados pessoais).
+
+    Único caminho até o modelo: com o interruptor `mascarar_modelo` ligado, o payload é mascarado aqui antes de sair.
+    """
     t0 = time.perf_counter()
-    prompt = planner.build_prompt(payload, schema or planner.TRIAGE_SCHEMA, intro)
+    enviado, mascarou, n_mascarados = para_o_modelo(payload)
+    if mascarou:
+        intro = (intro or planner.INTRO_PADRAO) + ' (mascarados localmente: marcadores entre colchetes substituem nomes)'
+    prompt = planner.build_prompt(enviado, schema or planner.TRIAGE_SCHEMA, intro)
     result = planner.call_llm(prompt)
     ai_hist = payload.get('historico_compartilhado_ia') or {}
     record = {
@@ -245,6 +306,8 @@ def run_plan(
         'notas_vault': len(ai_hist.get('notas_autorais_vault', [])),
         'sessoes_ia': len(ai_hist.get('sessoes_claude_code', [])) + len(ai_hist.get('sessoes_codex', [])),
         'eventos_sessao': len(payload.get('eventos_sessao', [])),
+        'mascarar_modelo': mascarou,
+        'itens_mascarados': n_mascarados,
     }
     log_run(record)
     if save_current_state and schema is None:

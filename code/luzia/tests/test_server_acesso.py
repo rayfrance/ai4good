@@ -198,7 +198,8 @@ def test_protecoes_de_host_origem_json_e_tamanho_valem_nas_rotas_de_acesso(servi
     assert servidor.pedir('POST', '/api/acesso/link', corpo, headers={'Origin': 'http://evil.example'})[0] == 403
     assert servidor.pedir('POST', '/api/acesso/link', corpo, headers={'Sec-Fetch-Site': 'cross-site'})[0] == 403
     assert servidor.pedir('POST', '/api/acesso/link', corpo, headers={'Content-Type': 'text/plain'})[0] == 415
-    assert servidor.pedir('POST', '/api/acesso/link', corpo, headers={'Content-Length': '99999999'})[0] == 413
+    # Content-Length enorme com corpo mínimo: recusa pelo tamanho declarado, sem ler (como em test_server.py)
+    assert servidor.pedir('POST', '/api/acesso/link', corpo=b'{}', headers={'Content-Length': '99999999'})[0] == 413
     assert servidor.pedir('POST', '/api/acesso/link', corpo=b'{nao e json')[0] == 400
     assert servidor.pedir('POST', '/api/acesso/sair', {}, headers={'Origin': 'http://evil.example'})[0] == 403
     assert servidor.pedir('POST', '/api/acesso/link', corpo)[0] == 200  # recusas acima não gastaram o link

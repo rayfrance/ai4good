@@ -345,6 +345,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._indisponivel()
         return self._json({'ok': True}, 200, [('Set-Cookie', f'{acesso.COOKIE}=; Max-Age=0; {COOKIE_ATTRS}')])
 
+    def _descartar_o_que_chegou(self) -> None:
+        """Corpo declarado grande demais: lê (até 64 KB) só o que já chegou e fecha a conexão depois da resposta.
+        Sem isso, fechar com bytes não lidos faz o Windows mandar RST e o cliente perde a resposta 413."""
+        self.close_connection = True
+        try:
+            self.connection.settimeout(0.2)
+            lido = 0
+            while lido < MAX_CORPO:
+                pedaco = self.rfile.read1(MAX_CORPO - lido)
+                if not pedaco:
+                    break
+                lido += len(pedaco)
+        except (OSError, ValueError):
+            pass
+
     def _drenar(self) -> None:
         try:
             n = min(MAX_CORPO, int(self.headers.get('Content-Length', 0) or 0))
@@ -457,6 +472,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             return self._json({'erro': 'tamanho inválido'}, 400)
         if tamanho > MAX_CORPO:
+            self._descartar_o_que_chegou()
             return self._json({'erro': 'pedido grande demais'}, 413)
         corpo = self.rfile.read(tamanho) if tamanho > 0 else b''
         path = self.path.split('?')[0]

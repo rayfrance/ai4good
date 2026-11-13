@@ -5,6 +5,7 @@ Tudo roda na fixture `privado`: o banco nasce na pasta temporária do teste, nun
 
 import multiprocessing
 import re
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -81,7 +82,7 @@ def test_esquema_criado(privado):
         achadas = {r['name'] for r in con.execute(f'PRAGMA table_info({tabela})')}
         assert colunas <= achadas, (tabela, colunas - achadas)
     meta = dict(con.execute('SELECT chave, valor FROM meta').fetchall())
-    assert meta['esquema'] == str(banco.ESQUEMA_VERSAO) == '2'
+    assert meta['esquema'] == str(banco.ESQUEMA_VERSAO) == '3'
     assert meta['migrado_em']
     pk = [r['name'] for r in con.execute('PRAGMA table_info(entrega_prisma)') if r['pk']]
     assert sorted(pk) == ['entrega_id', 'prisma']
@@ -199,9 +200,56 @@ def test_banco_do_esquema_1_ganha_as_tabelas_de_acesso_sem_migrar_de_novo(privad
     con = banco.conectar()  # versão nova do código abre o banco antigo
     try:
         meta = dict(con.execute('SELECT chave, valor FROM meta').fetchall())
-        assert meta['esquema'] == '2' and meta['migrado_em'] == migrado
+        assert meta['esquema'] == str(banco.ESQUEMA_VERSAO) and meta['migrado_em'] == migrado
         nomes = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert {'acesso_sessao', 'acesso_link'} <= nomes
         assert con.execute('SELECT COUNT(*) FROM lumen').fetchone()[0] == 1
     finally:
         con.close()
+
+
+PEDIDO_V2 = """CREATE TABLE pedido (
+        id INTEGER PRIMARY KEY,
+        tipo TEXT NOT NULL CHECK (tipo IN ('incluir', 'arquivar', 'reativar', 'mudar_meta')),
+        prisma TEXT NOT NULL,
+        motivo TEXT,
+        proposta_json TEXT,
+        leitura_id INTEGER REFERENCES leitura (id),
+        estado TEXT NOT NULL DEFAULT 'aberto' CHECK (estado IN ('aberto', 'proposto', 'aceito', 'recusado')),
+        criado_em TEXT NOT NULL,
+        decidido_em TEXT
+    )"""
+
+
+def test_banco_do_esquema_2_aceita_pedido_dividir_sem_migrar_de_novo(privado):
+    con = banco.conectar()
+    with banco.transacao(con):
+        con.execute('DROP TABLE pedido')
+        con.execute(PEDIDO_V2)
+        con.execute("INSERT INTO pedido (tipo, prisma, motivo, proposta_json, estado, criado_em, decidido_em) "
+                    "VALUES ('arquivar', 'X', 'motivo', '{}', 'aceito', '2026-11-01T10:00:00', '2026-11-01T10:01:00')")
+        con.execute("INSERT INTO trajetoria_versao (numero, criada_em, origem, pedido_id, foto_json) "
+                    "VALUES (99, '2026-11-01T10:01:00', 'pedido', 1, '{}')")
+        con.execute("UPDATE meta SET valor = '2' WHERE chave = 'esquema'")
+    migrado = con.execute("SELECT valor FROM meta WHERE chave = 'migrado_em'").fetchone()[0]
+    with pytest.raises(sqlite3.IntegrityError):  # o esquema 2 não conhece o tipo novo
+        with banco.transacao(con):
+            con.execute("INSERT INTO pedido (tipo, prisma, estado, criado_em) VALUES ('dividir', 'Y', 'aberto', 'x')")
+    con.close()
+    con = banco.conectar()  # código novo abre o banco antigo
+    try:
+        meta = dict(con.execute('SELECT chave, valor FROM meta').fetchall())
+        assert meta['esquema'] == str(banco.ESQUEMA_VERSAO) == '3' and meta['migrado_em'] == migrado
+        antigo = con.execute('SELECT * FROM pedido WHERE id = 1').fetchone()
+        assert (antigo['tipo'], antigo['prisma'], antigo['motivo'], antigo['estado'], antigo['decidido_em']) ==             ('arquivar', 'X', 'motivo', 'aceito', '2026-11-01T10:01:00')
+        with banco.transacao(con):
+            con.execute("INSERT INTO pedido (tipo, prisma, estado, criado_em) VALUES ('dividir', 'Y', 'aberto', 'x')")
+        assert con.execute("SELECT COUNT(*) FROM pedido WHERE tipo = 'dividir'").fetchone()[0] == 1
+        assert con.execute('PRAGMA foreign_key_check').fetchall() == []
+        assert con.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+        with pytest.raises(sqlite3.IntegrityError):  # o CHECK continua valendo para tipos desconhecidos
+            with banco.transacao(con):
+                con.execute("INSERT INTO pedido (tipo, prisma, estado, criado_em) VALUES ('fundir', 'Y', 'aberto', 'x')")
+    finally:
+        con.close()
+    banco.conectar().close()  # abrir de novo não refaz nada

@@ -31,7 +31,7 @@ if os.name == 'nt':
 else:
     import fcntl
 
-ESQUEMA_VERSAO = 2  # 2: acesso_sessao e acesso_link (entrada no painel herdada do agente)
+ESQUEMA_VERSAO = 3  # 2: acesso_sessao e acesso_link (entrada no painel herdada do agente); 3: pedido 'dividir'
 ESPERA_MS = 5000
 ESPERA_CURTA_MS = 1500  # caminho quente do hook: abrir e gravar cabem no tempo dele
 PENDENTES = 'pendentes.jsonl'
@@ -97,7 +97,7 @@ ESQUEMA = (
     )""",
     """CREATE TABLE IF NOT EXISTS pedido (
         id INTEGER PRIMARY KEY,
-        tipo TEXT NOT NULL CHECK (tipo IN ('incluir', 'arquivar', 'reativar', 'mudar_meta')),
+        tipo TEXT NOT NULL CHECK (tipo IN ('incluir', 'arquivar', 'reativar', 'mudar_meta', 'dividir')),
         prisma TEXT NOT NULL,
         motivo TEXT,
         proposta_json TEXT,
@@ -718,6 +718,30 @@ def _completar(con: sqlite3.Connection) -> None:
                 con.execute(sql)
 
 
+TIPOS_PEDIDO_V2 = "CHECK (tipo IN ('incluir', 'arquivar', 'reativar', 'mudar_meta'))"
+TIPOS_PEDIDO_V3 = "CHECK (tipo IN ('incluir', 'arquivar', 'reativar', 'mudar_meta', 'dividir'))"
+
+
+def _subir_esquema(con: sqlite3.Connection) -> None:
+    """Passos de um esquema antigo para o atual, dentro da transação exclusiva de `garantir` (sem migrar de novo).
+
+    3: o CHECK de `pedido.tipo` ganha 'dividir'. Só alarga um CHECK (o formato no disco não muda), então segue o
+    procedimento do SQLite para isso: trocar o SQL da tabela em `sqlite_master` e somar 1 ao `schema_version`
+    (recriar a tabela exigiria desligar as chaves estrangeiras, o que não pode acontecer dentro de uma transação).
+    """
+    linha = con.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pedido'").fetchone()
+    if linha is None or TIPOS_PEDIDO_V2 not in linha[0]:
+        return
+    versao = int(con.execute('PRAGMA schema_version').fetchone()[0])
+    con.execute('PRAGMA writable_schema = ON')
+    try:
+        con.execute("UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = 'pedido'",
+                    (linha[0].replace(TIPOS_PEDIDO_V2, TIPOS_PEDIDO_V3),))
+        con.execute(f'PRAGMA schema_version = {versao + 1}')
+    finally:
+        con.execute('PRAGMA writable_schema = OFF')
+
+
 def garantir(con: sqlite3.Connection) -> None:
     """Cria o esquema que faltar e roda a migração dos JSON uma única vez, numa transação exclusiva.
 
@@ -745,6 +769,7 @@ def garantir(con: sqlite3.Connection) -> None:
                 return
             for sql in ESQUEMA:
                 con.execute(sql)
+            _subir_esquema(con)
             con.execute("INSERT INTO meta (chave, valor) VALUES ('esquema', ?) "
                         'ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor', (str(ESQUEMA_VERSAO),))
             if not _meta(con).get('migrado_em'):

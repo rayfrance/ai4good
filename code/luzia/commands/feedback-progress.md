@@ -1,5 +1,5 @@
 ---
-description: "Luzia · propriedade das suas entregas (P1–P4 com a base de cada nota) e os avanços que fecham as lacunas"
+description: "Luzia · propriedade das suas entregas (P1–P4 com a base de cada nota) e as centelhas que fecham as lacunas"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:

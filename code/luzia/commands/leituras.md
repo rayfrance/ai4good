@@ -1,5 +1,5 @@
 ---
-description: "Luzia · renova de uma vez as leituras vencidas ou faltando (prismas e entregas), sempre com base, modelo e data"
+description: "Luzia · atualiza de uma vez as análises desatualizadas ou faltando (prismas e entregas), sempre com base, modelo e data"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:

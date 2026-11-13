@@ -1,5 +1,5 @@
 ---
-description: "Luzia · seus avanços (em andamento, na fila, sugeridos, conquistados e descartados) com filtros por estado, prisma e tipo"
+description: "Luzia · suas centelhas (o mesmo que /luzia:centelhas) com filtros por estado, prisma e tipo"
 argument-hint: "[--estado E] [--prisma P] [--tipo T]"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---

@@ -1,5 +1,5 @@
 ---
-description: "Luzia · acende 2 avanços (P3 e P4) ligados a uma entrega, para provar a propriedade do que foi entregue"
+description: "Luzia · acende 2 centelhas (P3 e P4) ligadas a uma entrega, para provar a propriedade do que foi entregue"
 argument-hint: "<id da entrega>"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---

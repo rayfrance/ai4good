@@ -1,5 +1,5 @@
 ---
-description: "Luzia · sua trajetória até a meta, por níveis de cada prisma (skill), com os avanços de cada um"
+description: "Luzia · sua trajetória até a meta, por níveis de cada prisma (skill), com as centelhas de cada um"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:

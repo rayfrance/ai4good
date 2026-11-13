@@ -1,5 +1,5 @@
 ---
-description: "Luzia · avanços que você mandou do painel para o seu agente"
+description: "Luzia · centelhas que você mandou do painel para o seu agente"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:

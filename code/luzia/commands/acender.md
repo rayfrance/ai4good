@@ -1,5 +1,5 @@
 ---
-description: "Luzia · acende 3 avanços novos para um prisma (ex.: /luzia:acender DDD)"
+description: "Luzia · acende 3 centelhas novas para um prisma (ex.: /luzia:acender DDD)"
 argument-hint: "<prisma>"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---

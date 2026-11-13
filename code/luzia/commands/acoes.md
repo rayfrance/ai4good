@@ -1,5 +1,5 @@
 ---
-description: "Luzia · seus avanços (em andamento, na fila, sugeridos, conquistados e descartados)"
+description: "Luzia · suas centelhas (em andamento, na fila, sugeridas, acesas e descartadas)"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:

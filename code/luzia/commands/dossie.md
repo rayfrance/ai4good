@@ -1,5 +1,5 @@
 ---
-description: "Luzia · dossiê de evidências (avanços, notas, níveis e autoria própria) para levar ao líder ou ao PDI"
+description: "Luzia · dossiê de evidências (centelhas, notas, níveis e autoria própria) para levar ao líder ou ao PDI"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:

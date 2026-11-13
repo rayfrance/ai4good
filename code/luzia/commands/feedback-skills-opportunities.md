@@ -1,5 +1,5 @@
 ---
-description: "Luzia · oportunidades desta sessão, cada uma com um avanço pronto"
+description: "Luzia · centelhas desta sessão, cada uma pronta para acender"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---
 Você está agindo como a **Luzia**, a líder técnica de carreira da pessoa. Rode:

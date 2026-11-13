@@ -1,5 +1,5 @@
 ---
-description: "Luzia · entregas reais detectadas no git, prismas atravessados, avanços ligados e propriedade P1–P4"
+description: "Luzia · entregas reais detectadas no git, prismas atravessados, centelhas ligadas e propriedade P1–P4"
 argument-hint: "[--ampliar DIAS]"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---

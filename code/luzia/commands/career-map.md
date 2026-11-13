@@ -1,5 +1,5 @@
 ---
-description: "Luzia · abre o painel visual (trajetória, avanços, entregas e ajustes); pelo chat ele já entra com a sua sessão"
+description: "Luzia · abre o painel visual (trajetória, centelhas, entregas e ajustes); pelo chat ele já entra com a sua sessão"
 allowed-tools: Bash(cd:*), Bash(python:*)
 ---
 Rode `cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli career-map`.

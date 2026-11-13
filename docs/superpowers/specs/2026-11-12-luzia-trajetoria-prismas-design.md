@@ -19,14 +19,17 @@ Nome real primeiro; a metáfora de luz só onde explica algo.
 | **Trajetória** | o caminho do nível atual até a meta (ex.: Júnior 3 → Plena) | rota |
 | **Prisma** | **uma única habilidade** da trajetória (ex.: DDD, SQL, React); nunca um nome que junta assuntos | skill (na experiência) |
 | **Nível** | 0 a 5 em cada prisma; subir de nível é o que antes era "degrau" | degrau |
-| **Avanço** | ação curta (5 a 30 min) de um prisma; tipos: explicar, praticar, estudar, explorar | feixe |
+| **Centelha** | qualquer oportunidade que a Luzia captura (na sessão, na triagem ou numa entrega passada) para um prisma, de 5 a 30 min; a pessoa **acende a centelha** (faz) para ganhar lúmens de luz própria. Tipos: explicar, praticar, estudar, explorar. Origem numa etiqueta curta: "da sessão", "da triagem", "da entrega" (13/11/2026, decidido com a Rayane) | feixe, avanço, lampejo |
 | **Lúmen (lm)** | a pontuação | — |
 | **Luz própria / refletida** | lúmens que vieram de você / do que o agente fez | — |
 | **Propriedade** | quanto de uma **entrega** é seu (P1–P4), fora do jogo | — |
 | **Foco** | a Luzia observando a sessão com intenção ("a Luzia está em foco") | observador |
-| **Lampejo** | o cartão curto que a Luzia mostra no chat quando percebe um conceito na mudança ("Lampejo da Luzia · DDD"); pode virar luz própria uma vez | cartão |
+| **Centelha da sessão** | o cartão curto que a Luzia mostra no chat quando percebe um conceito na mudança ("✦ Centelha da sessão · DDD · +10 lm refletida"); responder agora vale até +30 lm própria (uma vez), "Guardar" vira uma centelha guardada | cartão, lampejo |
+| **Análise da Luzia** | todo texto de IA, sempre com base, modelo e data | leitura |
 
-Modos do foco: **em foco, com lampejos** (era "ativo"), **em foco, em silêncio** (era "passivo"), **fora de foco** (era "sob demanda").
+Modos do foco: **Em foco** (era "ativo"; mostra centelhas da sessão), **Em silêncio** (era "passivo"), **Fora de foco** (era "sob demanda").
+
+Identificadores internos (tabelas `avanco` e `lampejo`, rota `/api/leituras`, comandos `avancos` e `leituras`) ficam como estão: a troca para centelha e análise é só de linguagem visível. Apelidos no chat: `centelhas` (= `avancos`, também `/luzia:centelhas`) e `analises` (= `leituras`).
 
 Regras de uso:
 - **Um prisma = uma habilidade** (13/11/2026, decidido com a Rayane): nada de prismas como "Testes e Qualidade / SQL",
@@ -35,9 +38,9 @@ Regras de uso:
 - Rótulos mostram só o nome do prisma, **sem a palavra "Prisma" na frente** (o título da seção, do filtro ou do cartão já
   diz que são prismas). "prisma" fica nos títulos de seção e na primeira explicação de cada tela/comando: "prisma (skill)".
 - **Dossiê e textos formais** (para líder, PDI) usam "skill", "nível" e "ação", não o vocabulário do jogo.
-- "Trecho" deixa de existir: "acender 3 avanços novos".
+- "Trecho" deixa de existir: "acender 3 centelhas novas".
 - Visual: cada prisma mostra os níveis 0–5 como **faixas de um espectro que acendem** (nível 3 = 3 faixas acesas). As cores das faixas seguem a paleta da Luzia (roxo → lilás → laranja → areia); a escolha exata é do construtor. O prisma refrata, não reflete: não desenhar reflexo.
-- Tipos de avanço ganham **ícone e cor**, sem nomes inventados.
+- Tipos de centelha ganham **ícone e cor**, sem nomes inventados.
 
 A troca vale em toda superfície visível: painel, saídas da CLI, comandos, skills, cartões do observador, linha de status, docs (`docs/luzia-ux.md`, `code/luzia/CONTEXT.md`, `harness/REGRAS.md`). Identificadores internos (nomes de tabela, colunas, funções) podem usar os termos novos; é escolha do construtor manter ou não as chaves dos esquemas JSON enviados ao modelo.
 

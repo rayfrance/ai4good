@@ -1,5 +1,5 @@
 ---
-description: "Luzia · sua trajetória até a meta, por níveis de cada prisma (skill), com espectro, leituras e pedidos de mudança"
+description: "Luzia · sua trajetória até a meta, por níveis de cada prisma (skill), com espectro, análises e pedidos de mudança"
 argument-hint: "[pedido abrir <incluir|arquivar|reativar|mudar_meta|dividir> \"<prisma>\" --motivo \"...\"]"
 allowed-tools: Bash(cd:*), Bash(python:*), AskUserQuestion
 ---

@@ -32,10 +32,11 @@ def _todas_protegidas_401(cli, cookie=True):
     for rota in server.ROTAS_GET:
         c, r, _ = cli.pedir('GET', rota + '?id=1', cookie=cookie)
         assert c == 401 and r.get('login') is True, (rota, c, r)
-    for rota in server.ROTAS_POST:
+    for rota in (*server.ROTAS_POST, '/index.html', '/'):
         c, r, _ = cli.pedir('POST', rota, {}, cookie=cookie)
         assert c == 401 and r.get('login') is True, (rota, c, r)
     for rota in ('/api/inventada', '/api/acesso/inventada', '/API/estado', '/api'):  # rota nova ou desconhecida
+        assert cli.pedir('POST', '/' + rota, {}, cookie=cookie)[0] == 401, rota  # caminho torto também
         assert cli.pedir('GET', rota, cookie=cookie)[0] in (401, 404), rota
         assert cli.pedir('POST', rota, {}, cookie=cookie)[0] == 401, rota
 

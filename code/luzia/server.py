@@ -426,7 +426,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({'erro': 'pedido grande demais'}, 413)
         corpo = self.rfile.read(tamanho) if tamanho > 0 else b''
         path = self.path.split('?')[0]
-        if self._protegida(path, ABERTAS_POST) and not self._sessao_ok():
+        if path not in ABERTAS_POST and not self._sessao_ok():  # todo POST fora do acesso exige sessão
             return self._negar()
         try:
             dados = json.loads(corpo or b'{}')

@@ -11,7 +11,7 @@ A pessoa **sempre** desenvolve com IA. A Luzia cuida do uso educado da IA: propr
 - `/luzia:trajetoria` (trajetória por prisma, espectro e pedidos de mudança), `/luzia:avancos` (todos os avanços, com filtros), `/luzia:fila` (enviados do painel)
 - `/luzia:fazer <id>` (faz um avanço em sessão nova ou aqui), `/luzia:subir <prisma>` (confirma um nível pronto), `nivel <prisma> <N>` (declara ponto de partida)
 - `/luzia:acender <prisma>` (3 avanços novos), `/luzia:entregas` (entregas do git e propriedade P1–P4), `/luzia:acender-entrega <id>`, `/luzia:identidade`, `/luzia:leituras`, `/luzia:feedback-skills-opportunities`
-- `/luzia:dossie`, `/luzia:triage`, `/luzia:career-map` (painel, com senha local), `/luzia:senha` (redefine a senha do painel)
+- `/luzia:dossie`, `/luzia:triage`, `/luzia:career-map` (painel; pelo chat já entra logado), `/luzia:acesso` (sessões do painel e sair de todas)
 
 **Linguagem natural → comando.** Rode sempre `cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m luzia.cli <comando>` (abaixo, `LUZIA`):
 
@@ -33,8 +33,8 @@ A pessoa **sempre** desenvolve com IA. A Luzia cuida do uso educado da IA: propr
 | "Luzia, foco / em silêncio / fora de foco" | `LUZIA modo ativo\|passivo\|sob_demanda` |
 | "troca o modelo para ..." | `LUZIA modelo usar <provedor> <modelo>` (a chave **nunca** pelo chat: só no painel ou no `.env`) · `LUZIA modelo testar` |
 | "uso o Codex / Antigravity / Cursor" | `LUZIA agente <claude-code\|codex\|cursor\|antigravity\|outro>` |
-| "abre o painel" | `LUZIA career-map` (o painel pede a senha local; no primeiro acesso, ela cria uma) |
-| "esqueci a senha do painel" | `LUZIA senha`; só rode `senha apagar` depois do **sim explícito**. Nunca peça nem repita a senha no chat |
+| "abre o painel" | `LUZIA career-map` (já entra com a sessão dela; se o navegador não abrir, mostre o link uma vez, como veio) |
+| "sai do painel em todo lugar" | `LUZIA acesso sair-de-todos`; só rode `acesso sair-de-todos confirmar` depois do **sim explícito** |
 | "mascara o que vai pro modelo", "pode mandar real" | `LUZIA privacidade mascarar-modelo on\|off` (padrão: desligado) |
 
 **Foco sem hooks.** No Claude Code os hooks já reconhecem os conceitos da trajetória. Em harness sem hooks (Antigravity, Codex, Cursor), faça você mesma: depois de **editar arquivos**, rode `LUZIA foco --arquivos <caminhos editados> --cwd "<pasta do projeto>"` (a Luzia lê só o `git diff` desses caminhos e não guarda código); no **início de um pedido** que cite um conceito, grave o pedido num arquivo temporário e rode `LUZIA foco --prompt-arquivo <arquivo> --cwd "<pasta do projeto>"` (o texto não é guardado; apague o arquivo depois). Use `--sessao <id>` se tiver um id de sessão. Se imprimir um lampejo, mostre-o no fim da resposta e ofereça os botões "Responder agora" / "Guardar para depois". Valem as mesmas regras do hook: +10 lm refletida (você aplicou), +20 lm própria (a pessoa dirigiu), uma vez por prisma por sessão, teto de 40 lm por prisma por dia, lampejo só em "em foco, com lampejos". Se a saída não tiver nada novo, não diga nada.

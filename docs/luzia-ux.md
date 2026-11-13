@@ -55,17 +55,17 @@ Qualquer ajuste na trajetória — **incluir prisma**, **mudar meta**, **arquiva
 ## Entregas (detecção local no git + P1–P4)
 - Rastreia entregas localmente nos repositórios autorizados (apenas commits da pessoa): merge commits de PR (`Merged PR ...`, `Merge pull request #...`), commits agrupados por id de ticket (`AB#...`, `#...`) ou commits isolados.
 - Janela inicial de **90 dias** (ampliável pelo chat ou painel); atualizações seguintes são incrementais.
-- Cada entrega exibe fatos medidos (período, duração em dias, nº de commits, arquivos, linhas, áreas), **prismas atravessados** com termos detectados, **lúmens ligados** na janela, **avanços feitos e úteis**, **propriedade P1–P4** (com P2 calculado sobre o total da entrega) e a **leitura assinada** da Luzia. Títulos e mensagens são os reais, com os números de PR/ticket, e aparecem só para quem entrou no painel (senha local) e no chat da própria pessoa; hashes de commit nunca saem do banco.
+- Cada entrega exibe fatos medidos (período, duração em dias, nº de commits, arquivos, linhas, áreas), **prismas atravessados** com termos detectados, **lúmens ligados** na janela, **avanços feitos e úteis**, **propriedade P1–P4** (com P2 calculado sobre o total da entrega) e a **leitura assinada** da Luzia. Títulos e mensagens são os reais, com os números de PR/ticket, e aparecem só para quem abriu o painel pelo próprio agente e no chat da própria pessoa; hashes de commit nunca saem do banco.
 
 ## Leituras com base (sem texto solto)
 - Toda leitura gerada por IA (por **prisma**, por **entrega** ou por **pedido de mudança**) armazena no SQLite os fatos usados, o hash da base, o modelo e a data, exibindo `Leitura da Luzia · com base em: … · modelo · data`.
 - Leituras vencidas são renovadas em lote apenas quando o hash da base muda ou sob pedido explícito. Sem modelo ou sem base suficiente, a interface exibe apenas os fatos medidos e informa leitura indisponível.
 
-## Login do painel e privacidade
-- **Senha local.** No primeiro acesso, o painel pede para criar uma senha (mínimo 8 caracteres, com confirmação); ela fica só como hash em `private/acesso.json`. Depois, o painel abre na tela "Entrar" e não mostra nenhum dado antes do login.
-- **Sessão.** Cai após 30 min sem uso, ao clicar em **Sair** ou ao reiniciar o servidor. Cinco senhas erradas seguidas travam a entrada por 60 s.
-- **Esqueci a senha.** No chat, `/luzia:senha` (ou `senha` na CLI) apaga a senha depois do seu sim e encerra as sessões; o próximo acesso ao painel cria uma nova. O chat não pede senha: ele já roda como você no sistema.
-- **Dados visíveis.** Para você, autenticada, nada é mascarado na tela: empresa, módulos, clientes, colegas e números de ticket/PR aparecem como são. Arquivos versionados nunca recebem esses dados.
+## Entrada no painel e privacidade
+- **Sem senha: a entrada vem do seu agente.** `/luzia:career-map` (ou o botão "Abrir o painel", ou `LUZIA career-map` em qualquer agente) abre o painel já logado. Aberto direto no navegador sem sessão, o painel só mostra "Abra o painel pelo seu agente" e não busca nenhum dado.
+- **Você permanece logada.** A sessão dura 30 dias sem uso e renova a cada uso; reiniciar o computador ou o painel não derruba. O que o painel faz sozinho (atualizar a tela, leituras automáticas) não conta como uso.
+- **Sair.** O botão **Sair** encerra a sessão daquele navegador; `/luzia:acesso` no chat mostra as sessões abertas e encerra todas, depois do seu sim.
+- **Dados visíveis.** Para você, logada, nada é mascarado na tela: empresa, módulos, clientes, colegas e números de ticket/PR aparecem como são. Arquivos versionados nunca recebem esses dados.
 - **Envio ao modelo.** Por padrão vai real. Em **Ajustes > Privacidade no envio ao modelo** (ou `privacidade mascarar-modelo on|off` no chat) você liga o mascaramento antes de cada chamada.
 
 ## Fora do desenho (por decisão)

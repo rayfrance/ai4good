@@ -84,7 +84,11 @@ async function api(caminho, dados) {
   try {
     const r = await fetch(caminho, dados ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados) } : {});
     const j = await r.json().catch(() => ({}));
-    return r.ok ? j : { erro: j.erro || `erro ${r.status}` };
+    if (r.status === 401 && j.login) {  // sessão ausente, vencida ou derrubada: volta ao login e para o polling
+      acessoAoIniciar();
+      return { erro: j.erro || 'entre com a sua senha', login: true };
+    }
+    return r.ok ? j : { ...j, erro: j.erro || `erro ${r.status}` };
   } catch {
     return { erro: 'a Luzia está desligada. Rode /luzia:career-map no seu agente para ligar o painel.', offline: true };
   }
@@ -810,6 +814,7 @@ function leiturasAutomaticas() {
 async function carregar() {
   const tela = document.querySelector('.tela.ativa')?.id || 'hoje';
   const novo = await api('/api/estado');
+  if (novo.login) return;  // a tela de entrada já está aberta
   if (novo.erro) {
     toast(novo.erro);
     if (E) return;
@@ -817,6 +822,7 @@ async function carregar() {
     return;
   }
   E = novo;
+  if (!$('#jornada')) $('main').innerHTML = MAIN_HTML;  // voltou depois de um painel vazio ou de sair
   if (E.vazio) {
     $('main').innerHTML = '<div class="bloco destaque"><span class="sobre">Olá</span><h3>Eu sou a Luzia.</h3><p>Rode a triagem no seu agente (/luzia:triage no Claude Code) para começarmos.</p></div>';
     return;
@@ -1080,9 +1086,144 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape') $('#gaveta').hidden = true;
 });
 
-carregar();
-setInterval(async () => {
-  if (!$('#gaveta').hidden || mostrarFormPedido) return;
+// ------------------------------------------------------------------ acesso (senha local)
+// Nenhum dado é buscado antes do login. A sessão vive só no cookie HttpOnly (o JS não a vê nem guarda nada no
+// navegador); qualquer 401 traz de volta esta tela e para o polling.
+const MAIN_HTML = $('main').innerHTML;
+let polling = null;
+let acessoAberto = false;
+let travaTimer = null;
+
+function pararPolling() {
+  clearInterval(polling);
+  polling = null;
+}
+
+function limparPainel() {
+  pararPolling();
+  E = null;
+  leiturasAutoPedidas = false;
+  $('#gaveta').hidden = true;
+  $('#gaveta-corpo').innerHTML = '';
+  $('main').innerHTML = MAIN_HTML;
+  $('#nav').innerHTML = '';
+  $('#selo').innerHTML = '';
+  $('#telemetria').innerHTML = '';
+}
+
+async function acessoAoIniciar() {
+  if (acessoAberto) return;
+  acessoAberto = true;
+  limparPainel();
+  document.body.classList.add('fora');
+  const st = await api('/api/acesso/estado');
+  if (st.erro) {
+    $('#acesso').innerHTML = `<div class="bloco destaque acesso-cartao"><span class="sobre">Luzia</span><h3>Não consegui abrir.</h3><p>${esc(st.erro)}</p></div>`;
+    acessoAberto = false;
+    return;
+  }
+  if (st.sessao_valida) return entrou();
+  telaAcesso(st);
+}
+
+function telaAcesso(st) {
+  const criar = !st.senha_criada;
+  const min = st.min_senha || 8;
+  $('#acesso').innerHTML = `<div class="bloco destaque acesso-cartao">
+    <div class="marca"><img src="logo.svg" alt=""><div><b>Luzia</b><small>sua líder técnica</small></div></div>
+    <span class="sobre">${criar ? 'Primeiro acesso' : 'Painel protegido'}</span>
+    <h3>${criar ? 'Crie a senha do seu painel' : 'Entre no seu painel'}</h3>
+    <p>${criar ? `O painel mostra seus dados reais (empresa, módulos, tickets, colegas). Só quem tiver esta senha vê. Mínimo de ${min} caracteres.`
+      : 'Seus dados reais aparecem só depois de entrar. A sessão cai após 30 min sem uso.'}</p>
+    <form id="form-acesso" class="campos" data-modo="${criar ? 'criar' : 'entrar'}" novalidate>
+      <label>Senha<input id="ac-senha" type="password" autocomplete="${criar ? 'new-password' : 'current-password'}" minlength="${min}" required autofocus></label>
+      ${criar ? `<label>Confirme a senha<input id="ac-conf" type="password" autocomplete="new-password" minlength="${min}" required></label>` : ''}
+      <button class="btn prim" type="submit" id="ac-enviar">${ic('check')}${criar ? 'Criar senha e entrar' : 'Entrar'}</button>
+    </form>
+    <p class="dica acesso-msg" id="ac-msg" role="alert"></p>
+    <p class="dica">${criar ? 'A senha fica só nesta máquina, como hash, em private/acesso.json.'
+      : 'Esqueceu a senha? No chat, rode <b>/luzia:senha</b> (ou <b>senha</b> na CLI): ela é apagada depois do seu sim e aqui você cria outra.'}</p>
+  </div>`;
+  if (st.travado_s) travar(st.travado_s);
+  $('#ac-senha')?.focus();
+}
+
+function travar(segundos) {
+  clearInterval(travaTimer);
+  let resto = segundos;
+  const bt = $('#ac-enviar');
+  const msg = $('#ac-msg');
+  const passo = () => {
+    if (!bt || !msg) return clearInterval(travaTimer);
+    if (resto <= 0) {
+      clearInterval(travaTimer);
+      bt.disabled = false;
+      msg.textContent = 'Pode tentar de novo.';
+      return;
+    }
+    bt.disabled = true;
+    msg.textContent = `Muitas tentativas erradas. Espere ${resto} s.`;
+    resto -= 1;
+  };
+  passo();
+  travaTimer = setInterval(passo, 1000);
+}
+
+async function enviarAcesso(form) {
+  const senha = $('#ac-senha').value;
+  const conf = $('#ac-conf');
+  const msg = $('#ac-msg');
+  const criar = form.dataset.modo === 'criar';
+  if (criar && senha.length < Number($('#ac-senha').minLength || 8)) {
+    msg.textContent = `A senha precisa ter pelo menos ${$('#ac-senha').minLength} caracteres.`;
+    return;
+  }
+  if (criar && senha !== conf.value) {
+    msg.textContent = 'A confirmação não é igual à senha.';
+    return;
+  }
+  const bt = $('#ac-enviar');
+  bt.disabled = true;
+  msg.textContent = criar ? 'Guardando…' : 'Conferindo…';
+  const r = await api(criar ? '/api/acesso/criar' : '/api/acesso/entrar',
+    criar ? { senha, confirmacao: conf.value } : { senha });
+  $('#ac-senha').value = '';
+  if (conf) conf.value = '';
+  bt.disabled = false;
+  if (!r.erro) return entrou();
+  if (r.segundos) return travar(r.segundos);
+  if (/já foi criada|ainda não há senha/.test(r.erro)) {  // mudou em outro lugar (outra aba, ou `senha` no chat)
+    acessoAberto = false;
+    return acessoAoIniciar();
+  }
+  msg.textContent = r.restantes ? `${r.erro} · ${r.restantes} tentativa(s) antes de travar por 60 s.` : r.erro;
+  $('#ac-senha').focus();
+}
+
+async function entrou() {
+  clearInterval(travaTimer);
+  acessoAberto = false;
+  $('#acesso').innerHTML = '';
+  document.body.classList.remove('fora');
+  await carregar();
+  if (E && !polling) polling = setInterval(atualizarSozinho, 4000);
+}
+
+async function sair() {
+  await api('/api/acesso/sair', {});
+  toast('Você saiu do painel.');
+  acessoAoIniciar();
+}
+
+document.addEventListener('submit', (ev) => {
+  if (ev.target.id !== 'form-acesso') return;
+  ev.preventDefault();
+  enviarAcesso(ev.target);
+});
+$('#sair').addEventListener('click', sair);
+
+async function atualizarSozinho() {
+  if (!E || !$('#gaveta').hidden || mostrarFormPedido) return;
   const novo = await api('/api/estado');
   if (novo.erro || novo.vazio || !E) return;
   const vistos = new Set((E.lumens || []).map(chaveLm));
@@ -1093,4 +1234,6 @@ setInterval(async () => {
   if (mudou && !editando) render();
   else feed();
   celebrar(novos);
-}, 4000);
+}
+
+acessoAoIniciar();

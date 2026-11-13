@@ -167,3 +167,17 @@ def test_respostas_nunca_vazam_senha_nem_token_em_log(servidor, privado):
     erros = privado / 'erros.log'
     texto = erros.read_text(encoding='utf-8') if erros.exists() else ''
     assert SENHA not in texto and 'errada-errada' not in texto and (servidor.cookie or '') not in texto
+
+
+def test_painel_nao_guarda_sessao_no_navegador_e_nao_busca_dados_antes_do_login():
+    painel = Path(server.PAINEL)
+    js = (painel / 'luzia.js').read_text(encoding='utf-8')
+    html = (painel / 'index.html').read_text(encoding='utf-8')
+    for proibido in ('localStorage', 'sessionStorage', 'document.cookie', 'indexedDB'):
+        assert proibido not in js, proibido
+    assert '<body class="fora">' in html  # trilho e telas escondidos até entrar
+    linhas = [ln for ln in js.splitlines() if ln and not ln.startswith((' ', '}', '//', ')'))]
+    chamadas_no_topo = [ln for ln in linhas if re.match(r'^[a-zA-Z_$][\w$]*\(.*\);$', ln)
+                        and 'addEventListener' not in ln]
+    assert chamadas_no_topo == ['acessoAoIniciar();']  # a única coisa que roda ao abrir é conferir o acesso
+    assert 'polling = setInterval' in js and 'clearInterval(polling)' in js

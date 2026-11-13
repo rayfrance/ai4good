@@ -277,7 +277,10 @@ class Handler(BaseHTTPRequestHandler):
         return m.value if m is not None else None
 
     def _sessao_ok(self) -> bool:
-        return PORTARIA.valida(self._token())
+        # Pedidos automáticos do painel (polling de 4 s, leituras automáticas) conferem a sessão sem renovar: uma aba
+        # esquecida aberta cai após 30 min sem um gesto da pessoa.
+        automatico = (self.headers.get('X-Luzia-Auto') or '').strip() == '1'
+        return PORTARIA.valida(self._token(), renovar=not automatico)
 
     def _negar(self) -> None:
         self._json({'erro': 'entre com a sua senha para ver o painel', 'login': True}, 401)

@@ -80,9 +80,12 @@ const nomeAgente = () => AGENTES[E?.agente]?.[0] || 'seu agente';
 const curto = (s) => esc(String(s || '').split('(')[0].trim());
 const rotuloPrisma = (s) => `Prisma ${curto(s)}`;
 
-async function api(caminho, dados) {
+// `auto`: pedido que a página faz sozinha (polling, leituras automáticas); o servidor confere a sessão sem renová-la.
+async function api(caminho, dados, auto = false) {
   try {
-    const r = await fetch(caminho, dados ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dados) } : {});
+    const headers = auto ? { 'X-Luzia-Auto': '1' } : {};
+    if (dados) headers['Content-Type'] = 'application/json';
+    const r = await fetch(caminho, dados ? { method: 'POST', headers, body: JSON.stringify(dados) } : { headers });
     const j = await r.json().catch(() => ({}));
     if (r.status === 401 && j.login) {  // sessão ausente, vencida ou derrubada: volta ao login e para o polling
       acessoAoIniciar();
@@ -811,16 +814,16 @@ let leiturasAutoPedidas = false;
 function leiturasAutomaticas() {
   if (leiturasAutoPedidas || !E || !E.modelo_pronto || !(E.leituras_vencidas > 0)) return;
   leiturasAutoPedidas = true;
-  api('/api/leituras', { auto: true }).then(async (r) => {
+  api('/api/leituras', { auto: true }, true).then(async (r) => {
     if (r.erro || !r.geradas) return;
     toast(`${r.geradas} leitura(s) da Luzia gerada(s) com base nos fatos.`);
-    await carregar();
+    await carregar(true);
   });
 }
 
-async function carregar() {
+async function carregar(auto = false) {
   const tela = document.querySelector('.tela.ativa')?.id || 'hoje';
-  const novo = await api('/api/estado');
+  const novo = await api('/api/estado', null, auto);
   if (novo.login) return;  // a tela de entrada já está aberta
   if (novo.erro) {
     toast(novo.erro);
@@ -1235,7 +1238,7 @@ $('#sair').addEventListener('click', sair);
 
 async function atualizarSozinho() {
   if (!E || !$('#gaveta').hidden || mostrarFormPedido) return;
-  const novo = await api('/api/estado');
+  const novo = await api('/api/estado', null, true);
   if (novo.erro || novo.vazio || !E) return;
   const vistos = new Set((E.lumens || []).map(chaveLm));
   const novos = (novo.lumens || []).filter((l) => !vistos.has(chaveLm(l)));

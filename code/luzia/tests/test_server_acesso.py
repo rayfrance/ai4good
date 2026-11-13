@@ -235,3 +235,37 @@ def test_comando_senha_tem_arquivo_com_description_entre_aspas():
     texto = (Path(server.HERE) / 'commands' / 'senha.md').read_text(encoding='utf-8')
     assert re.search(r'^description: ".*"$', texto, re.MULTILINE)
     assert 'python -m luzia.cli senha' in texto and 'LUZIA_BOTOES' in texto
+
+
+# ------------------------------------------------------------------ rodada de correções 1
+def test_polling_automatico_nao_renova_a_sessao(servidor, monkeypatch):
+    """Aba esquecida aberta: o polling de 4 s (cabeçalho X-Luzia-Auto) não segura a sessão além de 30 min sem uso."""
+    relogio = [5000.0]
+    monkeypatch.setattr(server.PORTARIA, 'relogio', lambda: relogio[0])
+    servidor.entrar(SENHA)
+    auto = {'X-Luzia-Auto': '1'}
+    for _ in range(7):  # 28 min só de polling
+        relogio[0] += 4 * 60
+        assert servidor.pedir('GET', '/api/estado', headers=auto)[0] == 200
+    relogio[0] += 3 * 60  # 31 min desde o último gesto da pessoa
+    c, r, _ = servidor.pedir('GET', '/api/estado', headers=auto)
+    assert c == 401 and r['login'] is True
+    assert servidor.pedir('GET', '/api/estado')[0] == 401  # e não volta com um clique
+
+
+def test_leituras_automaticas_tambem_nao_renovam(servidor, monkeypatch):
+    relogio = [5000.0]
+    monkeypatch.setattr(server.PORTARIA, 'relogio', lambda: relogio[0])
+    servidor.entrar(SENHA)
+    relogio[0] += 20 * 60
+    assert servidor.pedir('POST', '/api/leituras', {'auto': True}, headers={'X-Luzia-Auto': '1'})[0] == 200
+    relogio[0] += 11 * 60
+    assert servidor.pedir('GET', '/api/estado')[0] == 401
+
+
+def test_painel_marca_polling_e_leituras_automaticas_como_automaticos():
+    js = (Path(server.PAINEL) / 'luzia.js').read_text(encoding='utf-8')
+    assert "'X-Luzia-Auto': '1'" in js
+    assert "api('/api/leituras', { auto: true }, true)" in js and 'await carregar(true);' in js
+    corpo = js[js.index('async function atualizarSozinho'):]
+    assert "api('/api/estado', null, true)" in corpo[:400]

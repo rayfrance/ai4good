@@ -7,6 +7,11 @@
   - Plano em 16 tarefas: [docs/superpowers/plans/2026-11-12-luzia-trajetoria-prismas.md](../superpowers/plans/2026-11-12-luzia-trajetoria-prismas.md)
   - Regras de experiência atualizadas: [docs/luzia-ux.md](../luzia-ux.md)
 
+## Login local e dados visíveis · 13/11/2026
+- **Decisão da Rayane:** a proteção é por login, não por máscara. O painel pede senha local (PBKDF2, sessão por cookie HttpOnly/SameSite=Strict, cai após 30 min sem uso; 5 erros travam 60 s); chat/CLI rodam como a usuária do sistema. Dados reais (empresa, módulos, tickets) aparecem para ela; o envio ao modelo vai sem máscara por padrão, com interruptor `mascarar_modelo` em Ajustes e `privacidade mascarar-modelo on|off`. Sem modo apresentação. Arquivos versionados continuam sem dados reais (nomes fixos saíram do código).
+- **Estado:** `feature/luzia-acoes` = `feature/luzia-banco` = `0f9a071` + este registro; 349 testes; revisão de segurança Opus sem críticos e re-revisão limpa; login testado no navegador com senha de teste sobre dados sintéticos; painel real responde 401 sem sessão.
+- **Próximo passo da Rayane:** abrir `http://localhost:8501` (ou `/luzia:career-map`) e criar a senha; esqueceu, `/luzia:senha`. Backup do banco antes da mudança em `private/backup-antes-login-*`.
+
 ## Revisão final e correções · 13/11/2026 (Claude, sobre a entrega do Antigravity)
 - **Estado:** `feature/luzia-acoes` = `feature/luzia-banco` = `e7e58ea`, local, **sem push**. Suíte: 295 testes; `claude plugin validate` OK nos dois manifestos. Backup do banco real antes das correções em `private/backup-antes-correcoes-*`.
 - **Corrigido (revisões Opus independentes):** entregas reais não eram detectadas (identidade exigia nome exato; janela marcada como lida) e a tela caía nas entregas antigas geradas por IA; pedidos com traceback ou presos sem modelo; leituras sem fonte/modelo/data e nunca geradas pelo chat; ligação entrega↔avanço (P3/P4) inexistente; lampejo com +10 lm fixo; prisma por pedido sem lúmens passivos; linha de status quebrada como script; números de ticket nos títulos; custo da rodada automática de leituras (até 16 alvos por rodada). Novo: `foco` (reconhecimento passivo em harness sem hooks, como o Antigravity), `identidade`, `leituras`, `acender-entrega`, `modelo usar`, `agente`.

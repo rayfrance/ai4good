@@ -234,8 +234,8 @@ def cartao_refletida(skill: str, pergunta: str = '<a pergunta>', nivel: str = 'l
         f'▸ Em 1 frase: {pergunta} · vira luz própria: até +30 lm\n'
         'Depois, use AskUserQuestion com "Responder agora" e "Guardar para depois". Responder: espere a frase, avalie pela '
         f'{RUBRICA_LAMPEJO}, dê retorno em 1 linha e rode: {CLI} lampejo --skill "{skill}" --pergunta "<a pergunta>" '
-        f'--nota <0-4> --resumo "<1 linha, sem nomes da empresa>". Guardar: rode {CLI} lampejo --skill "{skill}" '
-        '--pergunta "<a pergunta>". Nunca cite nomes da empresa, clientes ou colegas.'
+        f'--nota <0-4> --resumo "<1 linha do que a pessoa explicou>". Guardar: rode {CLI} lampejo --skill "{skill}" '
+        '--pergunta "<a pergunta>".'
     )
 
 

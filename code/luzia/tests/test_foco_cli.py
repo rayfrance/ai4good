@@ -168,7 +168,7 @@ def test_botoes_do_foco_chamam_guardar_e_converter(privado, repo, monkeypatch):
     botoes_de(rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', 'se'))
     guardar = rodar(monkeypatch, *shlex.split(bts[1]['rodar']))
     assert 'Lampejo guardado' in guardar or 'Guardado' in guardar
-    converter = bts[0]['rodar'].replace('<0-4>', '4').replace('<1 linha, sem nomes da empresa>', 'separei o agregado')
+    converter = bts[0]['rodar'].replace('<0-4>', '4').replace('<1 linha do que a pessoa explicou>', 'separei o agregado')
     saida = rodar(monkeypatch, *shlex.split(converter))
     assert 'Luz própria' in saida and '+30 lm' in saida
     assert sorted(r['estado'] for r in _consulta('SELECT estado FROM lampejo')) == ['convertido', 'guardado']

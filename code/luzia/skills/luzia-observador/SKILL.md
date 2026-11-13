@@ -16,4 +16,4 @@ Foco da Luzia (painel > Ajustes, ou `cd "${CLAUDE_PLUGIN_ROOT}/.." && python -m 
 - `ativo` (**em foco, com lampejos**): observa e mostra lampejos no chat.
 - `passivo` (**em foco, em silêncio**): só soma lúmens no banco sem interromper.
 - `sob_demanda` (**fora de foco**): não observa; responde só quando chamada.
-Limites: um reconhecimento por prisma por sessão e 40 lm passivos por prisma por dia. Nunca interrompa a tarefa nem cite nomes da empresa, de clientes ou de colegas.
+Limites: um reconhecimento por prisma por sessão e 40 lm passivos por prisma por dia. Nunca interrompa a tarefa.

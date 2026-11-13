@@ -269,3 +269,15 @@ def test_painel_marca_polling_e_leituras_automaticas_como_automaticos():
     assert "api('/api/leituras', { auto: true }, true)" in js and 'await carregar(true);' in js
     corpo = js[js.index('async function atualizarSozinho'):]
     assert "api('/api/estado', null, true)" in corpo[:400]
+
+
+def test_instrucoes_ao_agente_nao_proibem_os_nomes_da_dona_dos_dados():
+    """Decisão da dona: dados reais visíveis para ela; o resumo vai só ao banco privado e ao dossiê local."""
+    raiz = Path(server.HERE)
+    arquivos_ = [*raiz.glob('commands/*.md'), *raiz.glob('skills/*/SKILL.md'), raiz / 'harness' / 'REGRAS.md',
+                 raiz / 'observer.py', raiz / 'cli.py', raiz / 'acoes.py']
+    for arq in arquivos_:
+        texto = arq.read_text(encoding='utf-8').lower()
+        for proibido in ('sem nomes da empresa', 'nunca escreva nomes', 'nunca cite nomes', 'nem cite nomes',
+                         'sem nomes da empresa, produtos internos'):
+            assert proibido not in texto, (arq.name, proibido)

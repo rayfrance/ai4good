@@ -199,7 +199,7 @@ RUBRICA_TXT = ('0 = não explicou · 1 = descreveu o que o código faz · 2 = ex
 
 def comando_registrar(acao_id: str) -> str:
     return (f'{arquivos.CLI} registrar {acao_id} '
-            '--nota <0-4> --resumo "<1 linha do que a pessoa demonstrou, sem nomes da empresa>"')
+            '--nota <0-4> --resumo "<1 linha do que a pessoa demonstrou>"')
 
 
 def prompt_completo(a: dict) -> str:

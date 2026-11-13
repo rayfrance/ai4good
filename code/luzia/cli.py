@@ -449,7 +449,7 @@ def roteiro(a: dict) -> None:
     print('4. Avalie a resposta final pela rubrica 0–4: ' + ' · '.join(f'{k} = {v}' for k, v in propriedade.RUBRICA.items())
           + '. Valor ganho: 4 = 100%, 3 = 75%, 2 = 50%, 0–1 = tente de novo.')
     print('5. Diga a nota e o porquê em uma linha, com um ponto forte e um próximo passo.')
-    print(f'6. Registre: {CLI} registrar {a["id"]} --nota <0-4> --resumo "<1 linha do que a pessoa demonstrou, sem nomes da empresa>"')
+    print(f'6. Registre: {CLI} registrar {a["id"]} --nota <0-4> --resumo "<1 linha do que a pessoa demonstrou>"')
     print('7. A saída do registrar termina com LUZIA_BOTOES: ofereça esses botões como próxima ação.')
 
 
@@ -823,11 +823,11 @@ def cmd_foco(args) -> None:
     print('<1 linha: onde o conceito aparece concretamente nesta mudança>')
     print(f'▸ Em 1 frase: {PERGUNTA_FOCO} · vira luz própria: até +30 lm')
     print(f'Depois ofereça os botões. Responder agora: espere a frase da pessoa, avalie pela {observer.RUBRICA_LAMPEJO}, dê '
-          'retorno em 1 linha e rode o botão trocando <0-4> pela nota e o resumo (1 linha, sem nomes da empresa, clientes ou '
-          'colegas). Guardar para depois: rode o botão como está. Se trocar a pergunta por uma mais concreta, use a mesma nos dois.')
+          'retorno em 1 linha e rode o botão trocando <0-4> pela nota e o resumo (1 linha do que a pessoa explicou). '
+          'Guardar para depois: rode o botão como está. Se trocar a pergunta por uma mais concreta, use a mesma nos dois.')
     botoes([
         {'rotulo': 'Responder agora', 'descricao': 'explique em 1 frase: vira luz própria, até +30 lm',
-         'rodar': f'lampejo --skill "{skill}" --pergunta "{PERGUNTA_FOCO}" --nota <0-4> --resumo "<1 linha, sem nomes da empresa>"'},
+         'rodar': f'lampejo --skill "{skill}" --pergunta "{PERGUNTA_FOCO}" --nota <0-4> --resumo "<1 linha do que a pessoa explicou>"'},
         {'rotulo': 'Guardar para depois', 'descricao': 'vira um avanço no painel e em /luzia:hoje',
          'rodar': f'guardar --skill "{skill}" --pergunta "{PERGUNTA_FOCO}"'},
     ], 'Quer responder ao lampejo agora?')

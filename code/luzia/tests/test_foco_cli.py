@@ -66,7 +66,7 @@ def _editar(repo, conteudo='class Pedido : Aggregate { }\n'):
 def test_foco_arquivos_reconhece_luz_refletida_e_oferece_o_lampejo(privado, repo, monkeypatch):
     _editar(repo)
     saida = rodar(monkeypatch, 'foco', '--arquivos', 'Pedido.cs', '--cwd', repo, '--sessao', 's1')
-    assert f'✦ Lampejo da Luzia · Prisma {DDD}' in saida and '+10 lm (luz refletida)' in saida
+    assert f'✦ Lampejo da Luzia · {DDD}' in saida and '+10 lm (luz refletida)' in saida
     bts = botoes_de(saida)
     assert [b['rotulo'] for b in bts] == ['Responder agora', 'Guardar para depois']
     assert bts[0]['rodar'].startswith('lampejo --skill') and '--nota' in bts[0]['rodar']
@@ -92,7 +92,7 @@ def test_foco_prompt_reconhece_luz_propria(privado, repo, monkeypatch, tmp_path)
     prompt = tmp_path / 'prompt.txt'
     prompt.write_text('modele o Aggregate de pedido separando o subdomínio', encoding='utf-8')
     saida = rodar(monkeypatch, 'foco', '--prompt-arquivo', prompt, '--cwd', repo, '--sessao', 's2')
-    assert f'Prisma {DDD}' in saida and '+20 lm de luz própria' in saida
+    assert f'o prisma "{DDD}"' in saida and f'Luzia · {DDD}: você dirigiu' in saida and '+20 lm de luz própria' in saida
     assert [(r['lm'], r['luz'], r['fonte']) for r in _consulta('SELECT * FROM lumen')] == [(20, 'propria', 'passivo-prompt')]
     assert _consulta('SELECT 1 FROM lampejo') == []  # o prompt dirigido não abre lampejo
     assert 'LUZIA_BOTOES=' in saida

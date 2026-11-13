@@ -33,7 +33,7 @@ from urllib.parse import parse_qs, urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from luzia import (acesso, acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos,  # noqa: E402
+from luzia import (acesso, acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos, prismas,  # noqa: E402
                    pipeline, propriedade, trajetoria)
 
 HERE = Path(__file__).resolve().parent
@@ -194,6 +194,8 @@ def estado() -> dict:
             'sugere': s_plan.get('luzia_sugere', p['nivel']),
             'evidencia': s_plan.get('evidencia', ''),
             'espectro': _espectro(p['nivel']),
+            # um prisma = uma habilidade: em quais habilidades este nome se divide ([] quando já é uma só)
+            'divisao': prismas.partes(nome) if prismas.composto(nome) else [],
             'leitura': leituras_prismas.get(nome),
             **prog,
             'avancos_conquistados': prog.get('feixes', 0),
@@ -562,7 +564,7 @@ class Handler(BaseHTTPRequestHandler):
                 prisma = str(dados.get('prisma') or dados.get('skill') or '').strip()
                 nivel, meta = numero('nivel', 'nível'), numero('meta', 'meta')
                 p = pedidos.abrir(con, tipo, prisma, str(dados.get('motivo', '')).strip())
-                if tipo in ('incluir', 'mudar_meta') and dados.get('propor', True):
+                if tipo in ('incluir', 'mudar_meta', 'dividir') and dados.get('propor', True):
                     p = pedidos.propor(con, p['id'], nivel=nivel, meta=meta)
                 return p
             if acao not in ('ajustar', 'propor', 'aceitar', 'recusar'):
@@ -571,7 +573,14 @@ class Handler(BaseHTTPRequestHandler):
             if pid is None:
                 raise ValueError('informe o número do pedido')
             if acao in ('ajustar', 'propor'):
-                return pedidos.propor(con, pid, nivel=numero('nivel', 'nível'), meta=numero('meta', 'meta'))
+                partes, mover = dados.get('partes'), dados.get('mover')
+                if partes is not None and not (isinstance(partes, list) and all(isinstance(x, str) for x in partes)):
+                    raise ValueError('partes: envie a lista de nomes das habilidades')
+                if mover is not None and not (isinstance(mover, dict)
+                                              and all(isinstance(v, str) for v in mover.values())):
+                    raise ValueError('mover: envie {avanço: habilidade}')
+                return pedidos.propor(con, pid, nivel=numero('nivel', 'nível'), meta=numero('meta', 'meta'),
+                                      partes=partes, mover=mover)
             if acao == 'aceitar':
                 return pedidos.aceitar(con, pid)
             return pedidos.recusar(con, pid)
@@ -603,6 +612,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/pedido':
             try:
+                if str(dados.get('acao', '')).strip().lower() == 'dividir_todos':
+                    with trajetoria.abrir() as con:
+                        return self._json({'ok': True, 'pedidos': pedidos.dividir_todos(con)})
                 return self._json({'ok': True, 'pedido': self._pedido(dados)})
             except (ValueError, RuntimeError) as e:  # pedido duplicado, já decidido, id ou número inválido
                 return self._json({'erro': str(e)}, 400)

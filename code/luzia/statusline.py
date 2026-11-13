@@ -43,7 +43,7 @@ def linha(dados: dict) -> str:
     if r['lm_total']:
         partes.append(f"{r['luz_propria']}% luz própria")
     if pronto:
-        partes.append(f"nível pronto: Prisma {pronto['nome'][:18]}")
+        partes.append(f"nível pronto: {pronto['nome'][:18]}")
     elif andamento:
         partes.append(f"#{andamento[0]['id']} em andamento")
     elif pendentes:

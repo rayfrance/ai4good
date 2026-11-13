@@ -220,7 +220,7 @@ def test_vocabulario_sem_termos_antigos(privado, monkeypatch):
         assert achado is None, f'Termo antigo "{achado.group(0)}" encontrado na saída visível:\n{texto}'
 
     v_traj = visivel(rodar(monkeypatch, 'trajetoria'))
-    assert v_traj.count('(skill)') == 1 and 'prisma (skill)' not in v_traj.lower()
+    assert v_traj.count('(prisma · skill)') == 1 and not re.search(r'\bPrisma [^(s]', v_traj)
     assert '▰' in v_traj or '▱' in v_traj
 
     v_modo = visivel(rodar(monkeypatch, 'modo'))
@@ -228,7 +228,7 @@ def test_vocabulario_sem_termos_antigos(privado, monkeypatch):
 
     # Verifica também o lampejo do observador e a linha de status
     cartao = observer.cartao_refletida(DDD, 'Como isolar o domínio?')
-    assert '✦ Lampejo da Luzia · Prisma Domain-Driven Design (DDD)' in cartao
+    assert '✦ Lampejo da Luzia · Domain-Driven Design (DDD)' in cartao and 'Prisma Domain' not in cartao
     assert RE_TERMOS_ANTIGOS.search(cartao) is None
 
     linha_st = statusline.linha({'workspace': {'current_dir': str(privado)}})
@@ -518,7 +518,7 @@ def test_erros_do_motor_ja_nascem_no_vocabulario_novo(privado, monkeypatch):
 
 def test_trajetoria_compacta_a_falta_e_nomeia_skill_so_na_primeira_vez(privado, monkeypatch):
     saida = visivel(rodar(monkeypatch, 'trajetoria'))
-    assert saida.count('(skill)') == 1 and '(prisma (skill))' not in saida
+    assert saida.count('(prisma · skill)') == 1 and saida.count('skill)') == 1
     falta = [l for l in saida.splitlines() if ' falta: ' in l]
     assert falta and all('conquistar 1' not in l and len(l) < 230 for l in falta), falta
 

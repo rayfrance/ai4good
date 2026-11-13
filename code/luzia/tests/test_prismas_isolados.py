@@ -241,3 +241,73 @@ def test_acender_grava_os_avancos_no_prisma_pedido(privado, monkeypatch):
     jogo.sincronizar(trajetoria.plano())
     res = cli.gerar_trecho(DDD)
     assert [a['skill'] for a in res['avancos']] == [DDD]
+
+
+# ------------------------------------------------------------------ chat e painel
+import re  # noqa: E402
+
+from luzia.tests.test_server import api  # noqa: E402,F401  (fixture do painel autenticado)
+
+RE_PREFIXO = re.compile(r'\bPrisma [^(]')  # "Prisma X" num rótulo; "Prismas ..." (título de seção) não casa
+
+
+def _rodar(monkeypatch, *argv):
+    from luzia.tests.test_cli import rodar, visivel, botoes_de
+    saida = rodar(monkeypatch, *argv)
+    return visivel(saida), botoes_de(saida)
+
+
+def test_chat_dividir_ajustar_e_aceitar(con, monkeypatch):
+    texto, bts = _rodar(monkeypatch, 'dividir', TESTES)
+    assert 'Testes e Qualidade' in texto and 'SQL' in texto and 'nível' in texto
+    assert not RE_PREFIXO.search(texto)
+    pid = next(p['id'] for p in pedidos.listar(con) if p['tipo'] == 'dividir')
+    assert {'pedido aceitar %d' % pid, 'pedido ajustar %d' % pid} <= {b['rodar'] for b in bts}
+    texto, _ = _rodar(monkeypatch, 'pedido', 'ajustar', str(pid), '--partes', 'Testes automatizados', 'SQL',
+                      '--mover', f'{TESTE_GUIADO}=SQL')
+    assert 'Testes automatizados' in texto
+    _rodar(monkeypatch, 'pedido', 'aceitar', str(pid))
+    assert _prisma(con, 'Testes automatizados')['estado'] == 'ativo' and _prisma(con, TESTES)['estado'] == 'arquivado'
+    assert next(x for x in jogo.avancos(con) if x['id'] == TESTE_GUIADO)['skill_plano'] == 'SQL'
+
+
+def test_chat_dividir_todos_e_oferta_nos_botoes(con, monkeypatch):
+    _, bts = _rodar(monkeypatch, 'hoje')
+    assert any(b['rodar'] == 'dividir-todos' for b in bts)
+    texto, bts = _rodar(monkeypatch, 'dividir-todos')
+    assert sorted(p['prisma'] for p in pedidos.listar(con) if p['tipo'] == 'dividir') == sorted([TESTES, FRONT])
+    assert 'React' in texto and 'SQL' in texto
+
+
+def test_rotulos_do_chat_sem_prefixo_prisma(con, monkeypatch):
+    for comando in (('hoje',), ('trajetoria',), ('avancos',), ('pedido',)):
+        texto, bts = _rodar(monkeypatch, *comando)
+        assert not RE_PREFIXO.search(texto), (comando, RE_PREFIXO.findall(texto))
+        assert not any(RE_PREFIXO.search(b.get('rotulo', '') + ' ' + b.get('descricao', '')) for b in bts), comando
+
+
+def test_painel_dividir_e_estado_com_a_divisao_sugerida(api, monkeypatch):
+    monkeypatch.setattr(pipeline, 'run_plan', lambda *a, **k: (_ for _ in ()).throw(AssertionError('sem modelo')))
+    c, est = api('GET', '/api/estado')
+    assert c == 200
+    por_nome = {p['nome']: p for p in est['prismas']}
+    assert por_nome[TESTES]['divisao'] == ['Testes e Qualidade', 'SQL'] and por_nome[DDD]['divisao'] == []
+    c, r = api('POST', '/api/pedido', {'acao': 'abrir', 'tipo': 'dividir', 'prisma': TESTES})
+    assert c == 200 and r['pedido']['estado'] == 'proposto'
+    pid = r['pedido']['id']
+    c, r = api('POST', '/api/pedido', {'acao': 'ajustar', 'id': pid, 'partes': ['Testes e Qualidade', 'Banco SQL'],
+                                       'mover': {TESTE_GUIADO: 'Banco SQL'}})
+    assert c == 200 and [x['nome'] for x in r['pedido']['proposta']['partes']] == ['Testes e Qualidade', 'Banco SQL']
+    c, r = api('POST', '/api/pedido', {'acao': 'ajustar', 'id': pid, 'partes': 'não é lista'})
+    assert c == 400
+    c, r = api('POST', '/api/pedido', {'acao': 'dividir_todos'})
+    assert c == 200 and [p['prisma'] for p in r['pedidos']] == [FRONT]
+    assert api('POST', '/api/pedido', {'acao': 'aceitar', 'id': pid})[0] == 200
+    _, est = api('GET', '/api/estado')
+    assert {'Testes e Qualidade', 'Banco SQL'} <= {p['nome'] for p in est['prismas'] if p['estado'] == 'ativo'}
+
+
+def test_painel_sem_prefixo_prisma_nos_rotulos():
+    from pathlib import Path
+    js = (Path(prismas.__file__).parent / 'painel' / 'luzia.js').read_text(encoding='utf-8')
+    assert not re.findall(r'Prisma \$\{', js)

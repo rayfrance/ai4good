@@ -6,7 +6,7 @@ O jogo (docs/luzia-ux.md): avanços valem lúmens; lúmens enchem os níveis de 
   `feedback-skills-opportunities`
 - `avancos` (`acoes`), `fila`, `fazer`/`prompt`/`revisitar <id>`, `registrar <id> --nota --resumo`, `descartar <id> --motivo`, `restaurar <id>`, `enviar <id>`
 - `foco --prompt-arquivo F | --arquivos P... [--cwd D] [--sessao S]` (foco sem hooks, para Antigravity, Codex e Cursor)
-- `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
+- `subir <prisma>`, `nivel <prisma> <N>`, `acender <prisma>` (`trecho`), `pedido <subacao> ...`, `dividir <prisma>` / `dividir-todos` (um prisma por habilidade), `dossie`, `cartao`, `guardar`, `career-map`, `modo`, `modelo`
 - `acesso [sair-de-todos]` (sessões do painel; `career-map` já entra logado),
   `privacidade [mascarar-modelo on|off]` (mascarar ou não o que vai ao modelo; padrão: desligado)
 """
@@ -26,7 +26,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import (acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos, pipeline, planner, propriedade,
+from . import (acoes, arquivos, banco, entregas, jogo, leituras, modelo, observer, pedidos, pipeline, planner, prismas, propriedade,
                trajetoria, triage)
 from .privacy import Redactor, SemMascara
 
@@ -261,7 +261,7 @@ def botoes(itens: list[dict], pergunta: str = 'O que você quer fazer agora?') -
 
 def bt_feixe(f: dict, prefixo: str = '') -> dict:
     return {'rotulo': (prefixo + f.get('titulo', ''))[:48],
-            'descricao': f"{f.get('tipo', '')} · Prisma {curto(f.get('skill_plano') or f.get('skill', ''))} · {f.get('duracao_min', '?')} min · {f.get('valor_lm')} lm",
+            'descricao': f"{f.get('tipo', '')} · {curto(f.get('skill_plano') or f.get('skill', ''))} · {f.get('duracao_min', '?')} min · {f.get('valor_lm')} lm",
             'rodar': f"fazer {f['id']}"}
 
 
@@ -282,6 +282,11 @@ def proximos_botoes(plan: dict, excluir: set | tuple = ()) -> list[dict]:
     bts += [{'rotulo': f"Revisitar: {f.get('titulo', '')}"[:48],
              'descricao': f"buscar o restante: você levou {f.get('lm_ganho')} de {f.get('valor_lm')} lm",
              'rodar': f"fazer {f['id']}"} for f in lista if jogo.pode_revisitar(f)][:1]
+    compostos = [s['nome'] for s in r['skills'] if prismas.composto(s['nome'])]
+    if compostos:  # um prisma = uma habilidade: oferece separar os que juntam assuntos
+        bts.append({'rotulo': 'Separar prismas compostos',
+                    'descricao': f"{len(compostos)} juntam assuntos: um prisma por habilidade, com nível e meta herdados",
+                    'rodar': 'dividir-todos'})
     abertos = {f.get('skill_plano') or f.get('skill') for f in lista if f['estado'] in ('sugerido', 'na_fila', 'em_andamento')}
     bts += [{'rotulo': f"Acender avanços de {curto(s['nome'])}"[:48],
              'descricao': f"3 avanços novos para o nível {s['proximo']} (o modelo leva ~10 s)",
@@ -298,7 +303,7 @@ def feixe_linha(f: dict) -> str:
     tent = f" · tentativa {f.get('tentativas') + 1}" if f.get('tentativas') and f.get('estado') != 'conquistado' else ''
     sk = f.get('skill_plano') or f.get('skill', '')
     return (f"{ESTADO_IC.get(f.get('estado'), '○')} `#{f['id']}` **{f.get('titulo', '')}** · {f.get('tipo', '')} · "
-            f"Prisma {curto(sk)} · {f.get('duracao_min', '?')} min · **{f.get('valor_lm', '?')} lm**{extra}{tent}")
+            f"{curto(sk)} · {f.get('duracao_min', '?')} min · **{f.get('valor_lm', '?')} lm**{extra}{tent}")
 
 
 def oferecer(lista: list[dict], pergunta: str = 'Qual avanço você quer fazer agora?') -> None:
@@ -319,7 +324,7 @@ def rota_texto(plan: dict, state: dict | None = None) -> None:
     with trajetoria.abrir() as con:
         leit_map = {s['nome']: leituras.obter(con, 'prisma', s['nome']) for s in r['skills']}
     for idx, s in enumerate(r['skills']):
-        rotulo_p = f"Prisma {s['nome']} (skill)" if idx == 0 else f"Prisma {s['nome']}"
+        rotulo_p = f"{s['nome']} (prisma · skill)" if idx == 0 else s['nome']
         esp = espectro_txt(s['nivel'])
         if s['na_meta']:
             print(f"   ✦ {rotulo_p} · `{esp}` nível {s['nivel']}/{s['meta']} · na meta")
@@ -343,7 +348,7 @@ def base_resumo(alvo_tipo: str | None, base: dict | None) -> str:
         return (f"{f.get('commits', 0)} commit(s), {f.get('arquivos', 0)} arquivo(s), {f.get('linhas', 0)} linhas e "
                 f"{len(b.get('prismas') or [])} prisma(s) atravessado(s) da entrega")
     if alvo_tipo == 'pedido':
-        return (f"o pedido ({b.get('tipo', '')} em Prisma {b.get('prisma', '')}) e a trajetória atual "
+        return (f"o pedido ({b.get('tipo', '')} em {b.get('prisma', '')}) e a trajetória atual "
                 f"({len(b.get('prismas_ativos') or [])} prisma(s) ativo(s))")
     return 'os fatos medidos pela Luzia'
 
@@ -405,7 +410,7 @@ def linhas_propriedade(prop: dict) -> list[str]:
 def avisar_degraus(plan: dict) -> None:
     for s in jogo.rota(plan)['skills']:
         if s['pronto'] and not s['na_meta']:
-            print(f"\n✦ **Prisma {s['nome']}** está pronto para subir para o nível {s['proximo']} "
+            print(f"\n✦ **{s['nome']}** está pronto para subir para o nível {s['proximo']} "
                   f"({s['lm']} lm, {s['luz_propria']}% luz própria). Você decide quando.")
 
 
@@ -477,7 +482,7 @@ def set_mode(modo: str) -> None:
 def roteiro(a: dict) -> None:
     revisita = a.get('estado') == 'conquistado'
     print(f"## ✦ Luzia · {'revisita do ' if revisita else ''}avanço `#{a['id']}` · **{a.get('valor_lm')} lm**")
-    print(f"**{a.get('titulo', '')}** · {a.get('tipo', '')} · Prisma {curto(a.get('skill_plano') or a.get('skill', ''))} · {a.get('duracao_min', '?')} min")
+    print(f"**{a.get('titulo', '')}** · {a.get('tipo', '')} · {curto(a.get('skill_plano') or a.get('skill', ''))} · {a.get('duracao_min', '?')} min")
     if revisita:
         print(f"Você levou {a.get('lm_ganho')} de {a.get('valor_lm')} lm (nota {a.get('nota')}/4). Nesta revisita vale só a diferença.")
     else:
@@ -522,7 +527,7 @@ def hoje(plan: dict, state: dict) -> None:
     perto = sorted((s for s in r['skills'] if not s['na_meta'] and s['lm']), key=lambda s: (-s['lm'], s['nome']))[:3]
     if perto:
         print('Mais perto do próximo nível: ' + ' · '.join(
-            f"Prisma {curto(s['nome'])} {s['lm']}/{s['limiar']} lm" + ('' if s['feixes'] else ' (falta 1 avanço)') for s in perto))
+            f"{curto(s['nome'])} {s['lm']}/{s['limiar']} lm" + ('' if s['feixes'] else ' (falta 1 avanço)') for s in perto))
     else:
         print('Nenhum lúmen ainda: o primeiro avanço conquistado acende a trajetória.')
     botoes(com_leituras(proximos_botoes(plan) + [BT_PAINEL]), 'Por onde seguimos?')
@@ -530,8 +535,12 @@ def hoje(plan: dict, state: dict) -> None:
 
 def _botoes_pedido(pid: int, p: dict) -> list[dict]:
     prop = p.get('proposta') or {}
-    bts = [{'rotulo': f'Aceitar pedido #{pid}', 'descricao': f"aplicar mudança em Prisma {curto(p['prisma'], 24)}",
+    bts = [{'rotulo': f'Aceitar pedido #{pid}', 'descricao': f"aplicar mudança em {curto(p['prisma'], 24)}",
             'rodar': f'pedido aceitar {pid}'}]
+    if p.get('tipo') == 'dividir':
+        bts.append({'rotulo': f'Ajustar pedido #{pid}',
+                    'descricao': 'renomear uma habilidade ou mover um avanço para outra',
+                    'rodar': f'pedido ajustar {pid}'})  # sem valores: a Luzia pergunta o que mudar
     if p.get('tipo') in ('incluir', 'mudar_meta'):  # arquivar e reativar não têm nível nem meta a ajustar
         bts.append({'rotulo': f'Ajustar pedido #{pid}',
                     'descricao': f"mudar nível ou meta (proposta: nível {prop.get('nivel_partida', 1)} → meta {prop.get('meta', 3)})",
@@ -551,6 +560,17 @@ def _print_proposta(p: dict) -> None:
     proposta = p.get('proposta') or {}
     if not proposta:
         return
+    if p.get('tipo') == 'dividir':
+        partes = proposta.get('partes') or []
+        print(f"- **Proposta da Luzia:** {len(partes)} prisma(s) de uma habilidade só, cada um herda o "
+              f"**nível {proposta.get('nivel_partida')} → meta {proposta.get('meta')}/5**; o prisma antigo é arquivado "
+              'com os lúmens dele (o progresso do nível novo conta a partir do aceite)')
+        for x in partes:
+            print(f"  - **{x['nome']}** · nível {x['nivel']} → meta {x['meta']} · palavras: {', '.join(x.get('palavras', [])[:6])}")
+        for a in proposta.get('avancos') or []:
+            print(f"  - Avanço `#{a['id']}` {a.get('titulo', '')} ({a.get('estado', '')}) → **{a['para']}**"
+                  + (' (você moveu)' if a.get('movido') else ''))
+        return
     ganho = int(proposta.get('ganho_niveis') or 0)
     print(f"- **Proposta da Luzia:** nível **{proposta.get('nivel_partida')} → meta {proposta.get('meta')}/5**"
           f" · a trajetória {'ganha' if ganho >= 0 else 'perde'} {abs(ganho)} nível(is)")
@@ -558,6 +578,49 @@ def _print_proposta(p: dict) -> None:
         print('- **Análise do pedido:** ' + leitura_txt(p.get('leitura'), indisponivel=proposta.get('leitura_indisponivel', '')))
     for a in (proposta.get('acoes') or [])[:3]:
         print(f"  - Avanço inicial sugerido: **{a.get('titulo', '')}** ({a.get('tipo', '')})")
+
+
+def _mover_de(itens: list[str] | None) -> dict[str, str]:
+    """`--mover <avanço>=<habilidade>` (pode repetir) → {id do avanço: habilidade}; formato errado vira ValueError."""
+    out = {}
+    for item in itens or []:
+        aid_, sep, parte = str(item).partition('=')
+        if not sep or not aid_.strip() or not parte.strip():
+            raise ValueError(f'use --mover <avanço>="<habilidade>" (recebi {item!r})')
+        out[aid_.strip().lstrip('#').lower()] = parte.strip().strip('"')
+    return out
+
+
+def cmd_dividir(args, plan: dict, todos: bool = False) -> None:
+    """Um prisma = uma habilidade: abre o pedido `dividir` (um prisma, ou todos os compostos) e mostra a proposta."""
+    with trajetoria.abrir() as con:
+        try:
+            if todos:
+                lista = pedidos.dividir_todos(con)
+            else:
+                nome = (args.valor or args.prisma or args.skill or '').strip()
+                if not nome:
+                    raise ValueError('informe o prisma: `dividir "<prisma>"` (ou `dividir-todos`)')
+                p = pedidos.abrir(con, 'dividir', nome, args.motivo if args.motivo != 'nao_faz_sentido' else '')
+                lista = [pedidos.propor(con, p['id'])]
+        except (ValueError, RuntimeError) as e:
+            print(f'Não foi possível dividir: {e}.')
+            botoes([BT_TRAJETORIA, BT_PAINEL], 'Como seguimos com a sua trajetória?')
+            return
+    if not lista:
+        print('Todos os seus prismas já são de uma habilidade só (ou já têm um pedido de divisão em aberto).')
+        botoes([BT_TRAJETORIA, BT_PAINEL])
+        return
+    print('## ✦ Luzia · um prisma por habilidade')
+    bts: list[dict] = []
+    for p in lista:
+        print(f"\n**Pedido `#{p['id']}`** · dividir **{p['prisma']}** (estado: **{p['estado']}**)")
+        if p.get('erro'):
+            print(f"- {p['erro']}: ajuste os nomes com `pedido ajustar {p['id']} --partes ...`.")
+        _print_proposta(p)
+        if len(bts) < 4:
+            bts.extend(b for b in _botoes_pedido(p['id'], p) if 'Recusar' not in b['rotulo'])
+    botoes(bts[:4] + [BT_PAINEL], 'Aceitar a divisão proposta ou ajustar antes?')
 
 
 def cmd_pedido(args, restantes: list[str], plan: dict) -> None:
@@ -584,9 +647,9 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
         tipo, nome_prisma = extras[0], extras[1]
         motivo = args.motivo if args.motivo != 'nao_faz_sentido' else ''
         p = pedidos.abrir(con, tipo, nome_prisma, motivo)
-        if tipo in ('incluir', 'mudar_meta'):
+        if tipo in ('incluir', 'mudar_meta', 'dividir'):
             p = pedidos.propor(con, p['id'], nivel=args.nivel, meta=args.meta)
-        print(f"✦ **Pedido `#{p['id']}` aberto** · **{p['tipo']}** em **Prisma {p['prisma']}** (estado: **{p['estado']}**)")
+        print(f"✦ **Pedido `#{p['id']}` aberto** · **{p['tipo']}** em **{p['prisma']}** (estado: **{p['estado']}**)")
         if p.get('motivo'):
             print(f"- **Motivo:** {p['motivo']}")
         _print_proposta(p)
@@ -596,6 +659,22 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
     if sub == 'ajustar':
         pid = _id_pedido(extras, sub)
         atual = next((x for x in pedidos.listar(con) if x['id'] == pid), None)
+        if atual is not None and atual['estado'] in ('aberto', 'proposto') and atual['tipo'] == 'dividir':
+            mover = _mover_de(args.mover)
+            if not args.partes and not mover:  # pergunta o que mudar em vez de refazer a mesma proposta
+                nomes = ' '.join(f'"{x["nome"]}"' for x in (atual.get('proposta') or {}).get('partes') or [])
+                print(f"O que você quer mudar na divisão de {atual['prisma']}? Diga os nomes das habilidades ou para "
+                      f"qual delas vai um avanço, e a Luzia roda `pedido ajustar {pid} --partes {nomes}` "
+                      f'ou `pedido ajustar {pid} --mover <avanço>="<habilidade>"`.')
+                _print_proposta(atual)
+                botoes([b for b in _botoes_pedido(pid, atual) if 'Ajustar' not in b['rotulo']],
+                       'Ajustar a divisão? Responda no chat, ou decida já:')
+                return
+            p = pedidos.propor(con, pid, partes=args.partes or None, mover=mover)
+            print(f"✦ **Pedido `#{pid}` ajustado** · dividir **{p['prisma']}** (estado: **{p['estado']}**)")
+            _print_proposta(p)
+            botoes(_botoes_pedido(pid, p), 'Aceitar esta nova divisão ou ajustar de novo?')
+            return
         if atual is not None and atual['estado'] in ('aberto', 'proposto'):
             if atual['tipo'] not in ('incluir', 'mudar_meta'):
                 print(f"O pedido `#{pid}` ({atual['tipo']}) não tem nível nem meta a ajustar: aceite ou recuse.")
@@ -603,14 +682,14 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
                 return
             if args.nivel is None and args.meta is None:  # nunca reenvia os mesmos valores: pergunta os novos
                 prop = atual.get('proposta') or {}
-                print(f"Qual nível de partida (0 a 5) e qual meta (1 a 5) você quer para o Prisma {atual['prisma']}? "
+                print(f"Qual nível de partida (0 a 5) e qual meta (1 a 5) você quer para o {atual['prisma']}? "
                       f"Hoje a proposta é nível {prop.get('nivel_partida', '?')} → meta {prop.get('meta', '?')}. "
                       f"Diga os dois números e a Luzia roda `pedido ajustar {pid} --nivel <0-5> --meta <1-5>`.")
                 botoes([b for b in _botoes_pedido(pid, atual) if 'Ajustar' not in b['rotulo']],
                        'Ajustar para qual nível e meta? Responda no chat, ou decida já:')
                 return
         p = pedidos.propor(con, pid, nivel=args.nivel, meta=args.meta)
-        print(f"✦ **Pedido `#{pid}` ajustado** · **Prisma {p['prisma']}** (estado: **{p['estado']}**)")
+        print(f"✦ **Pedido `#{pid}` ajustado** · **{p['prisma']}** (estado: **{p['estado']}**)")
         _print_proposta(p)
         botoes(_botoes_pedido(pid, p), 'Aceitar esta nova proposta ou ajustar de novo?')
         return
@@ -619,7 +698,7 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
         pid = _id_pedido(extras, sub)
         p = pedidos.aceitar(con, pid)
         plan = pipeline.load_state().get('plano', {})
-        print(f"★ **Pedido `#{pid}` aceito** — trajetória atualizada com **{p['tipo']}** em **Prisma {p['prisma']}**.")
+        print(f"★ **Pedido `#{pid}` aceito** — trajetória atualizada com **{p['tipo']}** em **{p['prisma']}**.")
         botoes([BT_TRAJETORIA, *proximos_botoes(plan)[:2]], 'Qual é o próximo passo na nova trajetória?')
         return
 
@@ -638,7 +717,7 @@ def _pedido(con, sub: str, extras: list[str], args) -> None:
     print('## ✦ Luzia · pedidos de mudança da trajetória')
     bts: list[dict] = []
     for p in lista[:5]:
-        print(f"- Pedido `#{p['id']}` · **{p['tipo']}** em **Prisma {p['prisma']}** — **{p['estado']}** ({p.get('motivo', '')})")
+        print(f"- Pedido `#{p['id']}` · **{p['tipo']}** em **{p['prisma']}** — **{p['estado']}** ({p.get('motivo', '')})")
         if p['estado'] in ('aberto', 'proposto') and not bts:
             bts.extend(_botoes_pedido(p['id'], p))
     botoes(bts or [BT_TRAJETORIA, BT_PAINEL])
@@ -683,7 +762,7 @@ def cmd_entregas(args, state: dict) -> None:
         return
     for e in lista[:10]:
         fatos = e.get('fatos', {})
-        prismas_nomes = ', '.join(f"Prisma {p['prisma']}" for p in e.get('prismas', [])) or 'nenhum prisma mapeado'
+        prismas_nomes = ', '.join(f"{p['prisma']}" for p in e.get('prismas', [])) or 'nenhum prisma mapeado'
         print(
             f"\n▸ **Entrega `#{e['id']}` · {e['titulo']}** ({e['fonte']})\n"
             f"   Fatos: {fatos.get('inicio', '')[:10]} a {fatos.get('fim', '')[:10]} "
@@ -766,7 +845,7 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
     print(f"- **Volume:** {fatos['commits']} commit(s) · {fatos['arquivos']} arquivo(s) · {fatos['linhas']} linhas · áreas: {', '.join(fatos['areas']) or 'n/d'}")
     if det['prismas']:
         print('- **Prismas atravessados:** ' + ', '.join(
-            f"Prisma {p['prisma']} ({', '.join(p['termos'])})" for p in det['prismas']
+            f"{p['prisma']} ({', '.join(p['termos'])})" for p in det['prismas']
         ))
     prop = det.get('propriedade') or {}
     for linha in linhas_propriedade(prop):
@@ -785,7 +864,7 @@ def cmd_entrega_detalhe(entrega_id: int, plan: dict) -> None:
         soma_lm = sum(int(l['lm']) for l in det['lumens_ligados'])
         print(f"\n**Lúmens ligados ({len(det['lumens_ligados'])} registro(s) · {soma_lm} lm)**")
         for l in det['lumens_ligados'][:5]:
-            print(f"- {l['quando'][:10]} · Prisma {l['prisma']} · +{l['lm']} lm ({l['luz']} · {l['fonte']})")
+            print(f"- {l['quando'][:10]} · {l['prisma']} · +{l['lm']} lm ({l['luz']} · {l['fonte']})")
 
     dims = prop.get('dimensoes') or {}
     lacunas = [d for d in ('P3', 'P4') if not dims.get(d)]
@@ -848,15 +927,15 @@ def cmd_foco(args) -> None:
         botoes(saida_botoes)
         return
     if r['modo'] == 'passivo':
-        resumo = ', '.join(f"Prisma {a['skill']} +{a['lm']} lm" for a in achados)
+        resumo = ', '.join(f"{a['skill']} +{a['lm']} lm" for a in achados)
         print(f'✦ Luzia · em foco, em silêncio: {resumo}. Lúmens registrados; não é preciso avisar a pessoa.')
         botoes(saida_botoes)
         return
     if origem == 'prompt':
         for a in achados:
-            print(f"[Luzia · em foco · luz própria] A pessoa DIRIGIU Prisma \"{a['skill']}\" neste pedido "
+            print(f"[Luzia · em foco · luz própria] A pessoa DIRIGIU o prisma \"{a['skill']}\" neste pedido "
                   f"(+{a['lm']} lm de luz própria). Responda normalmente e, no FIM, em UMA linha: "
-                  f"\"✦ Luzia · Prisma {a['skill']}: você dirigiu isto, +{a['lm']} lm de luz própria.\"")
+                  f"\"✦ Luzia · {a['skill']}: você dirigiu isto, +{a['lm']} lm de luz própria.\"")
         botoes(saida_botoes)
         return
     a = next((x for x in achados if x['lampejo']), achados[0])
@@ -866,10 +945,10 @@ def cmd_foco(args) -> None:
         print(observer.cartao_refletida(skill, nivel=nivel, lm=lm, provisorio=True))
         botoes(saida_botoes)
         return
-    print(f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica Prisma {skill} ({nivel}). '
+    print(f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica o prisma {skill} ({nivel}). '
           f'Isso rendeu +{lm} lm de luz REFLETIDA para a pessoa: quem aplicou foi o agente. Termine a tarefa normalmente e, no '
           'FIM da resposta, mostre este lampejo em no máximo 3 linhas:')
-    print(f'✦ Lampejo da Luzia · Prisma {skill} reconhecido nesta mudança · +{lm} lm (luz refletida)')
+    print(f'✦ Lampejo da Luzia · {skill} reconhecido nesta mudança · +{lm} lm (luz refletida)')
     print('<1 linha: onde o conceito aparece concretamente nesta mudança>')
     print(f'▸ Em 1 frase: {PERGUNTA_FOCO} · vira luz própria: até +30 lm')
     print(f'Depois ofereça os botões. Responder agora: espere a frase da pessoa, avalie pela {observer.RUBRICA_LAMPEJO}, dê '
@@ -975,7 +1054,7 @@ COMANDOS = [
     'entregas', 'entrega', 'acender-entrega', 'feedback-progress', 'feedback-skills-opportunities', 'identidade',
     'leituras', 'foco', 'agente',
     'avancos', 'acoes', 'fazer', 'prompt', 'registrar', 'revisitar', 'descartar', 'restaurar',
-    'subir', 'nivel', 'acender', 'trecho', 'pedido',
+    'subir', 'nivel', 'acender', 'trecho', 'pedido', 'dividir', 'dividir-todos',
     'dossie', 'lampejo', 'cartao', 'guardar', 'fila', 'enviar', 'career-map', 'modo', 'modelo', 'acesso', 'privacidade',
 ]
 
@@ -1002,6 +1081,8 @@ def main() -> None:
     ap.add_argument('--ampliar', type=int, default=0)
     ap.add_argument('--nivel', type=int, default=None)
     ap.add_argument('--meta', type=int, default=None)
+    ap.add_argument('--partes', nargs='+', default=None, help='pedido ajustar (dividir): nomes das habilidades')
+    ap.add_argument('--mover', action='append', default=None, help='pedido ajustar (dividir): <avanço>=<habilidade>')
     ap.add_argument('--base-url', default='', help='modelo usar: endereço do provedor compatível com OpenAI')
     ap.add_argument('--todas', action='store_true', help='leituras: inclui as entregas antigas, não só as mais recentes')
     ap.add_argument('--prompt-arquivo', default='', help='foco: arquivo temporário com o texto do pedido (nunca é gravado)')
@@ -1192,6 +1273,10 @@ def main() -> None:
         cmd_pedido(args, restantes, plan)
         return
 
+    if args.comando in ('dividir', 'dividir-todos'):
+        cmd_dividir(args, plan, todos=args.comando == 'dividir-todos')
+        return
+
     if args.comando == 'nivel':
         alvo_prisma = args.valor or args.prisma or args.skill
         nv_arg = args.nivel if args.nivel is not None else (int(restantes[0]) if restantes and restantes[0].lstrip('-').isdigit() else None)
@@ -1208,7 +1293,7 @@ def main() -> None:
                 botoes(proximos_botoes(plan))
                 return
         nv_int = int(nv_arg)
-        print(f"✦ **Prisma {skill}** declarado no **nível {nv_int}** `{espectro_txt(nv_int)}` (ponto de partida registrado).")
+        print(f"✦ **{skill}** declarado no **nível {nv_int}** `{espectro_txt(nv_int)}` (ponto de partida registrado).")
         botoes(proximos_botoes(plan), 'Qual é o próximo passo na sua trajetória?')
         return
 
@@ -1235,17 +1320,17 @@ def main() -> None:
             if a['estado'] != 'conquistado':
                 por_skill.setdefault(a.get('skill_plano') or a.get('skill', ''), []).append(a)
         for skill, lista in por_skill.items():
-            print(f'\n**Prisma {skill}**')
+            print(f'\n**{skill}**')
             for a in lista[:3]:
                 print(f'   {feixe_linha(a)}')
         if arquivados:
             print('\n**Prismas arquivados (lúmens e histórico preservados)**')
             for p in arquivados:
-                print(f"   - Prisma {p['nome']} · `{espectro_txt(p['nivel'])}` nível {p['nivel']}/{p['meta']}")
+                print(f"   - {p['nome']} · `{espectro_txt(p['nivel'])}` nível {p['nivel']}/{p['meta']}")
         if lista_pedidos:
             print('\n**Pedidos de mudança na trajetória**')
             for p in lista_pedidos[:5]:
-                print(f"   - Pedido `#{p['id']}` · **{p['tipo']}** em **Prisma {p['prisma']}** — estado: **{p['estado']}**")
+                print(f"   - Pedido `#{p['id']}` · **{p['tipo']}** em **{p['prisma']}** — estado: **{p['estado']}**")
         avisar_degraus(plan)
         botoes(com_leituras(proximos_botoes(plan)), 'Por onde seguimos?')
         return
@@ -1298,7 +1383,7 @@ def main() -> None:
             print(f"◐ {res['erro']}.")
             botoes(proximos_botoes(plan))
             return
-        print(f"## ✦ Luzia · 3 avanços novos acesos para Prisma {curto(res['skill'])}")
+        print(f"## ✦ Luzia · 3 avanços novos acesos para {curto(res['skill'])}")
         for f in res['feixes']:
             print(feixe_linha(f))
         footer(res['record'])
@@ -1375,7 +1460,7 @@ def main() -> None:
         r = jogo.rota(plan)
         s = next((x for x in r['skills'] if x['nome'] == (a.get('skill_plano') or a.get('skill'))), None)
         print(f"✦ Avanço conquistado · `#{a['id']}` · nota {args.nota}/4 · **+{res['ganho']} lm**"
-              + (f" · Prisma {curto(s['nome'])} {s['lm']}/{s['limiar']} lm" if s else '') + f" · trajetória {r['niveis_feitos']}/{r['niveis_total']} níveis")
+              + (f" · {curto(s['nome'])} {s['lm']}/{s['limiar']} lm" if s else '') + f" · trajetória {r['niveis_feitos']}/{r['niveis_total']} níveis")
         if a.get('entrega_id'):
             with trajetoria.abrir() as con:
                 det = entregas.detalhe(con, a['entrega_id'], incluir_leitura=False)
@@ -1416,11 +1501,11 @@ def main() -> None:
         skill = jogo.skill_de(args.valor or args.prisma or args.skill, plan)
         res = jogo.subir(skill, plan)
         if res.get('erro'):
-            print(f"◐ Prisma {curto(skill)}: {res['erro']}.")
+            print(f"◐ {curto(skill)}: {res['erro']}.")
             botoes(proximos_botoes(plan))
             return
         r = res['rota']
-        print(f"✦ **Prisma {skill}** subiu para o nível {res['para']}. Trajetória: **{r['niveis_feitos']} de {r['niveis_total']} níveis**.")
+        print(f"✦ **{skill}** subiu para o nível {res['para']}. Trajetória: **{r['niveis_feitos']} de {r['niveis_total']} níveis**.")
         if res.get('marco'):
             print(f"◆ Marco {res['marco']['n']} de 3 alcançado. Dossiê de evidências salvo em `{res['marco']['dossie']}` (local).")
         s = next((x for x in r['skills'] if x['nome'] == skill), {})
@@ -1462,7 +1547,7 @@ def main() -> None:
         nota, lm = res['nota'], res['lm']
         acoes.registrar_evento(acoes.aid('cartao', args.pergunta or skill), 'concluida', nota=nota, resumo=args.resumo[:200],
                                skill=skill, origem='cartao')
-        print(f"✦ Luz própria: nota {nota}/4 · **+{lm} lm** em Prisma {curto(skill)}" if lm else
+        print(f"✦ Luz própria: nota {nota}/4 · **+{lm} lm** em {curto(skill)}" if lm else
               f"◐ Nota {nota}/4: ainda luz refletida. Virou um avanço guardado para você tentar com calma.")
         if not lm:
             acoes.guardar(skill, args.pergunta or f'Pergunta do lampejo sobre {skill}')

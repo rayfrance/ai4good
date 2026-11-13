@@ -224,15 +224,15 @@ def nivel_txt(info: dict) -> str:
 def cartao_refletida(skill: str, pergunta: str = '<a pergunta>', nivel: str = 'lacuna da trajetória', lm: int = 10,
                      provisorio: bool = False) -> str:
     if provisorio:  # banco ocupado: o valor e o lampejo ainda não foram confirmados, então não convida a responder
-        return (f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica Prisma {skill} ({nivel}). '
+        return (f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica o prisma {skill} ({nivel}). '
                 f'Rendeu +{lm} lm de luz REFLETIDA para a pessoa, a confirmar (o banco estava ocupado; a Luzia confirma na próxima '
                 'gravação). Termine a tarefa normalmente e, no FIM, em UMA linha, sem fazer perguntas: '
-                f'"✦ Luzia · Prisma {skill} reconhecido nesta mudança · +{lm} lm (luz refletida, a confirmar)."')
+                f'"✦ Luzia · {skill} reconhecido nesta mudança · +{lm} lm (luz refletida, a confirmar)."')
     return (
-        f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica Prisma {skill} ({nivel}). Isso rendeu '
+        f'[Luzia · em foco · luz refletida] O código que você (agente) acabou de escrever aplica o prisma {skill} ({nivel}). Isso rendeu '
         f'+{lm} lm de luz REFLETIDA para a pessoa: quem aplicou foi o agente. Termine a tarefa normalmente. No FIM da resposta, '
         'mostre este lampejo em no máximo 3 linhas:\n'
-        f'✦ Lampejo da Luzia · Prisma {skill} reconhecido nesta mudança · +{lm} lm (luz refletida)\n'
+        f'✦ Lampejo da Luzia · {skill} reconhecido nesta mudança · +{lm} lm (luz refletida)\n'
         '<1 linha: onde o conceito aparece concretamente nesta mudança>\n'
         f'▸ Em 1 frase: {pergunta} · vira luz própria: até +30 lm\n'
         'Depois, use AskUserQuestion com "Responder agora" e "Guardar para depois". Responder: espere a frase, avalie pela '
@@ -251,8 +251,8 @@ def ao_enviar_prompt(event: dict, cfg: dict) -> None:
         gaps = lacunas(plano())
         for r in reconhecer_em(event.get('prompt', ''), 'prompt', sid, modo, 'prompt', 'prompt', gaps):
             if modo == 'ativo':
-                partes.append(f'[Luzia · em foco · luz própria] A pessoa DIRIGIU Prisma "{r["skill"]}" neste pedido (+{r["lm"]} lm de luz própria). '
-                              f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · Prisma {r["skill"]}: você dirigiu isto, +{r["lm"]} lm de luz própria."')
+                partes.append(f'[Luzia · em foco · luz própria] A pessoa DIRIGIU o prisma "{r["skill"]}" neste pedido (+{r["lm"]} lm de luz própria). '
+                              f'Responda normalmente e, no FIM, em UMA linha: "✦ Luzia · {r["skill"]}: você dirigiu isto, +{r["lm"]} lm de luz própria."')
     try:  # espera curta: o hook não pode travar a sessão; sem a fila, o resto do aviso sai igual
         pend = [f for f in acoes.fila(banco.ESPERA_CURTA_MS) if sid not in f.get('oferecida_em', [])]
     except Exception as e:
@@ -319,7 +319,7 @@ def ao_iniciar_sessao(event: dict, cfg: dict) -> None:
         fila = []
     partes = []
     if prontas:
-        partes.append(f"Prisma {', '.join(prontas)} pronto para subir de nível")
+        partes.append(f"{', '.join(prontas)} pronto para subir de nível")
     if andamento:
         partes.append(f'avanço em andamento: "{andamento[0].get("titulo", "")}"')
     if fila:

@@ -105,7 +105,7 @@ def test_lampejo_passa_para_o_proximo_prisma_se_o_primeiro_estava_no_teto(privad
     evento, cfg = _evento(privado, conteudo='Aggregate e xunit Assert')
     observer.ao_usar_ferramenta(evento, cfg)
     saida = json.loads(capsys.readouterr().out)['hookSpecificOutput']['additionalContext']
-    assert f'Prisma {TESTES}' in saida and '+10 lm' in saida
+    assert f'o prisma {TESTES}' in saida and f'Prisma {TESTES}' not in saida and '+10 lm' in saida
     assert [r['prisma'] for r in _consulta('SELECT prisma FROM lampejo')] == [TESTES]
 
 
@@ -121,7 +121,7 @@ def test_prisma_incluido_por_pedido_ganha_lumens_pelas_palavras_do_banco(privado
     evento, cfg = _evento(privado, conteudo='using OpenTelemetry; // sem nenhuma palavra dos outros prismas')
     observer.ao_usar_ferramenta(evento, cfg)
     saida = json.loads(capsys.readouterr().out)['hookSpecificOutput']['additionalContext']
-    assert 'Prisma Observabilidade' in saida
+    assert 'o prisma Observabilidade' in saida
     assert [(r['prisma'], r['lm']) for r in _consulta('SELECT prisma, lm FROM lumen')] == [('Observabilidade', 10)]
 
 

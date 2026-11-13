@@ -61,6 +61,7 @@ const TIPO_PEDIDO_NOME = {
   mudar_meta: 'Mudar meta',
   arquivar: 'Arquivar prisma',
   reativar: 'Reativar prisma',
+  dividir: 'Dividir prisma',
 };
 
 let E = null;
@@ -78,7 +79,7 @@ const prismasAtivos = () => (E?.skills || listaPrismas().filter((p) => p.estado 
 const avancoPorId = (id) => listaAvancos().find((a) => a.id === id);
 const nomeAgente = () => AGENTES[E?.agente]?.[0] || 'seu agente';
 const curto = (s) => esc(String(s || '').split('(')[0].trim());
-const rotuloPrisma = (s) => `Prisma ${curto(s)}`;
+const rotuloPrisma = (s) => curto(s);
 
 // `auto`: pedido que a página faz sozinha (polling, leituras automáticas); o servidor confere a sessão sem renová-la.
 async function api(caminho, dados, auto = false) {
@@ -131,7 +132,7 @@ function celebrar(novos) {
   const total = novos.reduce((s, l) => s + l.lm, 0);
   const l = novos[0];
   const propria = novos.some((x) => x.luz !== 'refletida');
-  toast(`+${total} lm · Prisma ${String(l.skill).split('(')[0].trim()} · ${novos.length > 1 ? `${novos.length} reconhecimentos` : legFonte(l.fonte)}${propria ? '' : ' (luz refletida)'}`, 'celebra');
+  toast(`+${total} lm · ${String(l.skill).split('(')[0].trim()} · ${novos.length > 1 ? `${novos.length} reconhecimentos` : legFonte(l.fonte)}${propria ? '' : ' (luz refletida)'}`, 'celebra');
   document.querySelectorAll('.trajetoria-linha .luz, .barra-nivel .p, .barra-nivel .r').forEach((b) => {
     b.classList.remove('brilho');
     void b.offsetWidth;
@@ -145,7 +146,7 @@ function maiorLacuna() {
 }
 
 function botaoAcender(s) {
-  return s ? `<button class="btn sec" data-acender="${esc(s.nome)}">${ic('raio')}Acender 3 avanços novos de Prisma ${curto(s.nome)}</button>` : '';
+  return s ? `<button class="btn sec" data-acender="${esc(s.nome)}">${ic('raio')}Acender 3 avanços novos de ${curto(s.nome)}</button>` : '';
 }
 
 // ------------------------------------------------------------------ espectro de 5 faixas e leitura com base
@@ -181,7 +182,7 @@ function resumoBaseLeitura(leitura, fallbackFatos = '') {
       return `${f.commits ?? 0} commit(s) · ${f.arquivos ?? 0} arquivo(s) · ${f.linhas ?? 0} linhas · ${(b.prismas || []).length} prisma(s)`;
     }
     if (alvo === 'pedido') {
-      return `pedido (${TIPO_PEDIDO_NOME[b.tipo] || b.tipo || ''} · Prisma ${b.prisma || ''}) e a trajetória atual`;
+      return `pedido (${TIPO_PEDIDO_NOME[b.tipo] || b.tipo || ''} · ${b.prisma || ''}) e a trajetória atual`;
     }
   }
   return fallbackFatos || 'fatos determinísticos registrados';
@@ -313,7 +314,7 @@ function abrirPrisma(nome) {
   $('#gaveta-corpo').innerHTML = `
     <button class="fechar" data-fechar aria-label="Fechar">${ic('fechar')}</button>
     <span class="sobre">Prisma (skill) · ${s.estado === 'arquivado' ? 'arquivado' : 'ativo na trajetória'}</span>
-    <h3>Prisma ${esc(nome)}</h3>
+    <h3>${esc(nome)}</h3>
     <p>${espectroPrisma(s, false)}</p>
     <p class="frase-nivel">${s.autoavaliada
       ? `Hoje você está no <b>nível ${s.nivel ?? s.voce}</b> de 5. Sua meta para Plena é o <b>nível ${s.meta ?? s.alvo}</b>.`
@@ -338,10 +339,10 @@ async function abrirEntregaDetalhe(id) {
   const f = det.fatos || {};
   const prismasTags = (det.prismas || []).map((p) => {
     const termos = (p.termos || []).length ? ` (${p.termos.map(esc).join(', ')})` : '';
-    return `<span class="tag refl">Prisma ${curto(p.prisma)}${termos}</span>`;
+    return `<span class="tag refl">${curto(p.prisma)}${termos}</span>`;
   }).join('') || '<span class="vazio">Nenhum prisma detectado nos caminhos ou mensagens.</span>';
   const lms = (det.lumens_ligados || []).map((l) =>
-    `<li><b>+${l.lm} lm</b> (${l.luz === 'refletida' ? 'luz refletida' : 'luz própria'}) · Prisma ${curto(l.prisma || l.skill)} · ${esc(legFonte(l.fonte))} · ${esc(String(l.quando || '').slice(0, 10))}</li>`
+    `<li><b>+${l.lm} lm</b> (${l.luz === 'refletida' ? 'luz refletida' : 'luz própria'}) · ${curto(l.prisma || l.skill)} · ${esc(legFonte(l.fonte))} · ${esc(String(l.quando || '').slice(0, 10))}</li>`
   ).join('');
   const feitos = (det.avancos_feitos || []).map(cartaoAvanco).join('');
   const uteis = (det.avancos_uteis || []).map(cartaoAvanco).join('');
@@ -414,7 +415,7 @@ function trajetoriaHero() {
 }
 
 function prontos() {
-  return prismasAtivos().filter((s) => s.pronto && !s.na_meta).map((s) => `<div class="pronto-aviso">${ic('subir')}<span><b>Prisma ${esc(s.nome)}</b> pronto para o nível ${s.proximo}: ${s.lm} lm, ${s.luz_propria}% luz própria.</span>
+  return prismasAtivos().filter((s) => s.pronto && !s.na_meta).map((s) => `<div class="pronto-aviso">${ic('subir')}<span><b>${esc(s.nome)}</b> pronto para o nível ${s.proximo}: ${s.lm} lm, ${s.luz_propria}% luz própria.</span>
     <button class="btn prim mini" data-subir="${esc(s.nome)}">Subir para ${s.proximo}</button></div>`).join('');
 }
 
@@ -458,7 +459,7 @@ function feed() {
   const el = $('#feed');
   if (!el) return;
   el.innerHTML = (E.lumens || []).slice(0, 7).map((l) => `<div class="feed-lm"><span class="lm ${l.luz === 'refletida' ? 'refl' : ''}">+${l.lm}</span>
-      <span>Prisma ${curto(l.skill)}<br><small>${esc(legFonte(l.fonte))} · luz ${l.luz === 'refletida' ? 'refletida' : 'própria'}</small></span><small>${esc(String(l.quando || '').slice(11, 16))}</small></div>`).join('')
+      <span>${curto(l.skill)}<br><small>${esc(legFonte(l.fonte))} · luz ${l.luz === 'refletida' ? 'refletida' : 'própria'}</small></span><small>${esc(String(l.quando || '').slice(11, 16))}</small></div>`).join('')
     || '<div class="vazio">Conquiste avanços ou trabalhe no seu repositório: a Luzia em foco reconhece o que você aplica e os lúmens aparecem aqui.</div>';
 }
 
@@ -466,7 +467,7 @@ function renderFormPedido() {
   if (!mostrarFormPedido) return '';
   const todosNomes = listaPrismas().map((p) => p.nome);
   const seletorExistente = ['mudar_meta', 'arquivar', 'reativar'].includes(tipoPedidoForm);
-  const opcoesPrisma = todosNomes.map((n) => `<option value="${esc(n)}">Prisma ${esc(n)}</option>`).join('');
+  const opcoesPrisma = todosNomes.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
   return `<div class="bloco" style="margin-bottom:var(--e4);border-color:var(--refletida)">
     <div class="pedido-cab">
       <b>Pedir mudança formal na trajetória</b>
@@ -483,7 +484,7 @@ function renderFormPedido() {
       </label>
       ${seletorExistente
         ? `<label>Prisma (skill)<select id="ped-prisma">${opcoesPrisma}</select></label>`
-        : `<label>Nome do novo prisma (skill)<input id="ped-prisma" placeholder="ex.: Mensageria e Eventos Assíncronos"></label>`}
+        : `<label>Nome do novo prisma (skill)<input id="ped-prisma" placeholder="ex.: Mensageria"></label>`}
       <label>Seu motivo para a mudança<input id="ped-motivo" placeholder="por que este ajuste faz sentido agora na sua carreira?"></label>
       ${['incluir', 'mudar_meta'].includes(tipoPedidoForm)
         ? `<label>Meta desejada (1 a 5, opcional)<input id="ped-meta" type="number" min="1" max="5" placeholder="ex.: 4"></label>`
@@ -496,6 +497,37 @@ function renderFormPedido() {
   </div>`;
 }
 
+// Pedido `dividir` (um prisma = uma habilidade): as partes com nível e meta herdados e para onde vai cada avanço.
+function renderCardDividir(p, prop, aberto) {
+  const partes = prop.partes || [];
+  const nomes = partes.map((x) => x.nome);
+  const avs = prop.avancos || [];
+  const opcoes = (atual) => nomes.map((n) => `<option value="${esc(n)}" ${n === atual ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  return `<div class="pedido-card ${esc(p.estado)}">
+    <div class="pedido-cab">
+      <span>
+        <span class="tag ${aberto ? 'refl' : p.estado === 'aceito' ? 'ok' : ''}">${esc(p.estado)}</span>
+        <b>#${p.id} · ${esc(TIPO_PEDIDO_NOME.dividir)} · ${esc(p.prisma)}</b>
+      </span>
+      <small style="color:var(--texto-3)">${esc(String(p.criado_em || '').slice(0, 10))}</small>
+    </div>
+    <p class="lacuna" style="margin:4px 0">Um prisma por habilidade: cada parte herda o nível ${prop.nivel_partida ?? '?'} e a meta ${prop.meta ?? '?'}. O prisma antigo é arquivado com os lúmens dele; o nível novo conta a partir do aceite.</p>
+    <div class="campos">
+      ${partes.map((x, i) => aberto
+        ? `<label>Habilidade ${i + 1}<input data-div-parte="${p.id}" value="${esc(x.nome)}"></label>`
+        : `<span class="tag luz">${esc(x.nome)} · nível ${x.nivel} → meta ${x.meta}</span>`).join('')}
+    </div>
+    ${avs.length ? `<ul class="lacuna" style="padding-left:18px;margin:var(--e2) 0">${avs.map((a) => `<li>${esc(a.titulo)} <small>(${esc(a.estado)})</small> → ${aberto
+      ? `<select data-div-mover="${p.id}" data-avanco-id="${esc(a.id)}">${opcoes(a.para)}</select>`
+      : `<b>${esc(a.para)}</b>`}</li>`).join('')}</ul>` : ''}
+    ${aberto ? `<div class="pedido-ajuste">
+      <button class="btn prim mini" data-pedido-aceitar="${p.id}">${ic('check', 'p')}Aceitar divisão</button>
+      <button class="btn sec mini" data-pedido-dividir-ajustar="${p.id}">Ajustar divisão</button>
+      <button class="btn link mini" data-pedido-recusar="${p.id}">Recusar</button>
+    </div>` : ''}
+  </div>`;
+}
+
 function renderCardPedido(p) {
   const prop = p.proposta || {};
   const aberto = ['aberto', 'proposto'].includes(p.estado);
@@ -503,12 +535,13 @@ function renderCardPedido(p) {
   const metaSug = prop.meta ?? 4;
   // A leitura guardada do pedido (texto, modelo e data de quando foi gerada), nunca o modelo configurado agora.
   const comAnalise = ['incluir', 'mudar_meta'].includes(p.tipo) && (prop.nivel_partida != null || prop.meta != null);
+  if (p.tipo === 'dividir') return renderCardDividir(p, prop, aberto);
 
   return `<div class="pedido-card ${esc(p.estado)}">
     <div class="pedido-cab">
       <span>
         <span class="tag ${aberto ? 'refl' : p.estado === 'aceito' ? 'ok' : ''}">${esc(p.estado)}</span>
-        <b>#${p.id} · ${esc(TIPO_PEDIDO_NOME[p.tipo] || p.tipo)} · Prisma ${esc(p.prisma)}</b>
+        <b>#${p.id} · ${esc(TIPO_PEDIDO_NOME[p.tipo] || p.tipo)} · ${esc(p.prisma)}</b>
       </span>
       <small style="color:var(--texto-3)">${esc(String(p.criado_em || '').slice(0, 10))}</small>
     </div>
@@ -519,7 +552,7 @@ function renderCardPedido(p) {
         ${(prop.palavras_chave || []).map((w) => `<span class="tag">${esc(w)}</span>`).join('')}
         ${(prop.acoes || []).length ? `<span class="tag">${prop.acoes.length} avanço(s) inicial(is)</span>` : ''}
       </div>` : ''}
-    ${comAnalise ? blocoLeitura(p.leitura, `pedido #${p.id} · Prisma ${p.prisma}`, true, prop.leitura_indisponivel) : ''}
+    ${comAnalise ? blocoLeitura(p.leitura, `pedido #${p.id} · ${p.prisma}`, true, prop.leitura_indisponivel) : ''}
     ${aberto ? `<div class="pedido-ajuste">
       <button class="btn prim mini" data-pedido-aceitar="${p.id}">${ic('check', 'p')}Aceitar proposta</button>
       ${['incluir', 'mudar_meta'].includes(p.tipo) ? `
@@ -547,6 +580,7 @@ function telaTrajetoria() {
       </div>
       <div class="acoes-bt">
         <button class="btn sec mini" data-gerar-leituras="1">${ic('raio', 'p')}Atualizar leituras</button>
+        ${ativos.some((s) => (s.divisao || []).length) ? `<button class="btn sec mini" data-dividir-todos="1">Separar prismas compostos</button>` : ''}
         <button class="btn prim mini" data-abrir-pedido-form="1">${ic('enviar', 'p')}Pedir mudança</button>
       </div>
     </div>
@@ -561,17 +595,18 @@ function telaTrajetoria() {
         const resumoFatos = `nível ${s.nivel}/${s.meta ?? s.alvo} · ${s.lm || 0} lm (${s.luz_propria || 0}% própria)`;
         return `<div class="prisma-card ${s.pronto && !s.na_meta ? 'pronta' : ''} ${s.na_meta ? 'meta-ok' : ''}">
           <button class="prisma-topo" data-prisma="${esc(s.nome)}">
-            <span class="nome"><b>Prisma ${esc(s.nome)}</b><small>${espectroPrisma(s)}</small></span>
+            <span class="nome"><b>${esc(s.nome)}</b><small>${espectroPrisma(s)}</small></span>
             <span>${barraNivel(s)}</span>
             <span>${s.pronto && !s.na_meta ? `<span class="btn prim mini" data-subir="${esc(s.nome)}">${ic('subir', 'p')}Subir</span>` : ic('seta', 'p')}</span>
           </button>
           ${blocoLeitura(s.leitura, resumoFatos, true)}
+          ${(s.divisao || []).length ? `<p class="dica">Este prisma junta assuntos: ${s.divisao.map(esc).join(', ')}. <button class="btn sec mini" data-dividir-prisma="${esc(s.nome)}">Separar em habilidades</button></p>` : ''}
         </div>`;
       }).join('')}
     </div>
     <p class="dica">Clique num prisma para ver a leitura completa com a base de fatos, níveis conquistados e avanços ligados.</p>
 
-    <div class="titulo"><h2>Pedidos de mudança na trajetória</h2><span>incluir, mudar meta, arquivar ou reativar prismas sem perder progresso</span></div>
+    <div class="titulo"><h2>Pedidos de mudança na trajetória</h2><span>incluir, mudar meta, arquivar, reativar ou dividir prismas sem perder progresso</span></div>
     <div class="pedidos-lista">
       ${pedidos.map(renderCardPedido).join('') || '<div class="bloco vazio">Nenhum pedido de mudança registrado ainda. Use o botão "Pedir mudança" acima ou <b>/luzia:trajetoria</b> no seu agente.</div>'}
     </div>
@@ -581,9 +616,11 @@ function telaTrajetoria() {
       <div class="prismas-lista">
         ${arquivados.map((s) => `<div class="prisma-card">
           <div class="prisma-topo">
-            <span class="nome"><b>Prisma ${esc(s.nome)}</b><small>${espectroPrisma(s)}</small></span>
+            <span class="nome"><b>${esc(s.nome)}</b><small>${espectroPrisma(s)}</small></span>
             <span class="lacuna">${s.lm || 0} lm preservados</span>
-            <button class="btn sec mini" data-reativar-prisma="${esc(s.nome)}">Reativar</button>
+            ${pedidos.some((p) => p.tipo === 'dividir' && p.estado === 'aceito' && p.prisma === s.nome)
+              ? '<span class="lacuna">dividido em habilidades</span>'
+              : `<button class="btn sec mini" data-reativar-prisma="${esc(s.nome)}">Reativar</button>`}
           </div>
         </div>`).join('')}
       </div>
@@ -650,7 +687,7 @@ function telaAvancos() {
         <span class="filtros-rotulo">Prisma</span>
         <div class="filtros">
           <button data-filtro-prisma="todos" class="${filtroPrisma === 'todos' ? 'ativo' : ''}">Todos os prismas · ${contPrisma('todos')}</button>
-          ${prismasNomes.map((n) => `<button data-filtro-prisma="${esc(n)}" class="${filtroPrisma === n ? 'ativo' : ''}">Prisma ${curto(n)} · ${contPrisma(n)}</button>`).join('')}
+          ${prismasNomes.map((n) => `<button data-filtro-prisma="${esc(n)}" class="${filtroPrisma === n ? 'ativo' : ''}">${curto(n)} · ${contPrisma(n)}</button>`).join('')}
         </div>
       </div>
       <div class="filtros-linha">
@@ -682,7 +719,7 @@ function telaEntregas() {
     const prismasTags = (e.prismas || []).map((p) => {
       const nomeP = typeof p === 'string' ? p : p.prisma;
       const termos = (p.termos || []).length ? ` · termos: ${p.termos.map(esc).join(', ')}` : '';
-      return `<span class="tag refl">Prisma ${curto(nomeP)}${termos}</span>`;
+      return `<span class="tag refl">${curto(nomeP)}${termos}</span>`;
     }).join('');
 
     const lms = e.lumens_ligados || [];
@@ -714,7 +751,7 @@ function telaEntregas() {
         ${blocoLeitura(e.leitura, resumoFatos, true)}
         <div class="dims">${dims}</div>
         ${lms.length ? `<div class="entrega-secao"><h4>Lúmens ligados na janela (${lms.length})</h4>
-          <div class="etiquetas">${lms.slice(0, 6).map((l) => `<span class="tag ${l.luz === 'refletida' ? 'refl' : 'luz'}">+${l.lm} lm · Prisma ${curto(l.prisma || l.skill)} · ${esc(legFonte(l.fonte))}</span>`).join('')}</div>
+          <div class="etiquetas">${lms.slice(0, 6).map((l) => `<span class="tag ${l.luz === 'refletida' ? 'refl' : 'luz'}">+${l.lm} lm · ${curto(l.prisma || l.skill)} · ${esc(legFonte(l.fonte))}</span>`).join('')}</div>
         </div>` : ''}
         ${feitosCards ? `<div class="entrega-secao"><h4>Avanços feitos nesta entrega</h4><div class="acoes">${feitosCards}</div></div>` : ''}
         ${uteisCards ? `<div class="entrega-secao"><h4>Avanços úteis dos mesmos prismas</h4><div class="acoes">${uteisCards}</div></div>` : ''}
@@ -791,8 +828,8 @@ function telaAjustes() {
   $('#ajustes').innerHTML = `
     <div class="titulo"><h2>Seu nível hoje em cada prisma (skill)</h2><span>0 a 5 · a trajetória parte daqui e só sobe quando você confirma</span></div>
     <div class="niveis">${prismasAtivos().map((s, i) => `<div class="bloco nivel">
-      <div class="cab"><b>Prisma ${esc(s.nome)}</b><span id="n${i}">${s.voce}</span></div>
-      <input type="range" min="0" max="5" value="${s.voce}" data-prisma-nivel="${esc(s.nome)}" data-i="${i}" aria-label="Prisma ${esc(s.nome)}">
+      <div class="cab"><b>${esc(s.nome)}</b><span id="n${i}">${s.voce}</span></div>
+      <input type="range" min="0" max="5" value="${s.voce}" data-prisma-nivel="${esc(s.nome)}" data-i="${i}" aria-label="Nível de ${esc(s.nome)}">
       <small>meta ${s.meta ?? s.alvo} · Luzia sugere ${s.sugere}</small></div>`).join('')}</div>
     <p style="margin-top:var(--e4)"><button class="btn prim" id="salvar-niveis">${ic('check')}Salvar meu nível</button></p>
     ${secaoModelo()}
@@ -871,6 +908,7 @@ document.addEventListener('click', async (ev) => {
     '[data-filtro-tipo]', '#salvar-niveis', '[data-abrir-pedido-form]', '#ped-enviar',
     '[data-pedido-aceitar]', '[data-pedido-ajustar]', '[data-pedido-recusar]',
     '[data-reativar-prisma]', '[data-gerar-leituras]', '[data-ampliar-entregas]',
+    '[data-dividir-prisma]', '[data-dividir-todos]', '[data-pedido-dividir-ajustar]',
     '[data-entrega-detalhe]', '#ent-identidade-salvar', '[data-acender-entrega]',
   ].join(',');
   const t = ev.target.closest(seletor);
@@ -900,10 +938,10 @@ document.addEventListener('click', async (ev) => {
   if (ds.acender) {
     ev.stopPropagation();
     t.disabled = true;
-    toast(`Acendendo 3 avanços de Prisma ${ds.acender.split('(')[0].trim()}…`);
+    toast(`Acendendo 3 avanços de ${ds.acender.split('(')[0].trim()}…`);
     const r = await api('/api/acender', { prisma: ds.acender });
     const qtd = (r.avancos || []).length;
-    toast(r.erro ? `Não acendeu: ${r.erro}` : `${qtd} avanços novos de Prisma ${ds.acender.split('(')[0].trim()}`, r.erro ? '' : 'celebra');
+    toast(r.erro ? `Não acendeu: ${r.erro}` : `${qtd} avanços novos de ${ds.acender.split('(')[0].trim()}`, r.erro ? '' : 'celebra');
     await carregar();
     if (!$('#gaveta').hidden && !r.erro) abrirPrisma(r.prisma || r.skill);
     return;
@@ -994,12 +1032,36 @@ document.addEventListener('click', async (ev) => {
     await carregar();
     return;
   }
+  if (ds.dividirPrisma || ds.dividirTodos) {
+    t.disabled = true;
+    const r = ds.dividirPrisma
+      ? await api('/api/pedido', { acao: 'abrir', tipo: 'dividir', prisma: ds.dividirPrisma, motivo: 'um prisma por habilidade' })
+      : await api('/api/pedido', { acao: 'dividir_todos' });
+    // Como todo pedido: a Luzia propõe a divisão e a pessoa confere, ajusta e aceita no card do pedido.
+    toast(r.erro ? `Erro: ${r.erro}` : 'Divisão proposta: confira as habilidades e os avanços no pedido e aceite.');
+    await carregar();
+    return;
+  }
+  if (ds.pedidoDividirAjustar) {
+    t.disabled = true;
+    const pid = ds.pedidoDividirAjustar;
+    const partes = [...document.querySelectorAll(`[data-div-parte="${pid}"]`)].map((i) => i.value.trim()).filter(Boolean);
+    const mover = {};
+    document.querySelectorAll(`[data-div-mover="${pid}"]`).forEach((s) => { mover[s.dataset.avancoId] = s.value; });
+    // Renomear uma parte: os avanços dela seguem a posição (o servidor mapeia nome antigo → novo).
+    const antes = [...document.querySelectorAll(`[data-div-parte="${pid}"]`)].map((i) => i.defaultValue);
+    Object.keys(mover).forEach((k) => { const i = antes.indexOf(mover[k]); if (i >= 0 && partes[i]) mover[k] = partes[i]; });
+    const r = await api('/api/pedido', { acao: 'ajustar', id: Number(pid), partes, mover });
+    toast(r.erro ? `Erro: ${r.erro}` : 'Divisão ajustada e registrada no histórico do pedido.');
+    await carregar();
+    return;
+  }
   if (ds.reativarPrisma) {
     t.disabled = true;
     const r = await api('/api/pedido', { acao: 'abrir', tipo: 'reativar', prisma: ds.reativarPrisma, motivo: 'Reativado pelo painel' });
     // Como todo pedido: abre, a Luzia propõe e a pessoa aceita no card do pedido (nada muda sozinho).
     toast(r.erro ? (r.erro || 'Não foi possível reativar.')
-      : `Pedido de reativar o Prisma ${ds.reativarPrisma} aberto: confira a proposta e aceite.`);
+      : `Pedido de reativar ${ds.reativarPrisma} aberto: confira a proposta e aceite.`);
     await carregar();
     return;
   }
@@ -1025,7 +1087,7 @@ document.addEventListener('click', async (ev) => {
   if (ds.subir) {
     ev.stopPropagation();
     const r = await api('/api/subir', { prisma: ds.subir });
-    toast(r.erro ? r.erro : `Prisma ${ds.subir.split('(')[0].trim()} subiu para o nível ${r.para}${r.marco ? ' · marco alcançado, dossiê gerado' : ''}`, r.erro ? '' : 'celebra');
+    toast(r.erro ? r.erro : `${ds.subir.split('(')[0].trim()} subiu para o nível ${r.para}${r.marco ? ' · marco alcançado, dossiê gerado' : ''}`, r.erro ? '' : 'celebra');
     carregar();
   } else if (ds.tela || ds.ir) {
     irPara(ds.tela || ds.ir);
